@@ -1,0 +1,11 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	ntp
+#open	2026-04-27-23-14-47
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	version	mode	stratum	poll	precision	root_delay	root_disp	ref_id	ref_time	org_time	rec_time	xmt_time	num_exts
+#types	time	string	addr	port	addr	port	count	count	count	interval	interval	interval	interval	string	time	time	time	time	count
+1777346087.032526	CUPxLn54IYtWwV8R5	192.168.68.57	50786	162.159.200.1	123	4	3	0	1.000000	1.000000	0.000000	0.000000	\x00\x00\x00\x00	0.000000	0.000000	0.000000	-1040657470.780455	0
+1777346087.093172	CUPxLn54IYtWwV8R5	192.168.68.57	50786	162.159.200.1	123	4	4	3	1.000000	0.000000	0.028244	0.000565	10.46.8.110	1777345993.570402	-1040657470.780455	1777346087.061169	1777346087.061268	0
+#close	2026-04-27-23-17-17
