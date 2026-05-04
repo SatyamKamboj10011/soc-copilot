@@ -1,0 +1,17 @@
+# ChromaDB - too large for GitHub
+ai/chroma_db/
+web/chroma_db/
+chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Node
+node_modules/
+web-react/node_modules/
+
+# Environment files with API keys
+.env
+*.env
