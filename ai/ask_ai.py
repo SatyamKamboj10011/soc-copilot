@@ -1,28 +1,42 @@
+from langchain_groq import ChatGroq
 from langchain_ollama import OllamaEmbeddings
-from langchain_ollama import OllamaLLM
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
-print("Loading ChromaDB...")
-embeddings = OllamaEmbeddings(model="llama3")
+embeddings = OllamaEmbeddings(model="nomic-embed-text")
 vectorstore = Chroma(
     persist_directory="./chroma_db",
     embedding_function=embeddings
 )
 
-print("Setting up AI...")
-llm = OllamaLLM(model="llama3")
-retriever = vectorstore.as_retriever()
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    groq_api_key="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"
+)
 
-questions = [
-    "What suspicious activity was detected?",
-    "Which IP addresses appear most often?",
-    "What type of events are in these logs?"
-]
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-for q in questions:
-    print(f"\nQuestion: {q}")
-    docs = retriever.invoke(q)
-    context = "\n".join([d.page_content for d in docs])
-    prompt = f"Based on these security logs:\n{context}\n\nAnswer this question: {q}"
-    answer = llm.invoke(prompt)
-    print(f"Answer: {answer}")
+def ask_ai(question):
+    docs = retriever.invoke(question)
+    context = "\n\n".join([d.page_content for d in docs])
+
+    prompt = f"""You are a cybersecurity analyst assistant.
+Use ONLY the log data below to answer the question.
+Be specific — mention IP addresses, ports, timestamps, and alert names.
+If the answer is not in the logs, say "I don't have enough log data to answer that."
+
+Log Data:
+{context}
+
+Question: {question}
+
+Answer:"""
+
+    response = llm.invoke(prompt)
+    return response.content
+
+if __name__ == "__main__":
+    while True:
+        q = input("\nAsk a question (or quit): ")
+        if q.lower() == "quit":
+            break
+        print("\nAnswer:", ask_ai(q))
