@@ -1,6 +1,9 @@
 from langchain_groq import ChatGroq
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 vectorstore = Chroma(
@@ -10,7 +13,7 @@ vectorstore = Chroma(
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
-    groq_api_key="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"
+    groq_api_key=os.getenv("GROQ_API_KEY")
 )
 
 retriever = vectorstore.as_retriever(search_kwargs={"k": 5})

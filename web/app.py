@@ -4,6 +4,9 @@ from langchain_groq import ChatGroq
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 import json
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -16,7 +19,7 @@ vectorstore = Chroma(
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
-    groq_api_key="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",
+   groq_api_key=os.getenv("GROQ_API_KEY"),
     temperature=0.1,
     max_tokens=1024
 )
