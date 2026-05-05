@@ -56,15 +56,27 @@ def load_logs():
                     continue
                 seen.add(text)
 
+                # docs.append(Document(
+                #     page_content=text,
+                #     metadata={
+                #         "event_type": event.get("event_type", ""),
+                #         "src_ip": event.get("src_ip", ""),
+                #         "dest_ip": event.get("dest_ip", ""),
+                #         "timestamp": event.get("timestamp", "")
+                #     }
+                # ))
+
                 docs.append(Document(
-                    page_content=text,
-                    metadata={
-                        "event_type": event.get("event_type", ""),
-                        "src_ip": event.get("src_ip", ""),
-                        "dest_ip": event.get("dest_ip", ""),
-                        "timestamp": event.get("timestamp", "")
-                    }
-                ))
+                       page_content=text,
+                       metadata={
+                          "event_type": event.get("event_type", ""),
+                          "src_ip": event.get("src_ip", ""),
+                          "dest_ip": event.get("dest_ip", ""),
+                          "timestamp": event.get("timestamp", ""),
+                          "date": event.get("timestamp", "")[:10],
+                          "hour": event.get("timestamp", "")[11:13]
+                       }
+                  ))
 
                 if len(docs) >= MAX_EVENTS:
                     break
