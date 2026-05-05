@@ -29,33 +29,39 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
 @app.route('/ask', methods=['POST'])
 def ask():
     question = request.json.get('question', '')
+    date_filter = request.json.get('date', None)
+    hour_filter = request.json.get('hour', None)
+
     docs = retriever.invoke(question)
+
+    if date_filter:
+        docs = [d for d in docs if d.metadata.get('date') == date_filter]
+    if hour_filter:
+        docs = [d for d in docs if d.metadata.get('hour') == hour_filter]
+
+    if not docs:
+        docs = retriever.invoke(question)
+
     context = "\n\n".join([d.page_content for d in docs])
 
-    prompt = f"""You are SIRA (Security Incident Response Assistant), an expert cybersecurity analyst in a Security Operations Centre.
+    prompt = f"""You are SIRA, an expert cybersecurity analyst assistant working in a Security Operations Centre.
 
-STRICT RULES:
-- Only use information from the log data provided below
-- Never make up or guess information
-- Always be specific with exact IPs, ports, timestamps, and signatures
-- Keep answers concise and professional
-
-ANSWER FORMAT — Always use this exact structure:
+Analyze the following log data and answer the question professionally.
+Always structure your answer like this:
 
 🔍 SUMMARY
 One sentence direct answer.
 
 ⚠️ THREAT DETAILS
-- Alert/Event: [exact signature name]
+- Alert: [exact signature]
 - Source IP: [exact IP]
-- Destination IP: [exact IP]  
+- Destination IP: [exact IP]
 - Time: [exact timestamp]
-- Protocol: [TCP/UDP/etc]
-- Severity: [1-3]
+- Severity: [level]
 
 📊 RISK ASSESSMENT
-- Risk Level: [CRITICAL / HIGH / MEDIUM / LOW]
-- Why: [one sentence explanation]
+- Risk Level: CRITICAL / HIGH / MEDIUM / LOW
+- Reason: [one sentence]
 
 ✅ RECOMMENDED ACTIONS
 1. [First action]
