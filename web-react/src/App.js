@@ -3,9 +3,10 @@ import { useState, useEffect, useRef } from "react";
 const FLASK_URL = "http://localhost:5000";
 
 const MODEL_OPTIONS = [
-  { value: "ollama",  label: "Ollama — sira-model (local)", tag: "Local — free",   needsKey: false, chip: "sira-model (local)" },
-  { value: "groq",   label: "Groq API (cloud)",             tag: "Cloud — API key", needsKey: true,  chip: "Groq llama3 (cloud)" },
-  { value: "openai", label: "OpenAI GPT-4o (cloud)",        tag: "Cloud — API key", needsKey: true,  chip: "GPT-4o (cloud)" },
+  { value: "ollama",      label: "SIRA Model — qwen2.5 (local)",       tag: "Local — free",   needsKey: false, chip: "sira-model (local)" },
+  { value: "ollama_phi3", label: "Phi3 3.8B — fastest (local)",        tag: "Local — free",   needsKey: false, chip: "Phi3 3.8B (local)" },
+  { value: "groq",        label: "Groq — Llama 3.3 70B (cloud)",       tag: "Cloud — free",   needsKey: false, chip: "Groq llama3 (cloud)" },
+  { value: "gemini", label: "Google Gemini 2.0 Flash (cloud)", tag: "Cloud — free", needsKey: false, chip: "Gemini 2.0 Flash (cloud)" },
 ];
 
 const QUICK_QUESTIONS = [
@@ -129,16 +130,6 @@ const css = `
   }
   .tag-local { background: var(--green-bg);  color: var(--green);  border-color: var(--green-bd); }
   .tag-cloud { background: var(--orange-bg); color: var(--orange); border-color: var(--orange-bd); }
-  .api-key-wrap { padding: 10px 16px 0; }
-  .api-key-lbl { font-size: 9px; font-weight: 700; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
-  .api-key-input {
-    width: 100%; border: 1.5px solid var(--border2);
-    border-radius: 8px; padding: 9px 12px;
-    font-family: var(--mono); font-size: 11px; color: var(--text);
-    background: var(--surface2); outline: none; transition: all 0.15s;
-  }
-  .api-key-input::placeholder { color: var(--text-dim); }
-  .api-key-input:focus { border-color: var(--accent); background: white; box-shadow: 0 0 0 3px var(--accent-glow); }
 
   .divider { height: 1px; background: var(--border); margin: 14px 0; }
 
@@ -319,7 +310,6 @@ const MOCK_ALERTS = [
 
 export default function App() {
   const [selectedModel, setSelectedModel] = useState("ollama");
-  const [apiKey, setApiKey]               = useState("");
   const [messages, setMessages]           = useState([
     { role: "ai", text: "Hello! I am SIRA, your Security Incident Response Assistant. I have loaded your Suricata and Zeek logs. Ask me anything about your network activity.", time: new Date().toLocaleTimeString() }
   ]);
@@ -359,7 +349,7 @@ export default function App() {
       const res = await fetch(`${FLASK_URL}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, model: selectedModel, api_key: apiKey || null })
+        body: JSON.stringify({ question: q, model: selectedModel })
       });
       const data = await res.json();
       setMessages(prev => [...prev, { role: "ai", text: data.answer, time: new Date().toLocaleTimeString() }]);
@@ -402,7 +392,7 @@ export default function App() {
             <select
               className="model-select"
               value={selectedModel}
-              onChange={e => { setSelectedModel(e.target.value); setApiKey(""); }}
+              onChange={e => setSelectedModel(e.target.value)}
             >
               {MODEL_OPTIONS.map(m => (
                 <option key={m.value} value={m.value}>{m.label}</option>
@@ -410,22 +400,11 @@ export default function App() {
             </select>
             <span className="sel-arrow">▾</span>
           </div>
-          <span className={`model-tag ${modelObj.needsKey ? "tag-cloud" : "tag-local"}`}>
+          <span className={`model-tag ${modelObj.tag.includes("Cloud") ? "tag-cloud" : "tag-local"}`}>
             {modelObj.tag}
           </span>
 
-          {modelObj.needsKey && (
-            <div className="api-key-wrap">
-              <div className="api-key-lbl">API Key</div>
-              <input
-                className="api-key-input"
-                type="password"
-                placeholder="Paste your API key here..."
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-              />
-            </div>
-          )}
+          {/* API key input intentionally removed — keys are managed in backend .env */}
 
           <div className="divider" />
 
