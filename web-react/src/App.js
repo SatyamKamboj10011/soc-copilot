@@ -2,374 +2,334 @@ import { useState, useEffect, useRef } from "react";
 
 const FLASK_URL = "http://localhost:5000";
 
+const MODEL_OPTIONS = [
+  { value: "ollama",  label: "Ollama — sira-model (local)", tag: "Local — free",   needsKey: false, chip: "sira-model (local)" },
+  { value: "groq",   label: "Groq API (cloud)",             tag: "Cloud — API key", needsKey: true,  chip: "Groq llama3 (cloud)" },
+  { value: "openai", label: "OpenAI GPT-4o (cloud)",        tag: "Cloud — API key", needsKey: true,  chip: "GPT-4o (cloud)" },
+];
+
+const QUICK_QUESTIONS = [
+  "What IPs triggered alerts?",
+  "Suspicious activity?",
+  "What should I do?",
+  "Summarise events",
+];
+
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #0b0f17;
-    --surface: #111622;
-    --surface2: #161c2d;
-    --border: #1e2d45;
-    --border2: #2a3f5f;
-    --accent: #4a9eff;
-    --accent2: #1a6fd4;
-    --green: #2ecc8a;
-    --red: #e05252;
-    --orange: #e07c3a;
-    --text: #b8cce0;
-    --text-dim: #445566;
-    --text-mid: #6a88a8;
-    --mono: 'Space Mono', monospace;
-    --sans: 'DM Sans', sans-serif;
+    --bg:          #eef1f8;
+    --surface:     #ffffff;
+    --surface2:    #f4f6fb;
+    --surface3:    #e8ecf5;
+    --border:      #dde1ee;
+    --border2:     #c8cede;
+    --accent:      #2563eb;
+    --accent-dark: #1d4ed8;
+    --accent-lite: #dbeafe;
+    --accent-glow: rgba(37,99,235,0.10);
+    --green:       #059669;
+    --green-bg:    #ecfdf5;
+    --green-bd:    #a7f3d0;
+    --red:         #dc2626;
+    --red-bg:      #fef2f2;
+    --red-bd:      #fecaca;
+    --orange:      #d97706;
+    --orange-bg:   #fffbeb;
+    --orange-bd:   #fde68a;
+    --text:        #0f172a;
+    --text-mid:    #475569;
+    --text-dim:    #94a3b8;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Plus Jakarta Sans', sans-serif;
+    --r:    10px;
+    --sh:   0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --sh-md:0 4px 16px rgba(0,0,0,0.08);
   }
 
   html, body, #root { height: 100%; }
   body { font-family: var(--sans); background: var(--bg); color: var(--text); overflow: hidden; }
-  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
 
+  /* ── FULL SCREEN LAYOUT ── */
   .app {
     display: grid;
-    grid-template-rows: 48px 1fr;
-    grid-template-columns: 260px 1fr 290px;
+    grid-template-rows: 58px 1fr;
+    grid-template-columns: 300px 1fr;
     height: 100vh;
+    width: 100vw;
   }
 
-  .nav {
+  /* ── TOP NAV ── */
+  .topnav {
     grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 18px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
+    box-shadow: var(--sh);
+    z-index: 10;
   }
-
-  .nav-logo {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: var(--mono);
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--accent);
-    letter-spacing: 2px;
+  .nav-left { display: flex; align-items: center; gap: 12px; }
+  .shield-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    font-size: 18px; box-shadow: 0 2px 8px rgba(37,99,235,0.35);
   }
-
-  .logo-box {
-    width: 26px; height: 26px;
-    background: var(--accent2);
-    border-radius: 5px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px;
+  .nav-title     { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+  .nav-subtitle  { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+  .nav-right     { display: flex; align-items: center; gap: 10px; }
+  .nav-pill {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 500; color: var(--text-mid);
+    background: var(--surface2); border: 1px solid var(--border);
+    padding: 5px 12px; border-radius: 20px;
   }
-
-  .nav-center { display: flex; align-items: center; gap: 18px; }
-
-  .nav-stat {
-    display: flex; align-items: center; gap: 5px;
-    font-family: var(--mono); font-size: 9px;
-    color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase;
-  }
-
-  .dot { width: 5px; height: 5px; border-radius: 50%; }
-  .dot-green { background: var(--green); }
-  .dot-red { background: var(--red); }
-  .dot-blue { background: var(--accent); }
+  .ndot { width: 6px; height: 6px; border-radius: 50%; }
+  .ndot-green { background: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,0.2); animation: glow-dot 2s infinite; }
+  .ndot-red   { background: var(--red); }
+  .ndot-blue  { background: var(--accent); }
+  @keyframes glow-dot { 0%,100%{opacity:1} 50%{opacity:0.45} }
   .nav-time { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
 
-  .threat-badge {
-    font-family: var(--mono); font-size: 9px; font-weight: 700;
-    padding: 3px 10px; border-radius: 3px; letter-spacing: 1px;
-    text-transform: uppercase; border: 1px solid;
-  }
-  .threat-high { background: rgba(224,82,82,0.12); color: var(--red); border-color: rgba(224,82,82,0.3); }
-  .threat-medium { background: rgba(224,124,58,0.12); color: var(--orange); border-color: rgba(224,124,58,0.3); }
-  .threat-low { background: rgba(46,204,138,0.1); color: var(--green); border-color: rgba(46,204,138,0.25); }
-
-  .sidebar {
+  /* ── LEFT PANEL ── */
+  .left-panel {
+    background: var(--surface);
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
-    overflow: hidden; background: var(--surface);
+    overflow: hidden;
+  }
+  .section-head {
+    padding: 14px 16px 0;
+    font-size: 9px; font-weight: 700;
+    color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase;
   }
 
-  .sidebar-header {
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
+  /* Model selector */
+  .model-select-wrap { position: relative; padding: 8px 16px 0; }
+  .model-select {
+    width: 100%; appearance: none;
+    background: var(--surface2); border: 1.5px solid var(--border2);
+    border-radius: var(--r); padding: 10px 36px 10px 13px;
+    font-family: var(--sans); font-size: 13px; font-weight: 500;
+    color: var(--text); cursor: pointer; outline: none; transition: all 0.15s;
   }
-
-  .sidebar-title {
-    font-family: var(--mono); font-size: 9px;
-    letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim);
+  .model-select:focus { border-color: var(--accent); background: white; box-shadow: 0 0 0 3px var(--accent-glow); }
+  .sel-arrow { position: absolute; right: 28px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-dim); font-size: 10px; }
+  .model-tag {
+    display: inline-block; margin: 8px 16px 0;
+    font-family: var(--mono); font-size: 9px; font-weight: 600;
+    padding: 3px 10px; border-radius: 20px; border: 1px solid;
   }
-
-  .count-badge {
-    background: rgba(224,82,82,0.15); color: var(--red);
-    border: 1px solid rgba(224,82,82,0.3);
-    font-family: var(--mono); font-size: 9px; font-weight: 700;
-    padding: 2px 7px; border-radius: 3px;
+  .tag-local { background: var(--green-bg);  color: var(--green);  border-color: var(--green-bd); }
+  .tag-cloud { background: var(--orange-bg); color: var(--orange); border-color: var(--orange-bd); }
+  .api-key-wrap { padding: 10px 16px 0; }
+  .api-key-lbl { font-size: 9px; font-weight: 700; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
+  .api-key-input {
+    width: 100%; border: 1.5px solid var(--border2);
+    border-radius: 8px; padding: 9px 12px;
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    background: var(--surface2); outline: none; transition: all 0.15s;
   }
+  .api-key-input::placeholder { color: var(--text-dim); }
+  .api-key-input:focus { border-color: var(--accent); background: white; box-shadow: 0 0 0 3px var(--accent-glow); }
 
-  .filter-bar {
-    padding: 7px 10px; border-bottom: 1px solid var(--border);
-    display: flex; gap: 4px; flex-wrap: wrap;
+  .divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 16px; }
+  .stat-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 12px 14px;
+    position: relative; overflow: hidden;
   }
-
-  .filter-btn {
-    padding: 3px 9px; font-family: var(--mono); font-size: 8px;
-    letter-spacing: 0.5px; text-transform: uppercase;
-    border-radius: 3px; border: 1px solid var(--border2);
-    background: transparent; color: var(--text-dim);
-    cursor: pointer; transition: all 0.12s;
+  .stat-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    border-radius: var(--r) var(--r) 0 0;
   }
+  .stat-card.blue::before   { background: linear-gradient(90deg,#2563eb,#60a5fa); }
+  .stat-card.red::before    { background: linear-gradient(90deg,#dc2626,#f87171); }
+  .stat-card.orange::before { background: linear-gradient(90deg,#d97706,#fbbf24); }
+  .stat-card.green::before  { background: linear-gradient(90deg,#059669,#34d399); }
+  .stat-lbl { font-size: 9px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .stat-val  { font-family: var(--mono); font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat-val.blue   { color: var(--accent); }
+  .stat-val.red    { color: var(--red); }
+  .stat-val.orange { color: var(--orange); }
+  .stat-val.green  { color: var(--green); }
 
-  .filter-btn.active-all { border-color: var(--accent); color: var(--accent); background: rgba(74,158,255,0.08); }
-  .filter-btn.active-alert { border-color: var(--red); color: var(--red); background: rgba(224,82,82,0.08); }
-  .filter-btn.active-dns { border-color: var(--accent); color: var(--accent); background: rgba(74,158,255,0.08); }
-  .filter-btn.active-http { border-color: var(--green); color: var(--green); background: rgba(46,204,138,0.08); }
-  .filter-btn.active-flow { border-color: var(--text-mid); color: var(--text-mid); }
-  .filter-btn.active-tls { border-color: var(--orange); color: var(--orange); background: rgba(224,124,58,0.08); }
-
-  .alerts-list { flex: 1; overflow-y: auto; }
-
-  .alert-item {
-    padding: 10px 14px;
-    border-bottom: 1px solid rgba(30,45,69,0.5);
-    cursor: pointer; border-left: 2px solid transparent; transition: all 0.12s;
+  /* Live event feed */
+  .feed-head { padding: 14px 16px 6px; font-size: 9px; font-weight: 700; color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase; }
+  .feed { flex: 1; overflow-y: auto; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 5px; }
+  .feed-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 7px;
+    background: var(--surface2); border: 1px solid var(--border);
+    cursor: default; transition: all 0.12s;
   }
+  .feed-item:hover { background: var(--accent-lite); border-color: rgba(37,99,235,0.2); }
+  .feed-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .feed-dot.alert { background: var(--red); }
+  .feed-dot.dns   { background: var(--accent); }
+  .feed-dot.http  { background: var(--green); }
+  .feed-dot.tls   { background: var(--orange); }
+  .feed-dot.flow  { background: var(--text-dim); }
+  .feed-type { font-family: var(--mono); font-size: 9px; font-weight: 600; min-width: 34px; color: var(--text-mid); text-transform: uppercase; }
+  .feed-ips  { font-family: var(--mono); font-size: 9px; color: var(--text-dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .feed-src  { color: var(--accent); }
+  .feed-time { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
 
-  .alert-item:hover { background: rgba(74,158,255,0.03); border-left-color: var(--border2); }
-  .alert-item.active { background: rgba(74,158,255,0.05); border-left-color: var(--accent); }
-
-  .alert-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-
-  .sev-tag {
-    font-family: var(--mono); font-size: 8px; font-weight: 700;
-    letter-spacing: 1px; text-transform: uppercase;
-    padding: 2px 6px; border-radius: 2px; border: 1px solid;
+  /* ── CHAT COLUMN ── */
+  .chat-col { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+  .chat-topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 20px; height: 54px; flex-shrink: 0;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    box-shadow: var(--sh);
   }
-
-  .sev-alert { background: rgba(224,82,82,0.1); color: var(--red); border-color: rgba(224,82,82,0.25); }
-  .sev-dns { background: rgba(74,158,255,0.1); color: var(--accent); border-color: rgba(74,158,255,0.2); }
-  .sev-http { background: rgba(46,204,138,0.08); color: var(--green); border-color: rgba(46,204,138,0.2); }
-  .sev-flow { background: rgba(106,136,168,0.1); color: var(--text-mid); border-color: rgba(106,136,168,0.2); }
-  .sev-tls { background: rgba(224,124,58,0.1); color: var(--orange); border-color: rgba(224,124,58,0.2); }
-
-  .alert-time { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
-
-  .alert-ips {
-    font-family: var(--mono); font-size: 9px; color: var(--text-mid);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  .chat-avatar {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+    border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    font-size: 17px; box-shadow: 0 2px 8px rgba(37,99,235,0.3);
   }
-  .alert-ips span { color: var(--accent); }
-
-  .main { display: flex; flex-direction: column; overflow: hidden; }
-
-  .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--border); }
-  .stat { padding: 10px 14px; border-right: 1px solid var(--border); }
-  .stat:last-child { border-right: none; }
-  .stat-label { font-family: var(--mono); font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 4px; }
-  .stat-value { font-family: var(--mono); font-size: 20px; font-weight: 700; line-height: 1; }
-  .stat-value.red { color: var(--red); }
-  .stat-value.green { color: var(--green); }
-  .stat-value.blue { color: var(--accent); }
-  .stat-value.orange { color: var(--orange); }
-  .stat-sub { font-size: 10px; color: var(--text-dim); margin-top: 3px; }
-
-  .chat-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-
-  .chat-header {
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 8px; background: var(--surface);
+  .chat-agent-name { font-size: 14px; font-weight: 700; color: var(--text); }
+  .chat-agent-sub  { font-size: 10px; color: var(--text-mid); }
+  .sdot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block; margin-right: 5px; animation: glow-dot 2s infinite; }
+  .model-chip {
+    margin-left: auto;
+    font-family: var(--mono); font-size: 9px; font-weight: 600;
+    padding: 4px 10px; border-radius: 20px;
+    background: var(--surface2); color: var(--text-mid);
+    border: 1px solid var(--border2);
   }
-
-  .ai-avatar {
-    width: 28px; height: 28px; background: var(--accent2);
-    border-radius: 6px; display: flex; align-items: center;
-    justify-content: center; font-size: 14px; flex-shrink: 0;
-  }
-
-  .ai-name { font-weight: 600; font-size: 12px; color: var(--text); }
-  .ai-status { font-size: 9px; color: var(--green); font-family: var(--mono); letter-spacing: 0.5px; }
-
   .clear-btn {
-    margin-left: auto; background: transparent;
-    border: 1px solid var(--border2); color: var(--text-dim);
-    padding: 4px 10px; border-radius: 3px; font-size: 9px;
-    font-family: var(--mono); cursor: pointer; letter-spacing: 0.5px;
-    text-transform: uppercase; transition: all 0.12s;
+    background: transparent; border: 1px solid var(--border2);
+    color: var(--text-dim); padding: 5px 12px; border-radius: 6px;
+    font-size: 10px; font-family: var(--sans); font-weight: 500;
+    cursor: pointer; transition: all 0.13s;
   }
   .clear-btn:hover { border-color: var(--red); color: var(--red); }
 
-  .date-filter-bar {
-    padding: 8px 14px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 8px;
-    background: var(--surface2); flex-wrap: wrap;
+  /* Messages */
+  .messages {
+    flex: 1; overflow-y: auto;
+    padding: 20px 24px;
+    display: flex; flex-direction: column; gap: 14px;
   }
-
-  .date-input, .hour-select {
-    background: var(--surface); border: 1px solid var(--border2);
-    border-radius: 4px; padding: 4px 8px; color: var(--text);
-    font-family: var(--mono); font-size: 10px; outline: none; cursor: pointer;
-  }
-
-  .date-input:focus, .hour-select:focus { border-color: var(--accent); }
-
-  .clear-filter-btn {
-    padding: 4px 10px; border-radius: 3px;
-    border: 1px solid rgba(224,82,82,0.3);
-    background: transparent; color: var(--red);
-    font-family: var(--mono); font-size: 8px;
-    cursor: pointer; letter-spacing: 0.5px; text-transform: uppercase; transition: all 0.12s;
-  }
-  .clear-filter-btn:hover { background: var(--red); color: white; }
-
-  .filter-active-badge {
-    font-family: var(--mono); font-size: 8px; color: var(--accent);
-    background: rgba(74,158,255,0.1); border: 1px solid rgba(74,158,255,0.2);
-    padding: 2px 8px; border-radius: 3px;
-  }
-
-  .messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-
-  .msg { display: flex; gap: 8px; }
-  .msg.user { flex-direction: row-reverse; }
-
-  .msg-icon { width: 24px; height: 24px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
-  .msg-icon.ai { background: var(--accent2); }
-  .msg-icon.user { background: rgba(74,158,255,0.1); border: 1px solid var(--border2); }
-
-  .bubble-wrap { display: flex; flex-direction: column; max-width: 76%; }
+  .msg { display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .bubble-wrap { display: flex; flex-direction: column; max-width: 68%; }
   .msg.user .bubble-wrap { align-items: flex-end; }
+  .bubble { padding: 11px 15px; border-radius: 14px; font-size: 13px; line-height: 1.7; }
+  .msg.ai .bubble {
+    background: var(--surface); border: 1px solid var(--border);
+    border-top-left-radius: 4px; color: var(--text); box-shadow: var(--sh);
+  }
+  .msg.user .bubble {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: white; border-top-right-radius: 4px;
+    box-shadow: 0 2px 12px rgba(37,99,235,0.3);
+  }
+  .msg-time { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 5px; padding: 0 3px; }
+  .msg.user .msg-time { text-align: right; }
 
-  .bubble { padding: 9px 13px; border-radius: 8px; font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
-
-  .msg.ai .bubble { background: var(--surface2); border: 1px solid var(--border); border-top-left-radius: 2px; color: var(--text); }
-  .msg.user .bubble { background: rgba(26,111,212,0.15); border: 1px solid rgba(26,111,212,0.25); border-top-right-radius: 2px; color: var(--text); }
-
-  .msg-time { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 4px; padding: 0 2px; }
-
-  .typing { display: flex; gap: 4px; padding: 9px 13px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; border-top-left-radius: 2px; width: fit-content; }
-  .typing span { width: 5px; height: 5px; background: var(--accent); border-radius: 50%; animation: bounce 1s infinite; }
+  .typing {
+    display: flex; gap: 5px; padding: 11px 15px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; border-top-left-radius: 4px;
+    width: fit-content; box-shadow: var(--sh);
+  }
+  .typing span { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; animation: bounce 1s infinite; }
   .typing span:nth-child(2) { animation-delay: 0.15s; }
   .typing span:nth-child(3) { animation-delay: 0.3s; }
-  @keyframes bounce { 0%,100%{transform:translateY(0);opacity:0.3} 50%{transform:translateY(-4px);opacity:1} }
+  @keyframes bounce { 0%,100%{transform:translateY(0);opacity:0.3} 50%{transform:translateY(-5px);opacity:1} }
 
-  .input-area { padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface); }
-  .quick-btns { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
-
-  .qbtn {
-    font-size: 9px; font-family: var(--mono); padding: 4px 10px;
-    border-radius: 3px; border: 1px solid var(--border2);
-    background: transparent; color: var(--text-dim);
-    cursor: pointer; transition: all 0.12s; white-space: nowrap; letter-spacing: 0.3px;
+  /* Input area */
+  .input-area {
+    padding: 14px 24px 18px;
+    background: var(--surface); border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.04);
   }
-  .qbtn:hover { border-color: var(--accent); color: var(--accent); }
-
-  .input-row { display: flex; gap: 7px; }
-
+  .quick-btns { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
+  .qbtn {
+    font-size: 11.5px; font-family: var(--sans); font-weight: 500;
+    padding: 6px 14px; border-radius: 20px;
+    border: 1.5px solid var(--border2);
+    background: var(--surface2); color: var(--text-mid);
+    cursor: pointer; transition: all 0.13s;
+  }
+  .qbtn:hover {
+    border-color: var(--accent); color: var(--accent);
+    background: var(--accent-lite); transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(37,99,235,0.12);
+  }
+  .input-row { display: flex; gap: 10px; }
   .chat-input {
-    flex: 1; background: var(--surface2); border: 1px solid var(--border2);
-    border-radius: 6px; padding: 9px 13px; color: var(--text);
-    font-family: var(--mono); font-size: 11px; outline: none; transition: border 0.12s;
+    flex: 1; background: var(--surface2);
+    border: 1.5px solid var(--border2); border-radius: 10px;
+    padding: 11px 16px; color: var(--text);
+    font-family: var(--sans); font-size: 13px; outline: none; transition: all 0.15s;
   }
   .chat-input::placeholder { color: var(--text-dim); }
-  .chat-input:focus { border-color: var(--accent); }
-
+  .chat-input:focus { border-color: var(--accent); background: white; box-shadow: 0 0 0 3px var(--accent-glow); }
   .send-btn {
-    width: 38px; height: 38px; background: var(--accent2);
-    border: none; border-radius: 6px; cursor: pointer;
-    color: white; font-size: 14px; transition: all 0.12s; flex-shrink: 0;
+    padding: 11px 24px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    border: none; border-radius: 10px;
+    cursor: pointer; color: white;
+    font-size: 13px; font-family: var(--sans); font-weight: 600;
+    transition: all 0.13s; flex-shrink: 0;
+    box-shadow: 0 2px 10px rgba(37,99,235,0.3);
   }
-  .send-btn:hover { background: var(--accent); }
-  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .send-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(37,99,235,0.4); }
+  .send-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
-  .right-panel { border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
-  .panel-tabs { display: flex; border-bottom: 1px solid var(--border); }
-
-  .tab {
-    flex: 1; padding: 10px 6px; font-family: var(--mono); font-size: 8px;
-    letter-spacing: 1.5px; text-transform: uppercase; text-align: center;
-    cursor: pointer; color: var(--text-dim); border-bottom: 2px solid transparent; transition: all 0.12s;
+  /* ── MOBILE ── */
+  @media (max-width: 768px) {
+    body { overflow: auto; }
+    .app { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
+    .topnav { position: sticky; top: 0; z-index: 20; flex-wrap: wrap; gap: 6px; padding: 8px 14px; height: auto; }
+    .nav-right { flex-wrap: wrap; gap: 6px; }
+    .left-panel { border-right: none; border-bottom: 1px solid var(--border); }
+    .stats-grid { grid-template-columns: repeat(4,1fr); }
+    .feed { max-height: 140px; }
+    .messages { padding: 14px 16px; }
+    .input-area { padding: 12px 16px 16px; }
+    .bubble-wrap { max-width: 85%; }
   }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .tab:hover:not(.active) { color: var(--text-mid); }
-
-  .tab-body { flex: 1; overflow-y: auto; padding: 12px; display: none; }
-  .tab-body.active { display: block; }
-
-  .detail-label { font-family: var(--mono); font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 5px; margin-top: 12px; }
-  .detail-label:first-child { margin-top: 0; }
-
-  .detail-value { font-family: var(--mono); font-size: 10px; color: var(--text); background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px; word-break: break-all; line-height: 1.6; }
-  .detail-value .hi { color: var(--accent); }
-  .detail-value .bad { color: var(--red); }
-
-  .sev-bar { display: flex; gap: 2px; margin-top: 7px; }
-  .sev-seg { flex: 1; height: 4px; border-radius: 1px; background: var(--border); }
-  .sev-seg.on { background: var(--red); }
-
-  .actions { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
-
-  .action-btn {
-    padding: 8px 12px; border-radius: 5px; font-family: var(--mono);
-    font-size: 9px; font-weight: 700; cursor: pointer; transition: all 0.12s;
-    border: 1px solid; display: flex; align-items: center; gap: 7px;
-    letter-spacing: 0.5px; text-transform: uppercase;
-  }
-  .btn-red { background: rgba(224,82,82,0.08); border-color: rgba(224,82,82,0.25); color: var(--red); }
-  .btn-red:hover { background: var(--red); color: white; }
-  .btn-orange { background: rgba(224,124,58,0.08); border-color: rgba(224,124,58,0.2); color: var(--orange); }
-  .btn-orange:hover { background: var(--orange); color: white; }
-  .btn-green { background: rgba(46,204,138,0.06); border-color: rgba(46,204,138,0.18); color: var(--green); }
-  .btn-green:hover { background: var(--green); color: #0b0f17; }
-
-  .log-entry { font-family: var(--mono); font-size: 9px; padding: 5px 8px; border-radius: 3px; margin-bottom: 2px; border-left: 2px solid var(--border); color: var(--text-dim); line-height: 1.5; cursor: pointer; transition: all 0.12s; }
-  .log-entry:hover { background: rgba(74,158,255,0.03); border-left-color: var(--accent); color: var(--text); }
-  .log-entry .hi { color: var(--accent); }
-  .log-entry .bad { color: var(--red); }
-
-  .toast { position: fixed; bottom: 18px; right: 18px; background: var(--surface2); border: 1px solid var(--border2); color: var(--text); padding: 9px 14px; border-radius: 5px; font-family: var(--mono); font-size: 10px; opacity: 0; transform: translateY(8px); transition: all 0.2s; z-index: 999; pointer-events: none; }
-  .toast.show { opacity: 1; transform: translateY(0); }
 `;
 
-const mockAlerts = [
-  { event_type: "alert", src_ip: "192.168.68.105", dest_ip: "10.0.0.45", timestamp: "2026-04-27T09:14:32", alert: { signature: "ET SCAN Nmap" } },
-  { event_type: "dns", src_ip: "192.168.68.57", dest_ip: "8.8.8.8", timestamp: "2026-04-27T09:11:05" },
-  { event_type: "http", src_ip: "192.168.68.57", dest_ip: "142.250.1.1", timestamp: "2026-04-27T09:10:22" },
-  { event_type: "flow", src_ip: "192.168.68.54", dest_ip: "203.109.191.8", timestamp: "2026-04-27T09:08:14" },
-  { event_type: "tls", src_ip: "192.168.68.57", dest_ip: "172.217.25.163", timestamp: "2026-04-27T09:07:55" },
-  { event_type: "dns", src_ip: "192.168.68.57", dest_ip: "8.8.8.8", timestamp: "2026-04-27T09:06:33" },
-  { event_type: "flow", src_ip: "192.168.68.51", dest_ip: "203.109.191.8", timestamp: "2026-04-27T09:05:12" },
-  { event_type: "http", src_ip: "192.168.68.57", dest_ip: "142.250.1.1", timestamp: "2026-04-27T09:04:01" },
-];
-
-const quickQuestions = [
-  "What suspicious activity was detected?",
-  "Which IPs appear most often?",
-  "What type of events are in the logs?",
-  "Is there any malicious traffic?",
-  "What should I do next?",
+const MOCK_ALERTS = [
+  { event_type: "alert", src_ip: "192.168.68.105", dest_ip: "10.0.0.45",      timestamp: "2026-04-27T09:14:32" },
+  { event_type: "dns",   src_ip: "192.168.68.57",  dest_ip: "8.8.8.8",        timestamp: "2026-04-27T09:11:05" },
+  { event_type: "http",  src_ip: "192.168.68.57",  dest_ip: "142.250.1.1",    timestamp: "2026-04-27T09:10:22" },
+  { event_type: "flow",  src_ip: "192.168.68.54",  dest_ip: "203.109.191.8",  timestamp: "2026-04-27T09:08:14" },
+  { event_type: "tls",   src_ip: "192.168.68.57",  dest_ip: "172.217.25.163", timestamp: "2026-04-27T09:07:55" },
+  { event_type: "alert", src_ip: "192.168.68.44",  dest_ip: "10.0.0.1",       timestamp: "2026-04-27T09:06:33" },
+  { event_type: "flow",  src_ip: "192.168.68.51",  dest_ip: "203.109.191.8",  timestamp: "2026-04-27T09:05:12" },
+  { event_type: "http",  src_ip: "192.168.68.57",  dest_ip: "142.250.1.1",    timestamp: "2026-04-27T09:04:01" },
 ];
 
 export default function App() {
-  const [messages, setMessages] = useState([
+  const [selectedModel, setSelectedModel] = useState("ollama");
+  const [apiKey, setApiKey]               = useState("");
+  const [messages, setMessages]           = useState([
     { role: "ai", text: "Hello! I am SIRA, your Security Incident Response Assistant. I have loaded your Suricata and Zeek logs. Ask me anything about your network activity.", time: new Date().toLocaleTimeString() }
   ]);
-  const [input, setInput] = useState("");
+  const [input, setInput]     = useState("");
   const [loading, setLoading] = useState(false);
-  const [alerts, setAlerts] = useState(mockAlerts);
-  const [activeAlert, setActiveAlert] = useState(0);
-  const [activeTab, setActiveTab] = useState("details");
-  const [toast, setToast] = useState("");
-  const [time, setTime] = useState(new Date().toLocaleTimeString());
-  const [filter, setFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("");
-  const [hourFilter, setHourFilter] = useState("");
-  const messagesRef = useRef(null);
+  const [alerts, setAlerts]   = useState(MOCK_ALERTS);
+  const [time, setTime]       = useState(new Date().toLocaleTimeString());
+  const messagesRef           = useRef(null);
+
+  const modelObj = MODEL_OPTIONS.find(m => m.value === selectedModel);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
@@ -379,23 +339,17 @@ export default function App() {
   useEffect(() => {
     fetch(`${FLASK_URL}/logs`)
       .then(r => r.json())
-      .then(data => { if (data.length > 0) setAlerts(data); })
+      .then(data => { if (Array.isArray(data) && data.length > 0) setAlerts(data); })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (messagesRef.current) {
+    if (messagesRef.current)
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
   }, [messages, loading]);
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 3000);
-  };
-
   const sendMessage = async (text) => {
-    const q = text || input.trim();
+    const q = (text || input).trim();
     if (!q || loading) return;
     setInput("");
     const now = new Date().toLocaleTimeString();
@@ -405,7 +359,7 @@ export default function App() {
       const res = await fetch(`${FLASK_URL}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, date: dateFilter || null, hour: hourFilter || null })
+        body: JSON.stringify({ question: q, model: selectedModel, api_key: apiKey || null })
       });
       const data = await res.json();
       setMessages(prev => [...prev, { role: "ai", text: data.answer, time: new Date().toLocaleTimeString() }]);
@@ -415,232 +369,154 @@ export default function App() {
     setLoading(false);
   };
 
-  const selected = alerts[activeAlert] || {};
   const alertCount = alerts.filter(a => a.event_type === "alert").length;
-  const threatLevel = alertCount >= 3 ? "high" : alertCount >= 1 ? "medium" : "low";
-  const filteredAlerts = alerts.filter(a => filter === "all" || a.event_type === filter);
-  const isFilterActive = dateFilter || hourFilter;
-
-  const sevColor = (type) => {
-    if (type === "alert") return "sev-alert";
-    if (type === "dns") return "sev-dns";
-    if (type === "http") return "sev-http";
-    if (type === "tls") return "sev-tls";
-    return "sev-flow";
-  };
+  const uniqueIPs  = [...new Set(alerts.map(a => a.src_ip).filter(Boolean))].length;
 
   return (
     <>
       <style>{css}</style>
       <div className="app">
 
-        {/* NAV */}
-        <nav className="nav">
-          <div className="nav-logo">
-            <div className="logo-box">🛡</div>
-            SOC COPILOT
+        {/* ── TOP NAV ── */}
+        <nav className="topnav">
+          <div className="nav-left">
+            <div className="shield-icon">🛡</div>
+            <div>
+              <div className="nav-title">SOC Copilot</div>
+              <div className="nav-subtitle">Security Operations Centre</div>
+            </div>
           </div>
-          <div className="nav-center">
-            <div className="nav-stat"><div className="dot dot-green" />SURICATA LIVE</div>
-            <div className="nav-stat"><div className="dot dot-green" />ZEEK ONLINE</div>
-            <div className="nav-stat"><div className="dot dot-red" />{alertCount} ALERTS</div>
-            <div className="nav-stat"><div className="dot dot-blue" />AI READY</div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span className={`threat-badge threat-${threatLevel}`}>THREAT: {threatLevel}</span>
-            <div className="nav-time">{time} UTC</div>
+          <div className="nav-right">
+            <div className="nav-pill"><div className="ndot ndot-green" />Suricata Live</div>
+            <div className="nav-pill"><div className="ndot ndot-green" />Zeek Online</div>
+            <div className="nav-pill"><div className="ndot ndot-red" />{alertCount} Alerts</div>
+            <div className="nav-pill"><div className="ndot ndot-blue" />AI Ready</div>
+            <div className="nav-time">{time}</div>
           </div>
         </nav>
 
-        {/* SIDEBAR */}
-        <aside className="sidebar">
-          <div className="sidebar-header">
-            <span className="sidebar-title">Live Events</span>
-            {alertCount > 0 && <span className="count-badge">{alertCount} ALERT</span>}
+        {/* ── LEFT PANEL ── */}
+        <aside className="left-panel">
+          <div className="section-head" style={{ marginTop: 14 }}>AI Model</div>
+          <div className="model-select-wrap">
+            <select
+              className="model-select"
+              value={selectedModel}
+              onChange={e => { setSelectedModel(e.target.value); setApiKey(""); }}
+            >
+              {MODEL_OPTIONS.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <span className="sel-arrow">▾</span>
           </div>
-          <div className="filter-bar">
-            {["all", "alert", "dns", "http", "flow", "tls"].map(f => (
-              <button key={f} className={`filter-btn ${filter === f ? `active-${f}` : ""}`} onClick={() => setFilter(f)}>{f}</button>
-            ))}
+          <span className={`model-tag ${modelObj.needsKey ? "tag-cloud" : "tag-local"}`}>
+            {modelObj.tag}
+          </span>
+
+          {modelObj.needsKey && (
+            <div className="api-key-wrap">
+              <div className="api-key-lbl">API Key</div>
+              <input
+                className="api-key-input"
+                type="password"
+                placeholder="Paste your API key here..."
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div className="divider" />
+
+          <div className="section-head">Overview</div>
+          <div className="stats-grid" style={{ marginTop: 10 }}>
+            <div className="stat-card blue">
+              <div className="stat-lbl">Total Events</div>
+              <div className="stat-val blue">{alerts.length}</div>
+            </div>
+            <div className="stat-card red">
+              <div className="stat-lbl">Alerts</div>
+              <div className="stat-val red">{alertCount}</div>
+            </div>
+            <div className="stat-card orange">
+              <div className="stat-lbl">Unique IPs</div>
+              <div className="stat-val orange">{uniqueIPs}</div>
+            </div>
+            <div className="stat-card green">
+              <div className="stat-lbl">Status</div>
+              <div className="stat-val green">OK</div>
+            </div>
           </div>
-          <div className="alerts-list">
-            {filteredAlerts.map((a, i) => (
-              <div key={i} className={`alert-item${activeAlert === alerts.indexOf(a) ? " active" : ""}`} onClick={() => setActiveAlert(alerts.indexOf(a))}>
-                <div className="alert-top">
-                  <span className={`sev-tag ${sevColor(a.event_type)}`}>{a.event_type}</span>
-                  <span className="alert-time">{a.timestamp?.substring(11, 19)}</span>
-                </div>
-                <div className="alert-ips"><span>{a.src_ip}</span>{" → "}{a.dest_ip}</div>
+
+          <div className="divider" />
+
+          <div className="feed-head">Live Events</div>
+          <div className="feed">
+            {alerts.slice(0, 20).map((a, i) => (
+              <div key={i} className="feed-item">
+                <div className={`feed-dot ${a.event_type}`} />
+                <span className="feed-type">{a.event_type}</span>
+                <span className="feed-ips">
+                  <span className="feed-src">{a.src_ip}</span> → {a.dest_ip}
+                </span>
+                <span className="feed-time">{a.timestamp?.substring(11, 19)}</span>
               </div>
             ))}
-            {filteredAlerts.length === 0 && (
-              <div style={{ padding: "20px 14px", fontFamily: "var(--mono)", fontSize: "9px", color: "var(--text-dim)", textAlign: "center" }}>
-                NO {filter.toUpperCase()} EVENTS
-              </div>
-            )}
           </div>
         </aside>
 
-        {/* MAIN */}
-        <main className="main">
-          <div className="stats-bar">
-            <div className="stat">
-              <div className="stat-label">Total Events</div>
-              <div className="stat-value blue">{alerts.length}</div>
-              <div className="stat-sub">In log file</div>
+        {/* ── CHAT COLUMN ── */}
+        <div className="chat-col">
+          <div className="chat-topbar">
+            <div className="chat-avatar">🤖</div>
+            <div>
+              <div className="chat-agent-name">SIRA</div>
+              <div className="chat-agent-sub">
+                <span className="sdot" />
+                {loading ? "Analysing..." : "Security Incident Response Assistant"}
+              </div>
             </div>
-            <div className="stat">
-              <div className="stat-label">Alerts</div>
-              <div className="stat-value red">{alertCount}</div>
-              <div className="stat-sub">Needs review</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Unique IPs</div>
-              <div className="stat-value orange">{[...new Set(alerts.map(a => a.src_ip).filter(Boolean))].length}</div>
-              <div className="stat-sub">Source addresses</div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Status</div>
-              <div className="stat-value green">OK</div>
-              <div className="stat-sub">System operational</div>
-            </div>
+            <div className="model-chip">{modelObj.chip}</div>
+            <button className="clear-btn" onClick={() => setMessages([])}>Clear chat</button>
           </div>
 
-          <div className="chat-wrap">
-            <div className="chat-header">
-              <div className="ai-avatar">🤖</div>
-              <div>
-                <div className="ai-name">SIRA — Security Incident Response Assistant</div>
-                <div className="ai-status">{loading ? "ANALYSING..." : "MONITORING LIVE"}</div>
-              </div>
-              <button className="clear-btn" onClick={() => setMessages([{ role: "ai", text: "Hello! I am SIRA, your Security Incident Response Assistant. Ask me anything about your logs.", time: new Date().toLocaleTimeString() }])}>
-                Clear
-              </button>
-            </div>
-
-            {/* Date and Time Filter Bar */}
-            <div className="date-filter-bar">
-              <span style={{ fontFamily: "var(--mono)", fontSize: "8px", color: "var(--text-dim)", letterSpacing: "1px", textTransform: "uppercase" }}>Filter:</span>
-              <input type="date" className="date-input" value={dateFilter} onChange={e => setDateFilter(e.target.value)} />
-              <select className="hour-select" value={hourFilter} onChange={e => setHourFilter(e.target.value)}>
-                <option value="">All Hours</option>
-                {[...Array(24)].map((_, i) => (
-                  <option key={i} value={String(i).padStart(2, '0')}>{String(i).padStart(2, '0')}:00</option>
-                ))}
-              </select>
-              {isFilterActive && (
-                <>
-                  <span className="filter-active-badge">FILTER ON</span>
-                  <button className="clear-filter-btn" onClick={() => { setDateFilter(""); setHourFilter(""); }}>Clear</button>
-                </>
-              )}
-            </div>
-
-            <div className="messages" ref={messagesRef}>
-              {messages.map((m, i) => (
-                <div key={i} className={`msg ${m.role}`}>
-                  <div className={`msg-icon ${m.role}`}>{m.role === "ai" ? "🤖" : "👤"}</div>
-                  <div className="bubble-wrap">
-                    <div className="bubble">{m.text}</div>
-                    <div className="msg-time">{m.time}</div>
-                  </div>
+          <div className="messages" ref={messagesRef}>
+            {messages.map((m, i) => (
+              <div key={i} className={`msg ${m.role}`}>
+                <div className="bubble-wrap">
+                  <div className="bubble">{m.text}</div>
+                  <div className="msg-time">{m.time}</div>
                 </div>
-              ))}
-              {loading && (
-                <div className="msg ai">
-                  <div className="msg-icon ai">🤖</div>
-                  <div className="typing"><span /><span /><span /></div>
-                </div>
-              )}
-            </div>
-
-            <div className="input-area">
-              <div className="quick-btns">
-                {quickQuestions.map((q, i) => (
-                  <button key={i} className="qbtn" onClick={() => sendMessage(q)}>{q}</button>
-                ))}
               </div>
-              <div className="input-row">
-                <input
-                  className="chat-input"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && sendMessage()}
-                  placeholder="Ask SIRA about your logs..."
-                />
-                <button className="send-btn" onClick={() => sendMessage()} disabled={loading}>➤</button>
-              </div>
-            </div>
-          </div>
-        </main>
-
-        {/* RIGHT PANEL */}
-        <aside className="right-panel">
-          <div className="panel-tabs">
-            {["details", "logs", "mitre"].map(t => (
-              <div key={t} className={`tab${activeTab === t ? " active" : ""}`} onClick={() => setActiveTab(t)}>{t}</div>
             ))}
-          </div>
-
-          <div className={`tab-body${activeTab === "details" ? " active" : ""}`}>
-            <div className="detail-label">Event Type</div>
-            <div className="detail-value"><span className="hi">{selected.event_type || "N/A"}</span></div>
-            <div className="detail-label">Source IP</div>
-            <div className="detail-value"><span className="bad">{selected.src_ip || "N/A"}</span></div>
-            <div className="detail-label">Destination IP</div>
-            <div className="detail-value"><span className="hi">{selected.dest_ip || "N/A"}</span></div>
-            <div className="detail-label">Timestamp</div>
-            <div className="detail-value">{selected.timestamp?.substring(0, 19) || "N/A"}</div>
-            {selected.alert?.signature && (
-              <>
-                <div className="detail-label">Signature</div>
-                <div className="detail-value"><span className="bad">{selected.alert.signature}</span></div>
-              </>
+            {loading && (
+              <div className="msg ai">
+                <div className="typing"><span /><span /><span /></div>
+              </div>
             )}
-            <div className="detail-label">Risk Score</div>
-            <div className="sev-bar">
-              {[...Array(10)].map((_, i) => (
-                <div key={i} className={`sev-seg${selected.event_type === "alert" ? (i < 8 ? " on" : "") : (i < 3 ? " on" : "")}`} />
+          </div>
+
+          <div className="input-area">
+            <div className="quick-btns">
+              {QUICK_QUESTIONS.map((q, i) => (
+                <button key={i} className="qbtn" onClick={() => sendMessage(q)}>{q}</button>
               ))}
             </div>
+            <div className="input-row">
+              <input
+                className="chat-input"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && sendMessage()}
+                placeholder="Ask SIRA about your logs..."
+              />
+              <button className="send-btn" onClick={() => sendMessage()} disabled={loading}>Ask</button>
+            </div>
           </div>
-
-          <div className={`tab-body${activeTab === "logs" ? " active" : ""}`}>
-            {alerts.slice(0, 30).map((a, i) => (
-              <div key={i} className="log-entry">
-                <span style={{ color: "var(--text-dim)" }}>{a.timestamp?.substring(11, 19)}</span>
-                <span className="hi"> [{a.event_type}]</span>
-                <span style={{ color: "var(--orange)" }}> {a.src_ip}</span>
-                {" → "}{a.dest_ip}
-              </div>
-            ))}
-          </div>
-
-          <div className={`tab-body${activeTab === "mitre" ? " active" : ""}`}>
-            {[
-              { id: "T1046", name: "Network Service Discovery", desc: "Port scanning detected via nmap signatures.", tactic: "Discovery" },
-              { id: "T1021", name: "Remote Services", desc: "Lateral movement via SMB or SSH connections.", tactic: "Lateral Movement" },
-              { id: "T1041", name: "Exfiltration Over C2", desc: "Data sent outside the network via C2 channel.", tactic: "Exfiltration" },
-            ].map((t, i) => (
-              <div key={i} style={{ marginBottom: 12 }}>
-                <div className="detail-label">{t.tactic}</div>
-                <div className="detail-value">
-                  <span className="hi">{t.id}</span> — {t.name}
-                  <div style={{ color: "var(--text-dim)", fontSize: 9, marginTop: 4 }}>{t.desc}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="actions">
-            <button className="action-btn btn-red" onClick={() => showToast("Escalated to Tier 2 analyst")}>🚨 Escalate Alert</button>
-            <button className="action-btn btn-orange" onClick={() => showToast(`IP ${selected.src_ip} blocked`)}>🔒 Block Source IP</button>
-            <button className="action-btn btn-green" onClick={() => showToast("Alert marked as investigated")}>✅ Mark Investigated</button>
-          </div>
-        </aside>
+        </div>
 
       </div>
-      <div className={`toast${toast ? " show" : ""}`}>{toast}</div>
     </>
   );
 }
