@@ -9,9 +9,13 @@ import json
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 app = Flask(__name__)
 CORS(app)
+
+
+
+
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 vectorstore = Chroma(
@@ -32,7 +36,7 @@ def get_llm(model, api_key=None):
         ), "cloud"
     elif model == "gemini":
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             google_api_key=api_key or os.getenv("GEMINI_API_KEY")
         ), "cloud"
     else:
@@ -97,8 +101,8 @@ def get_models():
     return jsonify([
         {"id": "ollama", "name": "SIRA Model — qwen2.5 (local)", "requires_key": False},
         {"id": "ollama_phi3", "name": "Phi3 3.8B (local — fastest)", "requires_key": False},
-        {"id": "groq", "name": "Groq API (cloud — free)", "requires_key": True},
-        {"id": "gemini", "name": "Google Gemini Flash (cloud — free)", "requires_key": True}
+        {"id": "groq", "name": "Groq — Llama 3.3 70B (cloud)", "requires_key": False},
+        {"id": "gemini", "name": "Google Gemini 2.0 Flash (cloud - free)", "requires_key": False}
     ])
 
 if __name__ == '__main__':
