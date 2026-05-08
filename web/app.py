@@ -112,5 +112,26 @@ def get_models():
         {"id": "mistral", "name": "Mistral Small (cloud — free)", "requires_key": False}    
     ])
 
+@app.route('/reputation/<ip>', methods=['GET'])
+def get_reputation(ip):
+    import requests as req
+    api_key = os.getenv("ABUSEIPDB_API_KEY")
+    try:
+        response = req.get(
+            "https://api.abuseipdb.com/api/v2/check",
+            headers={"Key": api_key, "Accept": "application/json"},
+            params={"ipAddress": ip, "maxAgeInDays": 90}
+        )
+        data = response.json().get("data", {})
+        return jsonify({
+            "ip": ip,
+            "score": data.get("abuseConfidenceScore", 0),
+            "country": data.get("countryCode", "??"),
+            "reports": data.get("totalReports", 0),
+            "malicious": data.get("abuseConfidenceScore", 0) > 25
+        })
+    except:
+        return jsonify({"ip": ip, "score": 0, "malicious": False, "error": "lookup failed"})
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
