@@ -5,6 +5,7 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
+from  langchain_mistralai import ChatMistralAI
 import json
 import os
 from dotenv import load_dotenv
@@ -38,6 +39,11 @@ def get_llm(model, api_key=None):
         return ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",
             google_api_key=api_key or os.getenv("GEMINI_API_KEY")
+        ), "cloud"
+    elif model == "mistral":
+        return ChatMistralAI(
+            model="mistral-small-latest",
+            mistral_api_key=os.getenv("MISTRAL_API_KEY")
         ), "cloud"
     else:
         return OllamaLLM(model="sira-model"), "local"
@@ -102,7 +108,8 @@ def get_models():
         {"id": "ollama", "name": "SIRA Model — qwen2.5 (local)", "requires_key": False},
         {"id": "ollama_phi3", "name": "Phi3 3.8B (local — fastest)", "requires_key": False},
         {"id": "groq", "name": "Groq — Llama 3.3 70B (cloud)", "requires_key": False},
-        {"id": "gemini", "name": "Google Gemini 2.0 Flash (cloud - free)", "requires_key": False}
+        {"id": "gemini", "name": "Google Gemini 2.0 Flash (cloud - free)", "requires_key": False},
+        {"id": "mistral", "name": "Mistral Small (cloud — free)", "requires_key": False}    
     ])
 
 if __name__ == '__main__':
