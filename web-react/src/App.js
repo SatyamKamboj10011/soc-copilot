@@ -7,6 +7,7 @@ const MODEL_OPTIONS = [
   { value: "ollama_phi3", label: "Phi3 3.8B — fastest (local)",        tag: "Local — free",   needsKey: false, chip: "Phi3 3.8B (local)" },
   { value: "groq",        label: "Groq — Llama 3.3 70B (cloud)",       tag: "Cloud — free",   needsKey: false, chip: "Groq llama3 (cloud)" },
   { value: "gemini", label: "Google Gemini 2.0 Flash (cloud)", tag: "Cloud — free", needsKey: false, chip: "Gemini 2.0 Flash (cloud)" },
+  { value: "mistral", label: "Mistral Small (cloud — free)", tag: "Cloud — free", needsKey: false, chip: "Mistral Small (cloud)" },
 ];
 
 const QUICK_QUESTIONS = [
