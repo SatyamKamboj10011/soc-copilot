@@ -13,6 +13,7 @@ MAX_EVENTS   = 500
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
 TRAIN_LOGS_PATH = "../logs/train_logs.json"
+ZEEK_CONN_PATH  = "../logs/conn.log"
 CHROMA_DB_PATH  = "./chroma_db"
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,24 @@ def format_event(event):
 
     return text.strip()
 
+
+# //ZEEK FORMATTER FUNCTION
+
+def format_zeek_conn(line):
+    if line.startswith("#"):
+        return None
+    parts = line.strip().split("\t")
+    if len(parts) < 10:
+        return None
+    try:
+        text  = f"Event: zeek_conn | Time: {parts[0]} | Protocol: {parts[6]}\n"
+        text += f"Source: {parts[2]}:{parts[3]} → Destination: {parts[4]}:{parts[5]}\n"
+        text += f"Duration: {parts[8]}s | Bytes sent: {parts[9]} | State: {parts[11] if len(parts) > 11 else 'unknown'}\n"
+        return text.strip()
+    except:
+        return None
+
+
 def load_logs(path):
     docs = []
     seen = set()
@@ -92,6 +111,37 @@ def load_logs(path):
                 continue
     return docs
 
+
+def load_zeek_conns(path, max_events=100):
+    docs = []
+    seen = set()
+    if not os.path.exists(path):
+        print(f"Zeek conn.log not found at {path} - skipping zeek connections")
+        return docs
+    with open(path, "r") as f:
+        for line in f:
+            text = format_zeek_conn(line)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            parts = line.strip().split("\t")
+            docs.append(Document(
+                page_content=text,
+                metadata={
+                    "event_type": "zeek_conn",
+                    "src_ip":     parts[2] if len(parts) > 2 else "",
+                    "dest_ip":    parts[4] if len(parts) > 4 else "",
+                    "timestamp":  parts[0] if len(parts) > 0 else "",
+                    "date":       "",
+                    "hour":       "",
+                    "split":      "full"
+
+                }
+            ))
+            if len(docs) >= max_events:
+                break
+    return docs
+
 # Delete old ChromaDB
 if os.path.exists(CHROMA_DB_PATH):
     shutil.rmtree(CHROMA_DB_PATH)
@@ -99,15 +149,22 @@ if os.path.exists(CHROMA_DB_PATH):
 
 print(f"Loading logs from {LOG_SOURCE}...")
 docs = load_logs(LOG_SOURCE)
-print(f"Loaded {len(docs)} clean events")
+print(f"Loaded {len(docs)} Suricata events")
+
+print(f"Loading Zeek logs from {ZEEK_CONN_PATH}...")
+zeek_docs = load_zeek_conns(ZEEK_CONN_PATH, max_events=100)
+print(f"Loaded {len(zeek_docs)} Zeek connection events")
+
+docs = docs + zeek_docs
+print(f"\nTotal events in ChromaDB: {len(docs)}")
 
 print("\nSample chunk:")
 print(docs[0].page_content)
 print()
 
 print("Building ChromaDB...")
-embeddings   = OllamaEmbeddings(model="nomic-embed-text")
-vectorstore  = Chroma.from_documents(
+embeddings  = OllamaEmbeddings(model="nomic-embed-text")
+vectorstore = Chroma.from_documents(
     docs,
     embeddings,
     persist_directory=CHROMA_DB_PATH
