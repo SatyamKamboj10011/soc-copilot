@@ -6,9 +6,9 @@
     "dest_ip": "10.85.168.132",
     "timestamp": "2026-04-27T09:03:00.555555+0000",
     "question": "Analyse this security alert: ET WEB_SERVER SQL Injection Attempt from 192.168.68.105 to 10.85.168.132 at 2026-04-27T09:03:00.555555+0000",
-    "sira_answer": "SUMMARY:\nThe log data does not contain an alert for a SQL Injection Attempt from 192.168.68.105 to 10.85.168.132 at the specified time.\n\nTHREAT DETAILS:\n- Alert: Not available in provided logs\n- Source IP: 192.168.68.105\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:03:00.555555+0000\n- Protocol: TCP\n- Severity: Not available in provided logs\n\nRISK ASSESSMENT:\n- Risk Level: LOW\n- Reason: No specific alert found for the mentioned event.\n\nRECOMMENDED ACTIONS:\n1. Review the network traffic around the specified time to identify any unusual patterns.\n2. Conduct a manual inspection of web application logs on 10.85.168.132 for suspicious activity.\n3. Monitor the source IP (192.168.68.105) for further malicious activities.",
+    "sira_answer": "SUMMARY:\nAn SQL injection attempt was detected from IP 192.168.68.105 to the web server at 10.85.168.132.\n\nTHREAT DETAILS:\n- Alert: ET WEB_SERVER SQL Injection Attempt\n- Source IP: 192.168.68.105\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:03:00.555555+0000\n- Protocol: TCP\n- Severity: 1\n\nRISK ASSESSMENT:\n- Risk Level: MEDIUM\n- Reason: The severity is set to 1, indicating a moderate risk.\n\nRECOMMENDED ACTIONS:\n1. Review the logs for additional SQL injection attempts from IP 192.168.68.105.\n2. Implement input validation and sanitization on the web application at 10.85.168.132 to prevent such attacks.\n3. Monitor the web server's access patterns and traffic for any unusual activity or further attempts.",
     "model_used": "ollama",
-    "evaluated_at": "2026-05-08T14:26:59.764205"
+    "evaluated_at": "2026-05-11T20:25:12.979521"
   },
   {
     "test_index": 2,
@@ -17,9 +17,9 @@
     "dest_ip": "10.85.168.132",
     "timestamp": "2026-04-27T09:03:30.666666+0000",
     "question": "Analyse this security alert: ET WEB_SERVER XSS Attempt Cross Site Scripting from 192.168.68.105 to 10.85.168.132 at 2026-04-27T09:03:30.666666+0000",
-    "sira_answer": "SUMMARY:\nThe log data does not contain an alert for ET WEB_SERVER XSS Attempt.\n\nTHREAT DETAILS:\n- Alert: Not available in the provided logs\n- Source IP: 192.168.68.105\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:03:30.666666+0000\n- Protocol: TCP\n- Severity: Not available in the provided logs\n\nRISK ASSESSMENT:\n- Risk Level: LOW\n- Reason: The specific alert for XSS is not present in the given log data.\n\nRECOMMENDED ACTIONS:\n1. Monitor network traffic for any unusual activity from 192.168.68.105.\n2. Review web application logs on 10.85.168.132 for potential signs of an XSS attack.\n3. Conduct a security awareness training session to educate users about preventing XSS attacks.",
+    "sira_answer": "SUMMARY:\nAn XSS (Cross Site Scripting) attempt was detected from IP 192.168.68.105 to the web server at 10.85.168.132.\n\nTHREAT DETAILS:\n- Alert: ET WEB_SERVER XSS Attempt Cross Site Scripting\n- Source IP: 192.168.68.105\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:03:30.666666+0000\n- Protocol: TCP\n- Severity: 2\n\nRISK ASSESSMENT:\n- Risk Level: HIGH\n- Reason: The XSS attempt can lead to unauthorized execution of scripts in the victim's browser, potentially leading to data theft or other malicious activities.\n\nRECOMMENDED ACTIONS:\n1. Block the source IP (192.168.68.105) from accessing the web server.\n2. Conduct a deeper inspection of the web application for vulnerabilities.\n3. Implement content security policies (CSP) on the web server to mitigate XSS attacks.\n4. Educate users about the risks of cross-site scripting and how to avoid falling victim to such attacks.",
     "model_used": "ollama",
-    "evaluated_at": "2026-05-08T14:27:13.961848"
+    "evaluated_at": "2026-05-11T20:25:24.379689"
   },
   {
     "test_index": 3,
@@ -28,9 +28,9 @@
     "dest_ip": "10.85.168.132",
     "timestamp": "2026-04-27T09:00:01.123456+0000",
     "question": "Analyse this security alert: ET SCAN Potential SSH Scan from 192.168.68.105 to 10.85.168.132 at 2026-04-27T09:00:01.123456+0000",
-    "sira_answer": "SUMMARY:\nThe log data does not contain an alert for a potential SSH scan from 192.168.68.105 to 10.85.168.132 at the specified time.\n\nTHREAT DETAILS:\n- Alert: Not available in provided logs\n- Source IP: 192.168.68.105\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:00:01.123456+0000\n- Protocol: TCP\n- Severity: Not available in provided logs\n\nRISK ASSESSMENT:\n- Risk Level: LOW\n- Reason: No specific alert or log entry found for the mentioned event.\n\nRECOMMENDED ACTIONS:\n1. Review other security logs around the specified time to identify if there are any related activities.\n2. Monitor network traffic from 192.168.68.105 and 10.85.168.132 for any unusual activity.\n3. Conduct a thorough review of the systems involved to ensure no unauthorized access has occurred.",
+    "sira_answer": "SUMMARY:\nThe log indicates an SSH scan attempt from IP 192.168.68.105 to IP 10.85.168.132 at the specified time.\n\nTHREAT DETAILS:\n- Alert: ET SCAN Potential SSH Scan\n- Source IP: 192.168.68.105\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:00:01.123456+0000\n- Protocol: TCP\n- Severity: 2\n\nRISK ASSESSMENT:\n- Risk Level: MEDIUM\n- Reason: The alert indicates a potential SSH scan, which could be an initial probing activity by an attacker.\n\nRECOMMENDED ACTIONS:\n1. Monitor the source IP (192.168.68.105) for any further suspicious activities.\n2. Review the logs for any other alerts related to this source IP.\n3. Implement rate limiting or firewall rules to restrict SSH access from this IP if necessary.",
     "model_used": "ollama",
-    "evaluated_at": "2026-05-08T14:27:29.325567"
+    "evaluated_at": "2026-05-11T20:25:34.231014"
   },
   {
     "test_index": 4,
@@ -39,9 +39,9 @@
     "dest_ip": "10.85.168.132",
     "timestamp": "2026-04-27T09:01:00.111111+0000",
     "question": "Analyse this security alert: ET SCAN Potential RDP Brute Force from 185.220.101.45 to 10.85.168.132 at 2026-04-27T09:01:00.111111+0000",
-    "sira_answer": "SUMMARY:\nThe log does not contain an alert for a potential RDP brute force attack from the specified IP and time.\n\nTHREAT DETAILS:\n- Alert: Not found in provided logs\n- Source IP: 185.220.101.45\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:01:00.111111+0000\n- Protocol: TCP\n- Severity: Not applicable (N/A)\n\nRISK ASSESSMENT:\n- Risk Level: LOW\n- Reason: The specific alert is not present in the provided logs.\n\nRECOMMENDED ACTIONS:\n1. Review other alerts and events around the specified time for any related activity.\n2. Monitor network traffic from 185.220.101.45 to 10.85.168.132 for any suspicious activity.\n3. Ensure that 10.85.168.132 has strong password policies and RDP is properly secured.",
+    "sira_answer": "SUMMARY:\nThe alert indicates a potential RDP brute force attack attempt from IP 185.220.101.45 targeting port 3389 on the destination IP 10.85.168.132.\n\nTHREAT DETAILS:\n- Alert: ET SCAN Potential RDP Brute Force\n- Source IP: 185.220.101.45\n- Destination IP: 10.85.168.132\n- Time: 2026-04-27T09:01:00.111111+0000\n- Protocol: TCP\n- Severity: 1\n\nRISK ASSESSMENT:\n- Risk Level: MEDIUM\n- Reason: The attack is attempting to gain administrator privileges, which could lead to significant damage if successful.\n\nRECOMMENDED ACTIONS:\n1. Block the source IP address 185.220.101.45 at the firewall to prevent further attempts.\n2. Increase monitoring of port 3389 for any unusual activity or additional failed login attempts.\n3. Implement stronger authentication mechanisms, such as multi-factor authentication (MFA), on the RDP service.\n4. Review and update the password policies for all user accounts with access to the destination IP address.",
     "model_used": "ollama",
-    "evaluated_at": "2026-05-08T14:27:42.916941"
+    "evaluated_at": "2026-05-11T20:25:45.168625"
   },
   {
     "test_index": 5,
@@ -50,8 +50,8 @@
     "dest_ip": "142.250.1.1",
     "timestamp": "2026-04-27T09:03:00.200000+0000",
     "question": "Analyse this TLS connection to google.com from 192.168.68.57 at 2026-04-27T09:03:00.200000+0000",
-    "sira_answer": "SUMMARY:\nNo TLS connection to google.com from 192.168.68.57 at the specified time is present in the provided logs.\n\nTHREAT DETAILS:\n- Alert: None\n- Source IP: 192.168.68.57\n- Destination IP: 8.8.8.8 (Google DNS)\n- Time: 2026-04-27T09:03:00.200000+0000\n- Protocol: UDP\n- Severity: N/A\n\nRISK ASSESSMENT:\n- Risk Level: LOW\n- Reason: No relevant event found in the provided logs for the specified time.\n\nRECOMMENDED ACTIONS:\n1. Continue monitoring network traffic for any unusual activity.\n2. Ensure that DNS queries are being logged and monitored for potential malicious activities.\n3. Verify if there is a need to implement additional security measures such as DNS filtering or rate limiting on DNS requests from internal IPs.",
+    "sira_answer": "SUMMARY:\nThe TLS connection to google.com from 192.168.68.57 is a standard HTTPS request.\n\nTHREAT DETAILS:\n- Alert: None\n- Source IP: 192.168.68.57\n- Destination IP: 8.8.8.8 (Google DNS)\n- Time: 2026-04-27T09:03:00.200000+0000\n- Protocol: TCP\n- Severity: N/A\n\nRISK ASSESSMENT:\n- Risk Level: LOW\n- Reason: The TLS connection is a standard DNS query to Google's public DNS server and does not indicate any malicious activity.\n\nRECOMMENDED ACTIONS:\n1. Monitor the network for any unusual traffic patterns from 192.168.68.57.\n2. Ensure that the endpoint with IP 192.168.68.57 is up-to-date with security patches and has a secure configuration.\n3. Review DNS query logs to ensure no other suspicious activities are occurring.",
     "model_used": "ollama",
-    "evaluated_at": "2026-05-08T14:27:56.390418"
+    "evaluated_at": "2026-05-11T20:25:54.629796"
   }
 ]
