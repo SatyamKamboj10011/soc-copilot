@@ -8,7 +8,7 @@ from langchain_core.documents import Document
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 USEFUL_TYPES = {"alert", "dns", "http", "tls", "flow"}
-MAX_EVENTS   = 150
+MAX_EVENTS   = 500
 
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
