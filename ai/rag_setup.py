@@ -1,3 +1,4 @@
+import datetime
 import json
 import shutil
 import os
@@ -72,7 +73,9 @@ def format_zeek_conn(line):
     if len(parts) < 10:
         return None
     try:
-        text  = f"Event: zeek_conn | Time: {parts[0]} | Protocol: {parts[6]}\n"
+        from datetime import datetime, timezone
+        ts = datetime.fromtimestamp(float(parts[0]), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        text  = f"Event: zeek_conn | Time: {ts} | Protocol: {parts[6]}\n"
         text += f"Source: {parts[2]}:{parts[3]} → Destination: {parts[4]}:{parts[5]}\n"
         text += f"Duration: {parts[8]}s | Bytes sent: {parts[9]} | State: {parts[11] if len(parts) > 11 else 'unknown'}\n"
         return text.strip()
@@ -125,6 +128,10 @@ def load_zeek_conns(path, max_events=100):
                 continue
             seen.add(text)
             parts = line.strip().split("\t")
+            try:
+                ts = datetime.fromtimestamp(float(parts[0]), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            except:
+                ts = parts[0] if len(parts) > 0 else ""
             docs.append(Document(
                 page_content=text,
                 metadata={
@@ -132,8 +139,8 @@ def load_zeek_conns(path, max_events=100):
                     "src_ip":     parts[2] if len(parts) > 2 else "",
                     "dest_ip":    parts[4] if len(parts) > 4 else "",
                     "timestamp":  parts[0] if len(parts) > 0 else "",
-                    "date":       "",
-                    "hour":       "",
+                    "date":       ts[:10] if len(parts) > 0 else "",
+                    "hour":       ts[11:13] if len(parts) > 0 else "",
                     "split":      "full"
 
                 }
