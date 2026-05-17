@@ -23,7 +23,7 @@ vectorstore = Chroma(
     embedding_function=embeddings
 )
 
-retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
 
 def get_llm(model, api_key=None):
@@ -94,6 +94,31 @@ def ask():
         docs = [d for d in docs if d.metadata.get('hour') == hour_filter]
     if not docs:
         docs = retriever.invoke(question)
+
+# Boost alert docs to top — always prioritise real alerts over flow/dns
+    alert_docs = [d for d in docs if d.metadata.get('event_type') == 'alert']
+    other_docs  = [d for d in docs if d.metadata.get('event_type') != 'alert']
+    docs = alert_docs + other_docs
+
+# If question contains an IP, fetch extra targeted logs for that IP
+    import re
+    ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', question)
+    if ip_match:
+        for ip in ip_match:
+            ip_docs = retriever.invoke(f"src_ip {ip} alert")
+            alert_ip_docs = [d for d in ip_docs if
+                             d.metadata.get('src_ip') == ip or
+                             d.metadata.get('dest_ip') == ip]
+        docs = alert_ip_docs + docs
+
+# Deduplicate while preserving order
+    seen = set()
+    unique_docs = []
+    for d in docs:
+        if d.page_content not in seen:
+           seen.add(d.page_content)
+           unique_docs.append(d)
+    docs = unique_docs[:15]
 
     context = "\n\n".join([d.page_content for d in docs])
 
@@ -267,5 +292,121 @@ def health():
     })
 
 
+# //ADDIING SOME IMPORTANT ENDPOINTS
+
+@app.route('/search', methods=['GET'])
+def search():
+    query  = request.args.get('q', '').strip()
+    event_type = request.args.get('type', None)
+    logs  = load_logs()
+
+    if query:
+        logs = [l for l in logs if
+                query in l.get('src_ip', '') or
+                query in l.get('dest_ip', '') or
+                query in l.get('alert', {}).get('signature', '')]
+    if event_type:
+        logs = [l for l in logs if l.get('event_type') == event_type]
+
+    return jsonify(logs[:100])  # return top 100 matches
+
+
+@app.route('/timeline', methods=['GET'])
+def timeline():
+    logs = load_logs()
+    hourly = Counter()
+    for l in logs:
+        ts = l.get('timestamp', '')
+        if len(ts) >= 13:  # crude check for valid timestamp
+            hour = ts[11:13]  # "2024-06-01T14"
+            hourly[hour] += 1
+
+    result = [{"hour": h, "count": c} for h, c in sorted(hourly.items())]
+    return jsonify(result)
+
+@app.route('/top-ips', methods=['GET'])
+def top_ips():
+    logs = load_logs()
+    limit = int(request.args.get('limit', 10))
+    ip_counts = Counter(l.get('src_ip') for l in logs if l.get('src_ip'))
+    result = [{"ip": ip, "count": count} for ip, count in ip_counts.most_common(limit)]
+    return jsonify(result)
+
+
+@app.route('/zeek-logs', methods=['GET'])
+def zeek_logs():
+    zeek_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'conn.log')
+    results = []
+    try:
+        with open(zeek_path, 'r') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue  # skip comments and empty lines
+                parts = line.strip().split('\t')
+                if len(parts) < 10:
+                    continue  # skip malformed lines
+                try:
+                    from datetime import datetime
+                    ts = datetime.fromtimestamp(float(parts[0])).strftime('%Y-%m-%dT%H:%M:%S')
+                    results.append({
+                        "timestamp": ts,
+                        "src_ip": parts[2],
+                        "src_port":  parts[3],
+                        "dest_ip":   parts[4],
+                        "dest_port": parts[5],
+                        "protocol":  parts[6],
+                        "duration":  parts[8],
+                        "state":     parts[11] if len(parts) > 11 else "unknown"
+                    })
+                except:
+                    continue  # skip lines with parsing errors
+    except FileNotFoundError:
+        return jsonify({"error": "Zeek conn.log not found"}), 404
+    return jsonify(results[:100])  # return top 100 entries
+
+@app.route('/correlate/ip', methods=['GET'])
+def correlate_ip():
+    ip = request.args.get('ip', '').strip()
+    if not ip:
+        return jsonify({"error": "IP parameter is required"}), 400
+    
+    logs = load_logs()
+    suricata_events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
+
+    zeek_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'conn.log')
+    zeek_events = []
+    try:
+        with open(zeek_path, 'r') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                parts = line.strip().split('\t')
+                if len(parts) < 10:
+                    continue
+                if ip in parts[2] or ip in parts[4]:
+                    try:
+                        from datetime import datetime
+                        ts = datetime.fromtimestamp(float(parts[0])).strftime('%Y-%m-%dT%H:%M:%S')
+                        zeek_events.append({
+                            "timestamp": ts,
+                            "src_ip":    parts[2],
+                            "dest_ip":   parts[4],
+                            "protocol":  parts[6],
+                            "duration":  parts[8],
+                            "state":     parts[11] if len(parts) > 11 else "unknown"
+                        })
+                    except:
+                        continue
+    except FileNotFoundError:
+        pass
+
+    return jsonify({
+        "ip": ip,
+        "suricata_events": suricata_events[:50],  # limit to top 50
+        "zeek_events": zeek_events[:50],         # limit to top 50
+        "total_suricata": len(suricata_events),
+        "total_zeek": len(zeek_events)
+    })
+                
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

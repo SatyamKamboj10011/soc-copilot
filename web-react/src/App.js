@@ -289,6 +289,43 @@ const sharedCss = `
   .welcome-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
   .wtag { font-family: var(--mono); font-size: 8px; letter-spacing: 1px; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--border2); color: var(--text-dim); }
 
+/* ── PAGES ── */
+  .page { flex: 1; overflow-y: auto; padding: 24px; background: var(--bg); }
+  .page-title { font-size: 20px; font-weight: 800; letter-spacing: 2px; color: var(--text); margin-bottom: 4px; }
+  .page-sub { font-family: var(--mono); font-size: 10px; color: var(--text-mid); letter-spacing: 2px; margin-bottom: 24px; }
+  .page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .page-card { background: var(--panel); border: 1px solid var(--border2); border-radius: 6px; padding: 20px; }
+  .page-card-title { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; }
+  .inv-search { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; padding: 10px 16px; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; margin-bottom: 16px; }
+  .inv-search:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .inv-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  .inv-table th { text-align: left; padding: 8px 12px; color: var(--text-dim); font-size: 9px; letter-spacing: 2px; border-bottom: 1px solid var(--border2); }
+  .inv-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-mid); }
+  .inv-table tr:hover td { background: var(--bg3); color: var(--text); cursor: pointer; }
+  .inv-type-badge { display: inline-block; padding: 2px 6px; border-radius: 2px; font-size: 8px; font-weight: 700; text-transform: uppercase; }
+  .inv-type-alert { background: var(--red-dim); color: var(--red); }
+  .inv-type-dns   { background: var(--accent-dim); color: var(--accent); }
+  .inv-type-http  { background: var(--green-dim); color: var(--green); }
+  .inv-type-tls   { background: var(--purple-dim); color: var(--purple); }
+  .inv-type-flow  { background: var(--bg3); color: var(--text-dim); }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: flex; align-items: center; justify-content: center; }
+  .modal { background: var(--panel); border: 1px solid var(--border2); border-radius: 8px; padding: 24px; width: 600px; max-width: 90vw; max-height: 80vh; overflow-y: auto; position: relative; }
+  .modal-close { position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 18px; }
+  .modal-close:hover { color: var(--red); }
+  .modal-title { font-size: 14px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
+  .modal-sub { font-family: var(--mono); font-size: 9px; color: var(--text-mid); margin-bottom: 20px; }
+  .modal-row { display: flex; gap: 8px; margin-bottom: 10px; align-items: flex-start; }
+  .modal-key { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 120px; }
+  .modal-val { font-family: var(--mono); font-size: 11px; color: var(--text); font-weight: 700; }
+  .ask-sira-btn { margin-top: 16px; width: 100%; padding: 10px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; border-radius: 4px; color: var(--bg); font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; }
+  .ask-sira-btn:hover { opacity: 0.9; }
+  .top-ip-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .top-ip-addr { font-family: var(--mono); font-size: 11px; color: var(--accent); min-width: 140px; }
+  .top-ip-bar { flex: 1; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .top-ip-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 3px; }
+  .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
+
+
   @media (max-width: 768px) {
     body { overflow: auto; }
     .app { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
@@ -408,6 +445,153 @@ function SiraMessage({ text }) {
   );
 }
 
+function AnalyticsPage({ stats }) {
+  const [topIPs, setTopIPs] = useState([]);
+  const [timeline, setTimeline] = useState([]);
+
+  useEffect(() => {
+    fetch(`${FLASK_URL}/top-ips?limit=10`).then(r => r.json()).then(setTopIPs).catch(() => {});
+    fetch(`${FLASK_URL}/timeline`).then(r => r.json()).then(setTimeline).catch(() => {});
+  }, []);
+
+  const maxCount = topIPs.length > 0 ? topIPs[0].count : 1;
+  const maxHour  = timeline.length > 0 ? Math.max(...timeline.map(t => t.count)) : 1;
+
+  const breakdown = stats?.event_breakdown || {};
+  const breakdownTotal = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  const breakdownColors = { alert: "var(--red)", dns: "var(--accent)", http: "var(--green)", tls: "var(--purple)", flow: "var(--text-dim)" };
+
+  return (
+    <div className="page">
+      <div className="page-title">Analytics</div>
+      <div className="page-sub">REAL-TIME EVENT ANALYSIS FROM YOUR LOGS</div>
+
+      <div className="page-grid">
+        {/* Events per hour bar chart */}
+        <div className="page-card" style={{ gridColumn: "1 / -1" }}>
+          <div className="page-card-title">Events Per Hour</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 120 }}>
+            {timeline.map((t, i) => (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <div style={{ width: "100%", height: `${(t.count / maxHour) * 100}px`, background: "linear-gradient(180deg, var(--accent), var(--accent2))", borderRadius: "2px 2px 0 0", minHeight: 2 }} />
+                <span style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)" }}>{t.hour}h</span>
+              </div>
+            ))}
+            {timeline.length === 0 && <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>Loading...</div>}
+          </div>
+        </div>
+
+        {/* Event breakdown */}
+        <div className="page-card">
+          <div className="page-card-title">Event Type Breakdown</div>
+          {Object.entries(breakdown).map(([type, count]) => (
+            <div key={type} className="top-ip-row">
+              <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: breakdownColors[type] || "var(--text)", minWidth: 60, textTransform: "uppercase" }}>{type}</span>
+              <div className="top-ip-bar"><div className="top-ip-fill" style={{ width: `${(count / breakdownTotal) * 100}%`, background: breakdownColors[type] || "var(--accent)" }} /></div>
+              <span className="top-ip-count">{count}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Top IPs */}
+        <div className="page-card">
+          <div className="page-card-title">Top 10 Attacker IPs</div>
+          {topIPs.map((item, i) => (
+            <div key={i} className="top-ip-row">
+              <span className="top-ip-addr">{item.ip}</span>
+              <div className="top-ip-bar"><div className="top-ip-fill" style={{ width: `${(item.count / maxCount) * 100}%` }} /></div>
+              <span className="top-ip-count">{item.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvestigationPage({ onAskSira }) {
+  const [logs, setLogs]           = useState([]);
+  const [search, setSearch]       = useState("");
+  const [selected, setSelected]   = useState(null);
+
+  useEffect(() => {
+    fetch(`${FLASK_URL}/logs?limit=200`).then(r => r.json()).then(setLogs).catch(() => {});
+  }, []);
+
+  const filtered = logs.filter(l =>
+    !search ||
+    l.src_ip?.includes(search) ||
+    l.dest_ip?.includes(search) ||
+    l.alert?.signature?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="page">
+      <div className="page-title">Investigation</div>
+      <div className="page-sub">SEARCH AND ANALYSE LOG EVENTS</div>
+
+      <input
+        className="inv-search"
+        placeholder="Search by IP address or alert signature..."
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+      />
+
+      <div className="page-card">
+        <table className="inv-table">
+          <thead>
+            <tr>
+              <th>TYPE</th>
+              <th>TIME</th>
+              <th>SOURCE IP</th>
+              <th>DEST IP</th>
+              <th>DETAILS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.slice(0, 100).map((l, i) => (
+              <tr key={i} onClick={() => setSelected(l)}>
+                <td><span className={`inv-type-badge inv-type-${l.event_type}`}>{l.event_type}</span></td>
+                <td>{l.timestamp?.substring(11, 19)}</td>
+                <td style={{ color: "var(--accent)" }}>{l.src_ip}</td>
+                <td>{l.dest_ip}</td>
+                <td style={{ color: "var(--text-dim)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {l.alert?.signature || l.dns?.rrname || l.http?.hostname || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && (
+        <div className="modal-overlay" onClick={() => setSelected(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setSelected(null)}>✕</button>
+            <div className="modal-title">Event Details</div>
+            <div className="modal-sub">{selected.timestamp}</div>
+            <div className="modal-row"><span className="modal-key">Type</span><span className="modal-val">{selected.event_type?.toUpperCase()}</span></div>
+            <div className="modal-row"><span className="modal-key">Source IP</span><span className="modal-val" style={{ color: "var(--accent)" }}>{selected.src_ip}:{selected.src_port}</span></div>
+            <div className="modal-row"><span className="modal-key">Destination IP</span><span className="modal-val">{selected.dest_ip}:{selected.dest_port}</span></div>
+            <div className="modal-row"><span className="modal-key">Protocol</span><span className="modal-val">{selected.proto}</span></div>
+            {selected.alert && <>
+              <div className="modal-row"><span className="modal-key">Alert</span><span className="modal-val" style={{ color: "var(--red)" }}>{selected.alert.signature}</span></div>
+              <div className="modal-row"><span className="modal-key">Category</span><span className="modal-val">{selected.alert.category}</span></div>
+              <div className="modal-row"><span className="modal-key">Severity</span><span className="modal-val">{selected.alert.severity}</span></div>
+            </>}
+            {selected.dns && <div className="modal-row"><span className="modal-key">DNS Query</span><span className="modal-val">{selected.dns.rrname}</span></div>}
+            {selected.http && <div className="modal-row"><span className="modal-key">HTTP</span><span className="modal-val">{selected.http.http_method} {selected.http.hostname}{selected.http.url}</span></div>}
+            <button className="ask-sira-btn" onClick={() => {
+              onAskSira(`Analyse this ${selected.event_type} event from ${selected.src_ip} to ${selected.dest_ip} at ${selected.timestamp}`);
+              setSelected(null);
+            }}>⬡ ASK SIRA ABOUT THIS EVENT</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MAIN APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [selectedModel, setSelectedModel]   = useState("ollama");
@@ -423,6 +607,9 @@ export default function App() {
   const [showScrollBtn, setShowScrollBtn]   = useState(false);
   const [unreadCount, setUnreadCount]       = useState(0);
   const [sidebarWidth, setSidebarWidth]     = useState(320);
+  const [stats, setStats]                   = useState(null);
+  const [health, setHealth] = useState(null);
+  const [page, setPage] = useState("dashboard");
 
   const messagesRef = useRef(null);
   const toastTimer  = useRef(null);
@@ -468,7 +655,18 @@ export default function App() {
   useEffect(() => { const t = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
-    fetch(`${FLASK_URL}/logs`).then(r => r.json()).then(data => { if (Array.isArray(data) && data.length > 0) setAlerts(data); }).catch(() => {});
+    const fetchLogs = () => fetch(`${FLASK_URL}/logs`).then(r => r.json()).then(data => { if (Array.isArray(data) && data.length > 0) setAlerts(data); }).catch(() => {});
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(data => setStats(data)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch(`${FLASK_URL}/health`).then(r => r.json()).then(data => setHealth(data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -533,12 +731,25 @@ export default function App() {
               <div className="brand-sub">SIRA v3 — Threat Intelligence</div>
             </div>
           </div>
+
+          <div style={{ display: "flex", gap: 4 }}>
+  {["dashboard", "analytics", "investigation"].map(p => (
+    <button key={p} onClick={() => setPage(p)} style={{
+      fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase",
+      padding: "5px 14px", borderRadius: 2, cursor: "pointer", transition: "all 0.15s",
+      background: page === p ? "var(--accent)" : "transparent",
+      color: page === p ? "var(--bg)" : "var(--text-dim)",
+      border: page === p ? "1px solid var(--accent)" : "1px solid var(--border2)"
+    }}>{p}</button>
+  ))}
+</div>
+
           <div className="nav-right">
             <div className="nav-status">
-              <div className="status-pill"><div className="ndot ndot-green" />SURICATA</div>
-              <div className="status-pill"><div className="ndot ndot-green" />ZEEK</div>
-              <div className="status-pill"><div className="ndot ndot-red" />{alertCount} ALERTS</div>
-              <div className="status-pill"><div className="ndot ndot-cyan" />AI READY</div>
+             <div className="status-pill"><div className={`ndot ${health?.status === "ok" ? "ndot-green" : "ndot-red"}`} />SURICATA</div>
+<div className="status-pill"><div className={`ndot ${health?.status === "ok" ? "ndot-green" : "ndot-red"}`} />ZEEK</div>
+<div className="status-pill"><div className="ndot ndot-red" />{stats?.alert_count ?? alertCount} ALERTS</div>
+<div className="status-pill"><div className={`ndot ${health?.ollama === "ok" ? "ndot-cyan" : "ndot-red"}`} />AI {health?.ollama === "ok" ? "READY" : "OFFLINE"}</div>
               <div className="nav-time">{time}</div>
             </div>
             <button className="theme-toggle" onClick={() => { setIsDark(d => !d); showToast(isDark ? "Light theme" : "Dark theme"); }}>
@@ -568,10 +779,10 @@ export default function App() {
 
           <div className="section-label">Overview</div>
           <div className="stats-grid" style={{ marginTop: 10 }}>
-            <div className="stat"><div className="stat-glow c" /><div className="stat-label">Total Events</div><div className="stat-value c">{alerts.length || "--"}</div></div>
-            <div className="stat"><div className="stat-glow r" /><div className="stat-label">Alerts</div><div className="stat-value r">{String(alertCount).padStart(2, "0")}</div></div>
-            <div className="stat"><div className="stat-glow o" /><div className="stat-label">Unique IPs</div><div className="stat-value o">{uniqueIPs || "--"}</div></div>
-            <div className="stat"><div className="stat-glow g" /><div className="stat-label">Status</div><div className="stat-value g">ONLINE</div></div>
+           <div className="stat"><div className="stat-glow c" /><div className="stat-label">Total Events</div><div className="stat-value c">{stats?.total_events || alerts.length || "--"}</div></div>
+<div className="stat"><div className="stat-glow r" /><div className="stat-label">Alerts</div><div className="stat-value r">{String(stats?.alert_count ?? alertCount).padStart(2, "0")}</div></div>
+<div className="stat"><div className="stat-glow o" /><div className="stat-label">Unique IPs</div><div className="stat-value o">{stats?.unique_ips || uniqueIPs || "--"}</div></div>
+<div className="stat"><div className="stat-glow g" /><div className="stat-label">Status</div><div className="stat-value g">ONLINE</div></div>
           </div>
 
           <div className="panel-divider" />
@@ -617,8 +828,13 @@ export default function App() {
           </div>
         </aside>
 
-        {/* ── CHAT COLUMN ── */}
-        <div className="chat-col">
+        {/* ── MAIN CONTENT ── */}
+        {page === "analytics" ? (
+       <AnalyticsPage stats={stats} />
+     ) : page === "investigation" ? (
+       <InvestigationPage onAskSira={(q) => { setPage("dashboard"); setTimeout(() => sendMessage(q), 300); }} />
+     ) : (
+<div className="chat-col">
           <div className="chat-header">
             <div className="agent-avatar">⬡</div>
             <div>
@@ -709,8 +925,10 @@ export default function App() {
             </div>
           </div>
         </div>
+)}
 
       </div>
+            
     </>
   );
 }
