@@ -12,6 +12,12 @@ from collections import Counter
 import sqlite3
 import json
 import os
+import shutil
+import subprocess
+from werkzeug.utils import secure_filename
+import csv 
+import io
+from flask import Response
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -455,6 +461,109 @@ def correlate_ip():
         "total_suricata": len(suricata_events),
         "total_zeek": len(zeek_events)
     })
-                
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'file' not in request.files:
+        return jsonify({"error" : "No file provided"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"errror" : "No file selected"}), 400
+
+    filename = secure_filename(file.filename)
+    if filename not in ['eve.json', 'conn.log']:
+        return jsonify({"error": "Invalid file name. Only eve.json and conn.log are accepted."}), 400
+
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'logs', filename)
+
+    # backup existing file
+    backup_path = save_path + '.bak'
+    if os.path.exists(save_path):
+        shutil.copy(save_path, backup_path)
+
+    file.save(save_path)
+
+    # rebuild ChromaDB
+    try:
+        rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
+        subprocess.run(['python', rag_script], timeout=120, check=True)
+        return jsonify({"message": f"{filename} uploaded and ChromaDB rebuilt successfully"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "ChromaDB rebuild timed out"}), 500
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
+
+@app.route('/export', methods=['GET'])
+def export():
+    logs = load_logs()
+    event_type = request.args.get('type', None)
+
+    if event_type:
+        logs = [l for l in logs if l.get('event_type') == event_type]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # header
+    writer.writerow(['timestamp', 'event_type', 'src_ip', 'src_port', 'dest_ip', 'dest_port', 'proto', 'alert_signature', 'alert_category', 'severity'])
+
+    for l in logs:
+        alert = l.get('alert', {})
+        writer.writerow([
+            l.get('timestamp', ''),
+            l.get('event_type', ''),
+            l.get('src_ip', ''),
+            l.get('src_port', ''),
+            l.get('dest_ip', ''),
+            l.get('dest_port', ''),
+            l.get('proto', ''),
+            alert.get('signature', ''),
+            alert.get('category', ''),
+            alert.get('severity', '')
+        ])
+
+    output.seek(0)
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={"Content-Disposition": "attachment; filename=soc-copilot-export.csv"}
+    )
+
+@app.route('/ask-all', methods=['POST'])
+def ask_all():
+    data = request.json
+    question = data.get('question', '')
+
+    docs = retriever.invoke(question)
+    alert_docs = [d for d in docs if d.metadata.get('event_type') == 'alert']
+    other_docs  = [d for d in docs if d.metadata.get('event_type') != 'alert']
+    docs = (alert_docs + other_docs)[:10]
+    context = "\n\n".join([d.page_content for d in docs])
+
+    prompt = f"""You are SIRA, Security Incident Response Assistant.
+Analyse the log data below and answer the question clearly and concisely.
+Log Data:
+{context}
+Question: {question}
+Answer:"""
+
+    results = {}
+    models_to_try = [
+        ("groq",   ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0)),
+        ("gemini", ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0)),
+        ("mistral",ChatMistralAI(model="mistral-small-latest", mistral_api_key=os.getenv("MISTRAL_API_KEY"))),
+    ]
+
+    for name, llm in models_to_try:
+        try:
+            results[name] = llm.invoke(prompt).content
+        except Exception as e:
+            results[name] = f"Error: {str(e)[:100]}"
+
+    return jsonify(results)
+
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True, port=5000)
