@@ -510,6 +510,12 @@ export default function App() {
   const [health, setHealth] = useState(null);
   const [page, setPage] = useState("dashboard");
 
+ const [showUpload, setShowUpload] = useState(false);
+ const [uploadFile, setUploadFile] = useState(null);
+ const [uploadStatus, setUploadStatus] = useState("");
+ const [uploading, setUploading] = useState(false);
+
+
   const messagesRef  = useRef(null);
   const toastTimer   = useRef(null);
   const isResizing   = useRef(false);
@@ -632,7 +638,34 @@ export default function App() {
     setLoading(false);
   };
 
+
+   const handleUpload = async () => {
+  if (!uploadFile) { setUploadStatus("No file selected"); return; }
+  setUploading(true);
+  setUploadStatus("Uploading...");
+  const formData = new FormData();
+  formData.append("file", uploadFile);
+  try {
+    const res = await fetch(`${FLASK_URL}/upload`, { method: "POST", body: formData });
+    const data = await res.json();
+    if (data.message) {
+      setUploadStatus("✓ " + data.message);
+      showToast("Logs uploaded successfully");
+      setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000);
+    } else {
+      setUploadStatus("✗ " + (data.error || "Upload failed"));
+    }
+  } catch {
+    setUploadStatus("✗ Cannot connect to Flask");
+  }
+  setUploading(false);
+};
+
   const alertCount = alerts.filter(a => a.event_type === "alert").length;
+  
+ 
+
+    
   const uniqueIPs  = [...new Set(alerts.map(a => a.src_ip).filter(Boolean))].length;
   const loadingLabel = { ollama: "SIRA", ollama_phi3: "PHI3", groq: "GROQ", gemini: "GEMINI", mistral: "MISTRAL" };
 
@@ -640,6 +673,53 @@ export default function App() {
     <>
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
       {toast && <div className="toast">✓ {toast.toUpperCase()}</div>}
+       
+       {showUpload && (
+  <div className="modal-overlay" onClick={() => setShowUpload(false)}>
+    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
+      <button className="modal-close" onClick={() => setShowUpload(false)}>✕</button>
+      <div className="modal-title">Upload Log File</div>
+      <div className="modal-sub">REPLACE EVE.JSON OR CONN.LOG — CHROMADB WILL REBUILD AUTOMATICALLY</div>
+
+      <div style={{ margin: "20px 0" }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>SELECT FILE</div>
+        <input type="file" accept=".json,.log"
+          onChange={e => { setUploadFile(e.target.files[0]); setUploadStatus(""); }}
+          style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text)", background: "var(--bg3)",
+            border: "1px solid var(--border2)", borderRadius: 4, padding: "10px", width: "100%" }} />
+        {uploadFile && (
+          <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>
+            ▸ {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.8 }}>
+        ⚠ Only <span style={{ color: "var(--orange)" }}>eve.json</span> and <span style={{ color: "var(--orange)" }}>conn.log</span> are accepted.<br />
+        Existing file will be backed up before replacing.
+      </div>
+
+      {uploadStatus && (
+        <div style={{ fontFamily: "var(--mono)", fontSize: 11, padding: "8px 12px", borderRadius: 4, marginBottom: 16,
+          background: uploadStatus.startsWith("✓") ? "var(--green-dim)" : "var(--red-dim)",
+          color: uploadStatus.startsWith("✓") ? "var(--green)" : "var(--red)",
+          border: `1px solid ${uploadStatus.startsWith("✓") ? "rgba(0,255,157,0.3)" : "rgba(255,61,90,0.3)"}` }}>
+          {uploadStatus}
+        </div>
+      )}
+
+      <button onClick={handleUpload} disabled={!uploadFile || uploading}
+        style={{ width: "100%", padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))",
+          border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)",
+          fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: uploadFile && !uploading ? "pointer" : "not-allowed",
+          opacity: uploadFile && !uploading ? 1 : 0.4, textTransform: "uppercase" }}>
+        {uploading ? "UPLOADING..." : "⬆ UPLOAD AND REBUILD"}
+      </button>
+    </div>
+  </div>
+)}
+
+
 
       <div className="app" style={{ gridTemplateColumns: `${sidebarWidth}px 1fr` }}>
 
@@ -725,6 +805,20 @@ export default function App() {
           <div className="panel-divider" />
 
           <div className="feed-wrap">
+
+          <div style={{ padding: "0 16px 10px" }}>
+  <button onClick={() => setShowUpload(true)} style={{
+    width: "100%", padding: "8px", background: "var(--bg3)",
+    border: "1px solid var(--border2)", borderRadius: 4,
+    color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 9,
+    letterSpacing: 1, textTransform: "uppercase", cursor: "pointer",
+    transition: "all 0.15s"
+  }}
+  onMouseEnter={e => e.target.style.borderColor = "var(--accent)"}
+  onMouseLeave={e => e.target.style.borderColor = "var(--border2)"}
+  >⬆ Upload Logs</button>
+</div>
+
             <div className="section-label">Live Feed</div>
             <div style={{ display: "flex", gap: 4, padding: "8px 16px 6px", flexWrap: "wrap" }}>
               {["all", "alert", "dns", "http", "tls", "flow"].map(f => (
