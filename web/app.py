@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 from werkzeug.utils import secure_filename
 import csv 
 import io
@@ -27,6 +28,7 @@ CORS(app)
 
 # JWT Config
 app.config["JWT_SECRET_KEY"] = "soc-copilot-secret-key-2024"
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 jwt = JWTManager(app)
 bcrypt = Bcrypt(app)
 
@@ -47,6 +49,27 @@ def init_db():
             email      TEXT NOT NULL,
             password   TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            username    TEXT NOT NULL,
+            session_id  TEXT NOT NULL,
+            role        TEXT NOT NULL,
+            message     TEXT NOT NULL,
+            model_used  TEXT DEFAULT 'ollama',
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            session_id  TEXT PRIMARY KEY,
+            username    TEXT NOT NULL,
+            title       TEXT DEFAULT 'New Session',
+            model_used  TEXT DEFAULT 'ollama',
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
@@ -395,10 +418,10 @@ def zeek_logs():
         with open(zeek_path, 'r') as f:
             for line in f:
                 if line.startswith('#'):
-                    continue  # skip comments and empty lines
+                    continue
                 parts = line.strip().split('\t')
                 if len(parts) < 10:
-                    continue  # skip malformed lines
+                    continue
                 try:
                     from datetime import datetime
                     ts = datetime.fromtimestamp(float(parts[0])).strftime('%Y-%m-%dT%H:%M:%S')
@@ -413,17 +436,18 @@ def zeek_logs():
                         "state":     parts[11] if len(parts) > 11 else "unknown"
                     })
                 except:
-                    continue  # skip lines with parsing errors
+                    continue
     except FileNotFoundError:
         return jsonify({"error": "Zeek conn.log not found"}), 404
-    return jsonify(results[:100])  # return top 100 entries
+    return jsonify(results[:100])
+
 
 @app.route('/correlate/ip', methods=['GET'])
 def correlate_ip():
     ip = request.args.get('ip', '').strip()
     if not ip:
         return jsonify({"error": "IP parameter is required"}), 400
-    
+
     logs = load_logs()
     suricata_events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
 
@@ -456,20 +480,21 @@ def correlate_ip():
 
     return jsonify({
         "ip": ip,
-        "suricata_events": suricata_events[:50],  # limit to top 50
-        "zeek_events": zeek_events[:50],         # limit to top 50
+        "suricata_events": suricata_events[:50],
+        "zeek_events": zeek_events[:50],
         "total_suricata": len(suricata_events),
         "total_zeek": len(zeek_events)
     })
+
 
 @app.route('/upload', methods=['POST'])
 def upload():
     if 'file' not in request.files:
         return jsonify({"error" : "No file provided"}), 400
-    
+
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"errror" : "No file selected"}), 400
+        return jsonify({"error" : "No file selected"}), 400
 
     filename = secure_filename(file.filename)
     if filename not in ['eve.json', 'conn.log']:
@@ -477,14 +502,12 @@ def upload():
 
     save_path = os.path.join(os.path.dirname(__file__), '..', 'logs', filename)
 
-    # backup existing file
     backup_path = save_path + '.bak'
     if os.path.exists(save_path):
         shutil.copy(save_path, backup_path)
 
     file.save(save_path)
 
-    # rebuild ChromaDB
     try:
         rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
         subprocess.run(['python', rag_script], timeout=120, check=True)
@@ -493,6 +516,7 @@ def upload():
         return jsonify({"error": "ChromaDB rebuild timed out"}), 500
     except subprocess.CalledProcessError as e:
         return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
+
 
 @app.route('/export', methods=['GET'])
 def export():
@@ -505,7 +529,6 @@ def export():
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # header
     writer.writerow(['timestamp', 'event_type', 'src_ip', 'src_port', 'dest_ip', 'dest_port', 'proto', 'alert_signature', 'alert_category', 'severity'])
 
     for l in logs:
@@ -529,6 +552,7 @@ def export():
         mimetype='text/csv',
         headers={"Content-Disposition": "attachment; filename=soc-copilot-export.csv"}
     )
+
 
 @app.route('/ask-all', methods=['POST'])
 def ask_all():
@@ -564,6 +588,99 @@ Answer:"""
     return jsonify(results)
 
 
+# ── HISTORY ENDPOINTS ────────────────────────────────────────────────────────
+
+@app.route('/history/sessions', methods=['GET'])
+@jwt_required()
+def get_sessions():
+    username = get_jwt_identity()
+    conn     = get_db()
+    sessions = conn.execute(
+        """SELECT s.session_id, s.title, s.model_used, s.created_at, s.updated_at,
+                  COUNT(c.id) as message_count
+           FROM chat_sessions s
+           LEFT JOIN chat_history c ON s.session_id = c.session_id
+           WHERE s.username = ?
+           GROUP BY s.session_id
+           ORDER BY s.updated_at DESC""",
+        (username,)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(s) for s in sessions])
+
+
+@app.route('/history/sessions/<session_id>', methods=['GET'])
+@jwt_required()
+def get_session_messages(session_id):
+    username = get_jwt_identity()
+    conn     = get_db()
+    messages = conn.execute(
+        """SELECT role, message, model_used, created_at
+           FROM chat_history
+           WHERE session_id = ? AND username = ?
+           ORDER BY created_at ASC""",
+        (session_id, username)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(m) for m in messages])
+
+
+@app.route('/history/sessions/<session_id>', methods=['DELETE'])
+@jwt_required()
+def delete_session(session_id):
+    username = get_jwt_identity()
+    conn     = get_db()
+    conn.execute("DELETE FROM chat_history WHERE session_id = ? AND username = ?", (session_id, username))
+    conn.execute("DELETE FROM chat_sessions WHERE session_id = ? AND username = ?", (session_id, username))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Session deleted"})
+
+
+@app.route('/history/save', methods=['POST'])
+@jwt_required()
+def save_message():
+    username   = get_jwt_identity()
+    data       = request.json
+    session_id = data.get('session_id')
+    role       = data.get('role')
+    message    = data.get('message')
+    model_used = data.get('model_used', 'ollama')
+    title      = data.get('title', 'Security Analysis')
+
+    if not session_id or not role or not message:
+        return jsonify({"error": "session_id, role, message required"}), 400
+
+    conn = get_db()
+    conn.execute(
+        """INSERT INTO chat_sessions (session_id, username, title, model_used, updated_at)
+           VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(session_id) DO UPDATE SET updated_at=CURRENT_TIMESTAMP""",
+        (session_id, username, title, model_used)
+    )
+    conn.execute(
+        """INSERT INTO chat_history (username, session_id, role, message, model_used)
+           VALUES (?, ?, ?, ?, ?)""",
+        (username, session_id, role, message, model_used)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Saved"}), 201
+
+
+@app.route('/history/clear-all', methods=['DELETE'])
+@jwt_required()
+def clear_all_history():
+    username = get_jwt_identity()
+    conn     = get_db()
+    conn.execute("DELETE FROM chat_history WHERE username = ?", (username,))
+    conn.execute("DELETE FROM chat_sessions WHERE username = ?", (username,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "All history cleared"})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True, port=5000)

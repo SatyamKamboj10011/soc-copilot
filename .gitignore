@@ -15,3 +15,7 @@ web-react/node_modules/
 # Environment files with API keys
 .env
 *.env
+
+# local files
+users.db
+start.bat
