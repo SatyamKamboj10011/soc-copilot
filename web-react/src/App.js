@@ -95,8 +95,6 @@ const sharedCss = `
   ::-webkit-scrollbar { width: 2px; }
   ::-webkit-scrollbar-thumb { background: var(--border2); }
   .app { position: relative; z-index: 1; display: grid; grid-template-rows: 52px 1fr; grid-template-columns: var(--sidebar-width, 320px) 1fr; height: 100vh; width: 100vw; }
-
-  /* ── TOPNAV ── */
   .topnav { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--border); position: relative; z-index: 10; }
   .topnav::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0.4; }
   .nav-brand { display: flex; align-items: center; gap: 10px; }
@@ -123,8 +121,6 @@ const sharedCss = `
   .toggle-track.on { background: var(--accent); }
   .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: white; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
   .toggle-thumb.on { transform: translateX(14px); }
-
-  /* ── LEFT PANEL ── */
   .left-panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
   .section-label { font-family: var(--mono); font-size: 8px; font-weight: 700; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; }
   .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border2); }
@@ -169,8 +165,6 @@ const sharedCss = `
   .feed-ips { font-family: var(--mono); font-size: 8px; color: var(--text-mid); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .feed-src { color: var(--accent); }
   .feed-time { font-family: var(--mono); font-size: 7px; color: var(--text-dim); flex-shrink: 0; }
-
-  /* ── CHAT ── */
   .chat-col { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
   .chat-header { display: flex; align-items: center; gap: 12px; padding: 0 20px; height: 52px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border); }
   .agent-avatar { width: 36px; height: 36px; flex-shrink: 0; background: linear-gradient(135deg, var(--accent), var(--purple)); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 0 15px var(--accent-glow); }
@@ -180,8 +174,6 @@ const sharedCss = `
   .model-chip { margin-left: auto; font-family: var(--mono); font-size: 8px; letter-spacing: 1px; padding: 4px 10px; border-radius: 2px; background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,229,255,0.2); }
   .clear-btn { background: transparent; border: 1px solid var(--border2); color: var(--text-dim); padding: 5px 12px; border-radius: 3px; font-family: var(--mono); font-size: 9px; letter-spacing: 1px; cursor: pointer; transition: all 0.15s; text-transform: uppercase; }
   .clear-btn:hover { border-color: var(--red); color: var(--red); }
-
-  /* ── MESSAGES ── */
   .messages-wrap { flex: 1; position: relative; overflow: hidden; }
   .messages { height: 100%; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
   .msg { display: flex; }
@@ -192,61 +184,93 @@ const sharedCss = `
   .bubble { padding: 12px 16px; font-size: 13px; line-height: 1.7; border-radius: 2px; }
   .msg.ai .bubble { background: transparent; border: none; padding: 0; width: 100%; }
   .msg.user .bubble { background: var(--accent-dim); border: 1px solid var(--accent-glow); color: var(--text); }
-
+  
   /* ── SIRA RESPONSE CARDS ── */
-  .sira-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
-  .sira-section {
-    background: var(--bg3);
-    border: 1px solid var(--border2);
-    border-radius: 6px;
-    padding: 10px 14px;
-    position: relative;
-    overflow: hidden;
-    animation: cardIn 0.3s ease both;
-  }
-  .sira-section.full-width { grid-column: 1 / -1; }
+  .sira-response { width: 100%; font-family: var(--sans); animation: cardIn 0.3s ease both; }
   @keyframes cardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-
-  .sira-section::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
-  .sira-section.summary::before  { background: linear-gradient(90deg, transparent, var(--accent), transparent); }
-  .sira-section.threat::before   { background: linear-gradient(90deg, transparent, var(--red), transparent); }
-  .sira-section.means::before    { background: linear-gradient(90deg, transparent, var(--purple), transparent); }
-  .sira-section.risk::before     { background: linear-gradient(90deg, transparent, var(--orange), transparent); }
-  .sira-section.actions::before  { background: linear-gradient(90deg, transparent, var(--green), transparent); }
-
-  .sira-section.summary { border-left: 2px solid var(--accent); }
-  .sira-section.threat  { border-left: 2px solid var(--red); }
-  .sira-section.means   { border-left: 2px solid var(--purple); }
-  .sira-section.risk    { border-left: 2px solid var(--orange); }
-  .sira-section.actions { border-left: 2px solid var(--green); }
-
-  .sira-heading { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-  .sira-heading.summary { color: var(--accent); }
-  .sira-heading.threat  { color: var(--red); }
-  .sira-heading.means   { color: var(--purple); }
-  .sira-heading.risk    { color: var(--orange); }
-  .sira-heading.actions { color: var(--green); }
-
-  .sira-body { font-family: var(--sans); font-size: 12px; line-height: 1.65; color: var(--text-mid); }
-  .sira-key { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
-  .sira-val { font-family: var(--mono); font-size: 10px; color: var(--text); font-weight: 700; }
-
-  .risk-badge { display: inline-block; font-family: var(--mono); font-weight: 900; letter-spacing: 3px; border-radius: 3px; }
-  .risk-critical { color: var(--red);    background: rgba(255,61,90,0.15);  border: 1px solid rgba(255,61,90,0.6);  box-shadow: 0 0 20px rgba(255,61,90,0.25);  font-size: 22px; padding: 8px 18px; }
-  .risk-high     { color: var(--red);    background: rgba(255,61,90,0.12);  border: 1px solid rgba(255,61,90,0.4);  box-shadow: 0 0 14px rgba(255,61,90,0.2);   font-size: 20px; padding: 6px 16px; }
-  .risk-medium   { color: var(--orange); background: var(--orange-dim);     border: 1px solid rgba(255,170,0,0.4);  box-shadow: 0 0 14px rgba(255,170,0,0.2);   font-size: 20px; padding: 6px 16px; }
-  .risk-low      { color: var(--green);  background: var(--green-dim);      border: 1px solid rgba(0,255,157,0.4);  box-shadow: 0 0 14px rgba(0,255,157,0.2);   font-size: 20px; padding: 6px 16px; }
-
-  .action-line { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 5px; font-size: 12px; color: var(--text-mid); }
-  .action-tick { color: var(--green); flex-shrink: 0; margin-top: 1px; font-size: 11px; }
-
-  .kv-line { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+  .sira-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border2); }
+  .sira-header-icon { width: 32px; height: 32px; background: var(--accent-dim); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .sira-header-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text); letter-spacing: 2px; }
+  .sira-header-sub { font-family: var(--mono); font-size: 9px; color: var(--text-mid); margin-top: 2px; }
+  .sira-risk-pill { margin-left: auto; display: flex; align-items: center; gap: 5px; border-radius: 20px; padding: 4px 12px; flex-shrink: 0; }
+  .sira-risk-pill.critical { background: rgba(255,61,90,0.15); border: 1px solid rgba(255,61,90,0.4); }
+  .sira-risk-pill.high     { background: rgba(255,61,90,0.12); border: 1px solid rgba(255,61,90,0.3); }
+  .sira-risk-pill.medium   { background: rgba(255,170,0,0.12); border: 1px solid rgba(255,170,0,0.3); }
+  .sira-risk-pill.low      { background: rgba(0,255,157,0.10); border: 1px solid rgba(0,255,157,0.3); }
+  .sira-risk-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .sira-risk-dot.critical,.sira-risk-dot.high { background: var(--red); }
+  .sira-risk-dot.medium { background: var(--orange); }
+  .sira-risk-dot.low    { background: var(--green); }
+  .sira-risk-label { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2px; }
+  .sira-risk-label.critical,.sira-risk-label.high { color: var(--red); }
+  .sira-risk-label.medium { color: var(--orange); }
+  .sira-risk-label.low    { color: var(--green); }
+  .sira-card { background: var(--bg3); border-radius: 8px; border: 1px solid var(--border2); padding: 14px 16px; margin-bottom: 10px; border-left: 3px solid; }
+  .sira-card.summary { border-left-color: var(--accent); }
+  .sira-card.threat  { border-left-color: var(--red); }
+  .sira-card.means   { border-left-color: var(--orange); }
+  .sira-card.risk    { border-left-color: var(--red); }
+  .sira-card.actions { border-left-color: var(--green); }
+  .sira-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .sira-card-icon { font-size: 15px; }
+  .sira-card-icon.summary { color: var(--accent); }
+  .sira-card-icon.threat  { color: var(--red); }
+  .sira-card-icon.means   { color: var(--orange); }
+  .sira-card-icon.risk    { color: var(--red); }
+  .sira-card-icon.actions { color: var(--green); }
+  .sira-card-title { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+  .sira-card-title.summary { color: var(--accent); }
+  .sira-card-title.threat  { color: var(--red); }
+  .sira-card-title.means   { color: var(--orange); }
+  .sira-card-title.risk    { color: var(--red); }
+  .sira-card-title.actions { color: var(--green); }
+  .sira-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .sira-prose { font-size: 13px; color: var(--text-mid); line-height: 1.75; margin: 0; }
+  .sira-kv { display: flex; flex-direction: column; gap: 6px; }
+  .sira-kv-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .sira-kv-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .sira-kv-key { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 80px; flex-shrink: 0; }
+  .sira-kv-val { font-family: var(--mono); font-size: 10px; color: var(--text); font-weight: 700; text-align: right; }
+  .sira-kv-val.red { color: var(--red); }
+  .sira-risk-center { display: flex; flex-direction: column; align-items: center; margin-bottom: 12px; }
+  .sira-risk-box { text-align: center; border-radius: 6px; padding: 12px 24px; border: 1px solid; }
+  .sira-risk-box.critical { background: rgba(255,61,90,0.12); border-color: rgba(255,61,90,0.5); }
+  .sira-risk-box.high     { background: rgba(255,61,90,0.10); border-color: rgba(255,61,90,0.4); }
+  .sira-risk-box.medium   { background: rgba(255,170,0,0.10); border-color: rgba(255,170,0,0.4); }
+  .sira-risk-box.low      { background: rgba(0,255,157,0.08); border-color: rgba(0,255,157,0.4); }
+  .sira-risk-box-label { font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: 4px; }
+  .sira-risk-box-label.critical,.sira-risk-box-label.high { color: var(--red); }
+  .sira-risk-box-label.medium { color: var(--orange); }
+  .sira-risk-box-label.low    { color: var(--green); }
+  .sira-risk-box-sub { font-family: var(--mono); font-size: 9px; letter-spacing: 2px; margin-top: 4px; opacity: 0.7; }
+  .sira-risk-box-sub.critical,.sira-risk-box-sub.high { color: var(--red); }
+  .sira-risk-box-sub.medium { color: var(--orange); }
+  .sira-risk-box-sub.low    { color: var(--green); }
+  .sira-confidence { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .sira-confidence-label { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+  .sira-confidence-bar { flex: 1; height: 4px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+  .sira-confidence-fill { height: 100%; border-radius: 2px; }
+  .sira-confidence-fill.critical,.sira-confidence-fill.high { background: var(--red); }
+  .sira-confidence-fill.medium { background: var(--orange); }
+  .sira-confidence-fill.low    { background: var(--green); }
+  .sira-confidence-pct { font-family: var(--mono); font-size: 10px; font-weight: 700; }
+  .sira-confidence-pct.critical,.sira-confidence-pct.high { color: var(--red); }
+  .sira-confidence-pct.medium { color: var(--orange); }
+  .sira-confidence-pct.low    { color: var(--green); }
+  .sira-action-list { display: flex; flex-direction: column; gap: 8px; }
+  .sira-action-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; background: var(--bg2); border-radius: 6px; border: 1px solid var(--border); }
+  .sira-action-num { min-width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .sira-action-num.n1 { background: rgba(255,61,90,0.15); color: var(--red); }
+  .sira-action-num.n2 { background: rgba(255,170,0,0.15); color: var(--orange); }
+  .sira-action-num.n3 { background: rgba(0,255,157,0.12); color: var(--green); }
+  .sira-action-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+  .sira-action-desc  { font-size: 11px; color: var(--text-mid); line-height: 1.6; }
+  .sira-fallback { background: var(--bg3); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 14px 16px; font-size: 13px; color: var(--text-mid); line-height: 1.75; }
 
   .msg-meta { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 6px; display: flex; align-items: center; gap: 10px; }
   .msg.user .msg-meta { justify-content: flex-end; }
   .copy-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-family: var(--mono); font-size: 8px; letter-spacing: 1px; text-transform: uppercase; padding: 0; transition: color 0.15s; }
   .copy-btn:hover { color: var(--accent); }
-
   .typing-wrap { display: flex; gap: 6px; align-items: center; padding: 12px 16px; background: var(--panel); border: 1px solid var(--border2); border-left: 2px solid var(--accent); border-radius: 2px; width: fit-content; }
   .typing-label { font-family: var(--mono); font-size: 9px; color: var(--accent); letter-spacing: 2px; }
   .typing-dot { width: 4px; height: 4px; border-radius: 50%; animation: bounce 1s infinite; }
@@ -254,13 +278,11 @@ const sharedCss = `
   .typing-dot:nth-child(3) { background: var(--purple); box-shadow: 0 0 6px var(--purple); animation-delay: 0.15s; }
   .typing-dot:nth-child(4) { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation-delay: 0.3s; }
   @keyframes bounce { 0%,100%{transform:translateY(0);opacity:0.3} 50%{transform:translateY(-5px);opacity:1} }
-
   .scroll-btn { position: absolute; bottom: 16px; right: 16px; width: 38px; height: 38px; border-radius: 50%; background: var(--scroll-btn-bg); border: 1px solid var(--scroll-btn-border); color: var(--scroll-btn-color); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(0,0,0,0.2); transition: all 0.2s; z-index: 20; backdrop-filter: blur(4px); }
   .scroll-btn:hover { transform: translateY(-2px); }
   .scroll-btn.hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
   .scroll-btn.visible { opacity: 1; pointer-events: all; transform: translateY(0); }
   .unread-badge { position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: var(--red); color: white; font-family: var(--mono); font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-
   .input-area { padding: 12px 20px 16px; background: var(--panel); border-top: 1px solid var(--border); }
   .quick-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .qbtn { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding: 5px 12px; border-radius: 2px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
@@ -277,18 +299,14 @@ const sharedCss = `
   .char-counter.ok   { color: var(--char-ok); }
   .char-counter.warn { color: var(--char-warn); }
   .char-counter.over { color: var(--char-over); font-weight: 700; }
-
   .toast { position: fixed; bottom: 80px; right: 20px; background: var(--panel); border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 10px; padding: 8px 16px; border-radius: 3px; letter-spacing: 1px; z-index: 9999; box-shadow: 0 0 16px var(--accent-glow); animation: fadeIn 0.2s ease; }
   @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-
   .welcome-card { background: var(--panel); border: 1px solid var(--border2); border-left: 2px solid var(--accent); border-radius: 2px; padding: 18px; }
   .welcome-title { font-size: 17px; font-weight: 800; letter-spacing: 1px; margin-bottom: 6px; color: var(--text); }
   .welcome-title span { color: var(--accent); }
   .welcome-body { font-family: var(--mono); font-size: 11px; color: var(--text-mid); line-height: 1.8; }
   .welcome-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
   .wtag { font-family: var(--mono); font-size: 8px; letter-spacing: 1px; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--border2); color: var(--text-dim); }
-
-  /* ── PAGES ── */
   .page { flex: 1; overflow-y: auto; padding: 24px; background: var(--bg); }
   .page-title { font-size: 20px; font-weight: 800; letter-spacing: 2px; color: var(--text); margin-bottom: 4px; }
   .page-sub { font-family: var(--mono); font-size: 10px; color: var(--text-mid); letter-spacing: 2px; margin-bottom: 24px; }
@@ -323,7 +341,6 @@ const sharedCss = `
   .top-ip-bar { flex: 1; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
   .top-ip-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 3px; }
   .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
-
   @media (max-width: 768px) {
     body { overflow: auto; }
     .app { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
@@ -338,109 +355,181 @@ const sharedCss = `
   }
 `;
 
-// ── SIRA line renderer ────────────────────────────────────────────────────
-function renderSiraLine(line, idx) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-
-  // numbered action: "1. Action — reason"
-  const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
-  if (numMatch) {
-    const [, , rest] = numMatch;
-    const parts = rest.split(" — ");
-    return (
-      <div key={idx} className="action-line">
-        <span className="action-tick">✓</span>
-        <span><strong>{parts[0]}</strong>{parts.length > 1 && <span style={{ color: "var(--text-dim)", fontStyle: "italic" }}> — {parts.slice(1).join(" — ")}</span>}</span>
-      </div>
-    );
+function extractKV(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const pairs = [];
+  for (const line of lines) {
+    const m = line.match(/^[-•]?\s*([^:]+):\s*(.+)/);
+    if (m) pairs.push({ key: m[1].trim(), val: m[2].trim() });
+    else if (line && pairs.length === 0) pairs.push({ key: null, val: line });
   }
-
-  // key-value: "- Alert: value"
-  const kvMatch = trimmed.match(/^[-•]\s*([^:]+):\s*(.+)/);
-  if (kvMatch) {
-    return (
-      <div key={idx} className="kv-line">
-        <span className="sira-key">{kvMatch[1]}:</span>
-        <span className="sira-val">{kvMatch[2]}</span>
-      </div>
-    );
-  }
-
-  // plain bullet
-  if (trimmed.startsWith("-") || trimmed.startsWith("•")) {
-    return (
-      <div key={idx} className="action-line">
-        <span className="action-tick">▸</span>
-        <span>{trimmed.replace(/^[-•]\s*/, "")}</span>
-      </div>
-    );
-  }
-
-  return <div key={idx} style={{ fontSize: 12, lineHeight: 1.65, color: "var(--text-mid)", marginBottom: 3 }}>{trimmed}</div>;
+  return pairs;
 }
 
-// ── SIRA Message ──────────────────────────────────────────────────────────
-function SiraMessage({ text }) {
-  const sections = parseSiraResponse(text);
+function extractActions(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const actions = [];
+  for (const line of lines) {
+    const m = line.match(/^(\d+)\.\s*(.+)/);
+    if (m) {
+      const parts = m[2].split(/\s*—\s*/);
+      actions.push({ title: parts[0].trim(), desc: parts.slice(1).join(" — ").trim() });
+    }
+  }
+  return actions;
+}
 
-  const sectionClass = {
-    "SUMMARY": "summary",
-    "THREAT DETAILS": "threat",
-    "WHAT THIS MEANS": "means",
-    "RISK ASSESSMENT": "risk",
-    "RECOMMENDED ACTIONS": "actions"
-  };
+function SiraMessage({ text, modelChip }) {
+  if (!text) return null;
 
-  const icons = {
-    "SUMMARY": "◉",
-    "THREAT DETAILS": "⚠",
-    "WHAT THIS MEANS": "◈",
-    "RISK ASSESSMENT": "◆",
-    "RECOMMENDED ACTIONS": "▶"
-  };
-
-  if (!sections) {
-    return (
-      <div className="sira-section summary full-width" style={{ gridColumn: "1 / -1" }}>
-        <div className="sira-body">{text}</div>
-      </div>
-    );
+  const sections = {};
+  const sectionNames = ["SUMMARY", "THREAT DETAILS", "WHAT THIS MEANS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"];
+  for (let i = 0; i < sectionNames.length; i++) {
+    const current = sectionNames[i];
+    const next    = sectionNames[i + 1];
+    const startIdx = text.indexOf(current);
+    if (startIdx === -1) continue;
+    const contentStart = startIdx + current.length;
+    const endIdx = next ? text.indexOf(next) : text.length;
+    sections[current] = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
   }
 
+  if (Object.keys(sections).length === 0) {
+    return <div className="sira-fallback">{text}</div>;
+  }
+
+  const riskText = sections["RISK ASSESSMENT"] || "";
+  const riskLevel = /CRITICAL/i.test(riskText) ? "critical" : /HIGH/i.test(riskText) ? "high" : /MEDIUM/i.test(riskText) ? "medium" : /LOW/i.test(riskText) ? "low" : "medium";
+  const riskLabel = riskLevel.toUpperCase();
+
+  const confidenceMatch = riskText.match(/confidence[:\s]+(\w+)/i);
+  const confidenceText  = confidenceMatch ? confidenceMatch[1].toLowerCase() : null;
+  const confidencePct   = confidenceText === "high" ? 85 : confidenceText === "medium" ? 60 : confidenceText === "low" ? 35 : null;
+
+  const threatKV  = extractKV(sections["THREAT DETAILS"] || "");
+  const actions   = extractActions(sections["RECOMMENDED ACTIONS"] || "");
+  const numColors = ["n1", "n2", "n3"];
+
   return (
-    <div className="sira-grid">
-      {sections.map((s, i) => {
-        const cls = sectionClass[s.heading] || "summary";
-        const riskLevel = s.heading === "RISK ASSESSMENT" ? getRiskLevel(s.content) : null;
-        const isFullWidth = s.heading === "SUMMARY" || s.heading === "RECOMMENDED ACTIONS" || s.heading === "WHAT THIS MEANS";
-        const lines = s.content.split("\n");
+    <div className="sira-response">
 
-        return (
-          <div key={i} className={`sira-section ${cls}${isFullWidth ? " full-width" : ""}`} style={{ animationDelay: `${i * 0.06}s` }}>
-            <div className={`sira-heading ${cls}`}>
-              <span>{icons[s.heading] || "▸"}</span>
-              {s.heading}
+      {/* Header */}
+      <div className="sira-header">
+        <div className="sira-header-icon">🛡</div>
+        <div>
+          <div className="sira-header-title">SIRA ANALYSIS</div>
+          <div className="sira-header-sub">Security Incident Response Assistant · {modelChip || "sira-model"}</div>
+        </div>
+        <div className={`sira-risk-pill ${riskLevel}`}>
+          <div className={`sira-risk-dot ${riskLevel}`} />
+          <span className={`sira-risk-label ${riskLevel}`}>{riskLabel}</span>
+        </div>
+      </div>
+
+      {/* Summary */}
+      {sections["SUMMARY"] && (
+        <div className="sira-card summary">
+          <div className="sira-card-header">
+            <span className="sira-card-icon summary">◉</span>
+            <span className="sira-card-title summary">Summary</span>
+          </div>
+          <p className="sira-prose">{sections["SUMMARY"]}</p>
+        </div>
+      )}
+
+      {/* Threat Details + Risk Assessment side by side */}
+      <div className="sira-two-col">
+
+        {sections["THREAT DETAILS"] && (
+          <div className="sira-card threat" style={{ marginBottom: 0 }}>
+            <div className="sira-card-header">
+              <span className="sira-card-icon threat">⚠</span>
+              <span className="sira-card-title threat">Threat Details</span>
             </div>
+            <div className="sira-kv">
+              {threatKV.map((item, i) => (
+                <div key={i} className="sira-kv-row">
+                  {item.key && <span className="sira-kv-key">{item.key}</span>}
+                  <span className={`sira-kv-val ${item.key?.toLowerCase().includes("attacker") || item.key?.toLowerCase().includes("src") ? "red" : ""}`}>
+                    {item.val}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-            {riskLevel ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <span className={`risk-badge risk-${riskLevel}`}>{riskLevel.toUpperCase()}</span>
-                <div className="sira-body" style={{ flex: 1 }}>
-                  {lines.map((line, idx) => renderSiraLine(line, idx))}
+        {sections["RISK ASSESSMENT"] && (
+          <div className="sira-card risk" style={{ marginBottom: 0 }}>
+            <div className="sira-card-header">
+              <span className="sira-card-icon risk">◆</span>
+              <span className="sira-card-title risk">Risk Assessment</span>
+            </div>
+            <div className="sira-risk-center">
+              <div className={`sira-risk-box ${riskLevel}`}>
+                <div className={`sira-risk-box-label ${riskLevel}`}>{riskLabel}</div>
+                <div className={`sira-risk-box-sub ${riskLevel}`}>
+                  {riskLevel === "critical" ? "IMMEDIATE ACTION" : riskLevel === "high" ? "URGENT REVIEW" : riskLevel === "medium" ? "MONITOR CLOSELY" : "LOW PRIORITY"}
                 </div>
               </div>
-            ) : (
-              <div className="sira-body">
-                {lines.map((line, idx) => renderSiraLine(line, idx))}
+            </div>
+            <p className="sira-prose" style={{ fontSize: 11 }}>
+              {riskText.replace(/CRITICAL|HIGH|MEDIUM|LOW/gi, "").replace(/Risk Level[:\s]*/i, "").replace(/Why[:\s]*/i, "").trim().split("\n").filter(Boolean)[0]}
+            </p>
+            {confidencePct && (
+              <div className="sira-confidence">
+                <span className="sira-confidence-label">Confidence</span>
+                <div className="sira-confidence-bar">
+                  <div className={`sira-confidence-fill ${riskLevel}`} style={{ width: `${confidencePct}%` }} />
+                </div>
+                <span className={`sira-confidence-pct ${riskLevel}`}>{confidencePct}%</span>
               </div>
             )}
           </div>
-        );
-      })}
+        )}
+      </div>
+
+      {/* What This Means */}
+      {sections["WHAT THIS MEANS"] && (
+        <div className="sira-card means">
+          <div className="sira-card-header">
+            <span className="sira-card-icon means">◈</span>
+            <span className="sira-card-title means">What This Means</span>
+          </div>
+          <p className="sira-prose">{sections["WHAT THIS MEANS"]}</p>
+        </div>
+      )}
+
+      {/* Recommended Actions */}
+      {sections["RECOMMENDED ACTIONS"] && (
+        <div className="sira-card actions">
+          <div className="sira-card-header">
+            <span className="sira-card-icon actions">▶</span>
+            <span className="sira-card-title actions">Recommended Actions</span>
+          </div>
+          {actions.length > 0 ? (
+            <div className="sira-action-list">
+              {actions.map((a, i) => (
+                <div key={i} className="sira-action-item">
+                  <div className={`sira-action-num ${numColors[i] || "n3"}`}>{i + 1}</div>
+                  <div>
+                    <div className="sira-action-title">{a.title}</div>
+                    {a.desc && <div className="sira-action-desc">{a.desc}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="sira-prose">{sections["RECOMMENDED ACTIONS"]}</p>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
+
+
 
 function AnalyticsPage({ stats }) {
   const [topIPs, setTopIPs] = useState([]);
@@ -496,17 +585,36 @@ function AnalyticsPage({ stats }) {
   );
 }
 
+// ── INVESTIGATION PAGE ────────────────────────────────────────────────────
 function InvestigationPage({ onAskSira }) {
-  const [logs, setLogs]         = useState([]);
-  const [search, setSearch]     = useState("");
-  const [selected, setSelected] = useState(null);
+  const [logs, setLogs]                     = useState([]);
+  const [search, setSearch]                 = useState("");
+  const [selected, setSelected]             = useState(null);
+  const [profile, setProfile]               = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [whatIf, setWhatIf]                 = useState(null);
+  const [whatIfLoading, setWhatIfLoading]   = useState(false);
+
+  const loadProfile = async (ip) => {
+    setProfileLoading(true);
+    setProfile(null);
+    try {
+      const res  = await fetch(`${FLASK_URL}/attacker-profile/${ip}`);
+      const data = await res.json();
+      setProfile(data);
+    } catch { setProfile({ error: "Failed to load profile" }); }
+    setProfileLoading(false);
+  };
+
   useEffect(() => {
     fetch(`${FLASK_URL}/logs?limit=200`).then(r => r.json()).then(setLogs).catch(() => {});
   }, []);
+
   const filtered = logs.filter(l =>
     !search || l.src_ip?.includes(search) || l.dest_ip?.includes(search) ||
     l.alert?.signature?.toLowerCase().includes(search.toLowerCase())
   );
+
   return (
     <div className="page">
       <div className="page-title">Investigation</div>
@@ -530,6 +638,8 @@ function InvestigationPage({ onAskSira }) {
           </tbody>
         </table>
       </div>
+
+      {/* ── EVENT DETAIL MODAL ── */}
       {selected && (
         <div className="modal-overlay" onClick={() => setSelected(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -547,13 +657,142 @@ function InvestigationPage({ onAskSira }) {
             </>}
             {selected.dns && <div className="modal-row"><span className="modal-key">DNS Query</span><span className="modal-val">{selected.dns.rrname}</span></div>}
             {selected.http && <div className="modal-row"><span className="modal-key">HTTP</span><span className="modal-val">{selected.http.http_method} {selected.http.hostname}{selected.http.url}</span></div>}
-            <button className="ask-sira-btn" onClick={() => {
-              onAskSira(`Analyse this ${selected.event_type} event from ${selected.src_ip} to ${selected.dest_ip} at ${selected.timestamp}`);
-              setSelected(null);
-            }}>⬡ ASK SIRA ABOUT THIS EVENT</button>
+
+            {selected.src_ip && (
+              <button onClick={() => { loadProfile(selected.src_ip); setSelected(null); }}
+                style={{ marginTop: 12, width: "100%", padding: "10px", background: "var(--purple-dim)", border: "1px solid var(--purple)", borderRadius: 4, color: "var(--purple)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+                ◈ VIEW ATTACKER PROFILE
+              </button>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button className="ask-sira-btn" style={{ flex: 1, marginTop: 0 }} onClick={() => {
+                onAskSira(`Analyse this ${selected.event_type} event from ${selected.src_ip} to ${selected.dest_ip} at ${selected.timestamp}`);
+                setSelected(null);
+              }}>⬡ ASK SIRA</button>
+
+              {selected.alert?.signature && (
+                <button onClick={async () => {
+                  const sig = selected.alert.signature;
+                  const src = selected.src_ip;
+                  const dst = selected.dest_ip;
+                  setSelected(null);
+                  setWhatIfLoading(true);
+                  setWhatIf(null);
+                  try {
+                    const res  = await fetch(`${FLASK_URL}/what-if`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ signature: sig, src_ip: src, dest_ip: dst })
+                    });
+                    const data = await res.json();
+                    setWhatIf(data);
+                  } catch { setWhatIf({ error: "Failed to load" }); }
+                  setWhatIfLoading(false);
+                }} style={{ flex: 1, padding: "10px", background: "var(--orange-dim)", border: "1px solid var(--orange)", borderRadius: 4, color: "var(--orange)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+                  ⚠ WHAT IF?
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
+
+      {/* ── ATTACKER PROFILE MODAL ── */}
+      {(profile || profileLoading) && (
+        <div className="modal-overlay" onClick={() => setProfile(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 680 }}>
+            <button className="modal-close" onClick={() => setProfile(null)}>✕</button>
+            {profileLoading && (
+              <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--accent)" }}>
+                ◈ Building attacker profile...
+              </div>
+            )}
+            {profile && !profile.error && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20, padding: "16px", background: "var(--bg3)", borderRadius: 6, border: "1px solid var(--purple)", borderLeft: "3px solid var(--purple)" }}>
+                  <img src={`https://flagcdn.com/24x18/${profile.geo.flag?.toLowerCase()}.png`} alt="" style={{ width: 36, height: 27, borderRadius: 2 }} onError={e => e.target.style.display='none'} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: "var(--purple)" }}>{profile.ip}</div>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mid)", marginTop: 4 }}>{profile.geo.city}, {profile.geo.country} — {profile.geo.isp}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 28, fontWeight: 900, color: profile.abuse.score > 75 ? "var(--red)" : profile.abuse.score > 25 ? "var(--orange)" : "var(--green)" }}>{profile.abuse.score}%</div>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 2 }}>ABUSE SCORE</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+                  {[
+                    { label: "Total Events", value: profile.stats.total_events, color: "var(--accent)" },
+                    { label: "Alerts", value: profile.stats.total_alerts, color: "var(--red)" },
+                    { label: "AbuseIPDB Reports", value: profile.abuse.reports, color: "var(--orange)" },
+                    { label: "Ports Targeted", value: profile.stats.ports_targeted.length, color: "var(--purple)" },
+                  ].map((s, i) => (
+                    <div key={i} style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: "12px", textAlign: "center" }}>
+                      <div style={{ fontFamily: "var(--mono)", fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
+                      <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 1, marginTop: 4 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {profile.stats.signatures.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>ATTACK SIGNATURES USED</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {profile.stats.signatures.map((sig, i) => (
+                        <span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "3px 8px", borderRadius: 2, background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,61,90,0.3)" }}>{sig}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {profile.stats.ports_targeted.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>PORTS TARGETED</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {profile.stats.ports_targeted.map((port, i) => (
+                        <span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "3px 8px", borderRadius: 2, background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(0,229,255,0.2)" }}>{port}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "2px solid var(--purple)", borderRadius: 4, padding: 16 }}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 12 }}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
+                  <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{profile.sira_assessment}</div>
+                </div>
+                <button className="ask-sira-btn" style={{ marginTop: 16 }} onClick={() => {
+                  onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`);
+                  setProfile(null);
+                }}>⬡ ASK SIRA FOR FULL ANALYSIS</button>
+              </>
+            )}
+            {profile?.error && (
+              <div style={{ color: "var(--red)", fontFamily: "var(--mono)", fontSize: 12, padding: 20 }}>✗ {profile.error}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── WHAT IF MODAL ── */}
+      {(whatIf || whatIfLoading) && (
+        <div className="modal-overlay" onClick={() => { setWhatIf(null); setWhatIfLoading(false); }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 640 }}>
+            <button className="modal-close" onClick={() => { setWhatIf(null); setWhatIfLoading(false); }}>✕</button>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--orange)", letterSpacing: 3, marginBottom: 4 }}>⚠ WHAT IF MODE</div>
+            <div className="modal-title">If This Attack Wasn't Blocked...</div>
+            <div className="modal-sub">{whatIf?.signature}</div>
+            {whatIfLoading && (
+              <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--orange)" }}>
+                ⚠ SIRA is simulating the attack chain...
+              </div>
+            )}
+            {whatIf && !whatIfLoading && (
+              <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap", background: "var(--bg3)", border: "1px solid var(--orange)", borderLeft: "3px solid var(--orange)", borderRadius: 4, padding: 16 }}>
+                {whatIf.error ? <span style={{ color: "var(--red)" }}>✗ {whatIf.error}</span> : whatIf.answer}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -561,9 +800,9 @@ function InvestigationPage({ onAskSira }) {
 // ── MAIN APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [selectedModel, setSelectedModel]   = useState("ollama");
-  const [messages, setMessages] = useState([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]);
+  const [messages, setMessages]             = useState([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
-  const [lastSession, setLastSession] = useState(null);
+  const [lastSession, setLastSession]       = useState(null);
   const [input, setInput]                   = useState("");
   const [loading, setLoading]               = useState(false);
   const [alerts, setAlerts]                 = useState([]);
@@ -642,25 +881,25 @@ export default function App() {
   }, []);
 
   useEffect(() => { fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {}); }, []);
+
   useEffect(() => {
-  const loadLastSession = async () => {
-    try {
-      const { collection, query, where, orderBy, limit, getDocs } = await import("firebase/firestore");
-      const sessionsRef = collection(db, "soc_sessions");
-      const q = query(sessionsRef, where("username", "==", username), orderBy("updated_at", "desc"), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const session = { id: snap.docs[0].id, ...snap.docs[0].data() };
-        setLastSession(session);
-        setShowResumePrompt(true);
-      }
-    } catch (e) { console.error("Session load error:", e); }
-  };
-  loadLastSession();
-}, []);
-  
-  
-  
+    const loadLastSession = async () => {
+      try {
+        const { collection, query, where, orderBy, limit, getDocs } = await import("firebase/firestore");
+        const sessionsRef = collection(db, "soc_sessions");
+        const q = query(sessionsRef, where("username", "==", username), orderBy("updated_at", "desc"), limit(1));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const session = { id: snap.docs[0].id, ...snap.docs[0].data() };
+          setLastSession(session);
+          setShowResumePrompt(true);
+        }
+      } catch (e) { console.error("Session load error:", e); }
+    };
+    loadLastSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => { fetch(`${FLASK_URL}/health`).then(r => r.json()).then(setHealth).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -703,11 +942,10 @@ export default function App() {
     } catch (e) { console.error("Firestore user save error:", e); }
     try {
       const recentHistory = messages.slice(-6).filter(m => !m.isWelcome).map(m => ({
-  role: m.role === "user" ? "user" : "assistant",
-  content: m.text
-}));
-
-const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, model: selectedModel, history: recentHistory }) });
+        role: m.role === "user" ? "user" : "assistant",
+        content: m.text
+      }));
+      const res  = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, model: selectedModel, history: recentHistory }) });
       const data = await res.json();
       setMessages(prev => [...prev, { role: "ai", text: data.answer, time: new Date().toLocaleTimeString(), model: modelObj.chip }]);
       try {
@@ -728,10 +966,11 @@ const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Conten
     try {
       const res  = await fetch(`${FLASK_URL}/upload`, { method: "POST", body: formData });
       const data = await res.json();
-      if (data.message) { 
-         const eventsMsg = data.events_loaded ? ` (${data.events_loaded} events loaded)` : "";
-         setUploadStatus("✓ " + data.message + eventsMsg); 
-         showToast("Logs uploaded");
+      if (data.message) {
+        const eventsMsg = data.events_loaded ? ` (${data.events_loaded} events loaded)` : "";
+        setUploadStatus("✓ " + data.message + eventsMsg);
+        showToast("Logs uploaded");
+        setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000);
       } else { setUploadStatus("✗ " + (data.error || "Upload failed")); }
     } catch { setUploadStatus("✗ Cannot connect to Flask"); }
     setUploading(false);
@@ -745,45 +984,49 @@ const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Conten
     <>
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
       {toast && <div className="toast">✓ {toast.toUpperCase()}</div>}
+
+      {/* ── RESUME SESSION MODAL ── */}
       {showResumePrompt && lastSession && (
-  <div className="modal-overlay" onClick={() => setShowResumePrompt(false)}>
-    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 460 }}>
-      <div className="modal-title">Resume Last Session?</div>
-      <div className="modal-sub">YOU HAVE A PREVIOUS INVESTIGATION SESSION</div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mid)", margin: "16px 0", lineHeight: 1.8, background: "var(--bg3)", padding: "12px", borderRadius: 4, border: "1px solid var(--border2)" }}>
-        <div style={{ color: "var(--accent)", marginBottom: 6 }}>⬡ {lastSession.title}</div>
-        <div style={{ fontSize: 9, color: "var(--text-dim)" }}>MODEL: {lastSession.model_used?.toUpperCase()} — {lastSession.updated_at?.toDate?.()?.toLocaleString?.() || "Recent"}</div>
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={async () => {
-          try {
-            const { collection, query, where, orderBy, getDocs } = await import("firebase/firestore");
-            const msgsRef = collection(db, "soc_messages");
-            const q = query(msgsRef, where("session_id", "==", lastSession.id), orderBy("created_at", "asc"));
-            const snap = await getDocs(q);
-            const loaded = snap.docs.map(d => ({
-              role: d.data().role === "user" ? "user" : "ai",
-              text: d.data().message,
-              time: d.data().created_at?.toDate?.()?.toLocaleTimeString?.() || "",
-              model: d.data().model_used
-            }));
-            setMessages([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }, ...loaded]);
-            setSessionId(lastSession.id);
-            if (lastSession.model_used) setSelectedModel(lastSession.model_used);
-            showToast("Session resumed");
-          } catch (e) { console.error("Resume error:", e); }
-          setShowResumePrompt(false);
-        }} style={{ flex: 1, padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
-          ↩ RESUME SESSION
-        </button>
-        <button onClick={() => { setShowResumePrompt(false); showToast("Starting fresh"); }} 
-          style={{ flex: 1, padding: "12px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
-          + NEW SESSION
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+        <div className="modal-overlay" onClick={() => setShowResumePrompt(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 460 }}>
+            <div className="modal-title">Resume Last Session?</div>
+            <div className="modal-sub">YOU HAVE A PREVIOUS INVESTIGATION SESSION</div>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mid)", margin: "16px 0", lineHeight: 1.8, background: "var(--bg3)", padding: "12px", borderRadius: 4, border: "1px solid var(--border2)" }}>
+              <div style={{ color: "var(--accent)", marginBottom: 6 }}>⬡ {lastSession.title}</div>
+              <div style={{ fontSize: 9, color: "var(--text-dim)" }}>MODEL: {lastSession.model_used?.toUpperCase()} — {lastSession.updated_at?.toDate?.()?.toLocaleString?.() || "Recent"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={async () => {
+                try {
+                  const { collection, query, where, orderBy, getDocs } = await import("firebase/firestore");
+                  const msgsRef = collection(db, "soc_messages");
+                  const q = query(msgsRef, where("session_id", "==", lastSession.id), orderBy("created_at", "asc"));
+                  const snap = await getDocs(q);
+                  const loaded = snap.docs.map(d => ({
+                    role: d.data().role === "user" ? "user" : "ai",
+                    text: d.data().message,
+                    time: d.data().created_at?.toDate?.()?.toLocaleTimeString?.() || "",
+                    model: d.data().model_used
+                  }));
+                  setMessages([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }, ...loaded]);
+                  setSessionId(lastSession.id);
+                  if (lastSession.model_used) setSelectedModel(lastSession.model_used);
+                  showToast("Session resumed");
+                } catch (e) { console.error("Resume error:", e); }
+                setShowResumePrompt(false);
+              }} style={{ flex: 1, padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+                ↩ RESUME SESSION
+              </button>
+              <button onClick={() => { setShowResumePrompt(false); showToast("Starting fresh"); }}
+                style={{ flex: 1, padding: "12px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+                + NEW SESSION
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── UPLOAD MODAL ── */}
       {showUpload && (
         <div className="modal-overlay" onClick={() => setShowUpload(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
@@ -797,8 +1040,8 @@ const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Conten
               {uploadFile && <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>▸ {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)</div>}
             </div>
             <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.8 }}>
-  ⚠ Any <span style={{ color: "var(--orange)" }}>.json</span> file will be saved as eve.json. Any <span style={{ color: "var(--orange)" }}>.log</span> file will be saved as conn.log.
-</div>
+              ⚠ Any <span style={{ color: "var(--orange)" }}>.json</span> file will be saved as eve.json. Any <span style={{ color: "var(--orange)" }}>.log</span> file will be saved as conn.log.
+            </div>
             {uploadStatus && (
               <div style={{ fontFamily: "var(--mono)", fontSize: 11, padding: "8px 12px", borderRadius: 4, marginBottom: 16,
                 background: uploadStatus.startsWith("✓") ? "var(--green-dim)" : "var(--red-dim)",
@@ -816,7 +1059,6 @@ const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Conten
       )}
 
       <div className="app" style={{ gridTemplateColumns: `${sidebarWidth}px 1fr` }}>
-
         <nav className="topnav">
           <div className="nav-brand">
             <div className="brand-icon">⬡</div>
@@ -870,12 +1112,12 @@ const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Conten
           <div className={`model-badge ${modelObj.cloud ? "badge-cloud" : "badge-local"}`}>⬡ {modelObj.tag}</div>
           <div className="panel-divider" />
           <div className="section-label" style={{ justifyContent: "space-between" }}>
-  Overview
-  <button onClick={() => fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {})}
-    style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", letterSpacing: 1 }}>
-    ↻ REFRESH
-  </button>
-</div>
+            Overview
+            <button onClick={() => fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {})}
+              style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", letterSpacing: 1 }}>
+              ↻ REFRESH
+            </button>
+          </div>
           <div className="stats-grid" style={{ marginTop: 10 }}>
             <div className="stat"><div className="stat-glow c" /><div className="stat-label">Total Events</div><div className="stat-value c">{stats?.total_events || alerts.length || "--"}</div></div>
             <div className="stat"><div className="stat-glow r" /><div className="stat-label">Alerts</div><div className="stat-value r">{String(stats?.alert_count ?? alertCount).padStart(2, "0")}</div></div>
@@ -964,7 +1206,7 @@ const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Conten
                           </div>
                         </div>
                       ) : m.role === "ai" ? (
-                        <div className="bubble"><SiraMessage text={m.text} /></div>
+  <div className="bubble"><SiraMessage text={m.text} modelChip={m.model} /></div>
                       ) : (
                         <div className="bubble">{m.text}</div>
                       )}
