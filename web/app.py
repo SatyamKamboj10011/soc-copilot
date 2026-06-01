@@ -497,10 +497,12 @@ def upload():
         return jsonify({"error" : "No file selected"}), 400
 
     filename = secure_filename(file.filename)
-    if filename not in ['eve.json', 'conn.log']:
-        return jsonify({"error": "Invalid file name. Only eve.json and conn.log are accepted."}), 400
+    if not (filename.endswith('.json') or filename.endswith('.log')):
+            return jsonify({"error": "Only .json or .log files accepted"}), 400
 
-    save_path = os.path.join(os.path.dirname(__file__), '..', 'logs', filename)
+# Always save as eve.json or conn.log regardless of original filename
+    save_as = 'eve.json' if filename.endswith('.json') else 'conn.log'
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'logs', save_as)
 
     backup_path = save_path + '.bak'
     if os.path.exists(save_path):
@@ -511,7 +513,11 @@ def upload():
     try:
         rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
         subprocess.run(['python', rag_script], timeout=120, check=True)
-        return jsonify({"message": f"{filename} uploaded and ChromaDB rebuilt successfully"})
+        new_logs = load_logs()
+        return jsonify({
+            "message": f"{save_as} uploaded and ChromaDB rebuilt successfully",
+            "events_loaded": len(new_logs)
+        })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "ChromaDB rebuild timed out"}), 500
     except subprocess.CalledProcessError as e:
@@ -678,6 +684,18 @@ def clear_all_history():
     conn.commit()
     conn.close()
     return jsonify({"message": "All history cleared"})
+
+
+@app.route('/log-info', methods=['GET'])
+def log_info():
+    logs = load_logs()
+    log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
+    file_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
+    return jsonify({
+        "filename": "eve.json",
+        "total_events": len(logs),
+        "file_size_kb": round(file_size / 1024, 1)
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────
