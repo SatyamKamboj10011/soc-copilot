@@ -236,42 +236,47 @@ def ask():
 
     context = "\n\n".join([d.page_content for d in docs])
 
-    prompt = f"""You are SIRA, Security Incident Response Assistant.
-You analyze real network security logs and explain them clearly.
-Your answers must be understood by BOTH security experts AND complete beginners.
+    prompt = f"""You are SIRA — Security Incident Response Assistant, built for entry-level SOC analysts.
+Your job is to make complex security events understandable and actionable.
 
-Rules:
-- Only use the log data provided below
-- Always include specific IPs, timestamps, ports and alert names from the logs
-- Never make up information not in the logs
-- If data is not available, say so clearly
-- Avoid heavy jargon — explain technical terms in plain English when you use them
+STRICT RULES:
+- Only use facts from the log data below — never invent details
+- Always include exact IPs, timestamps, ports and alert names from logs
+- If information is missing from logs, say "Not available in logs"
+- Write so a junior analyst with 3 months experience can understand
+- Be specific and direct — no vague statements
 
-Always structure your answer EXACTLY like this:
+Previous conversation:
+{chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in history[-4:] if m.get('content')]) or "None"}
+
+RESPOND IN EXACTLY THIS STRUCTURE — do not add or remove sections:
 
 SUMMARY:
-Write 2-3 plain English sentences explaining what happened, as if explaining to someone with no security background.
+3 clear sentences: What happened, who did it, when. Use exact values from logs.
 
 THREAT DETAILS:
-- Alert: exact signature name from the logs
-- Attacker IP: exact source IP
-- Target IP: exact destination IP
-- Time: exact timestamp
-- Protocol: TCP / UDP / etc
-- Severity: 1 (low), 2 (medium), or 3 (high)
+- Alert: [exact signature name]
+- Attacker IP: [exact src_ip]
+- Target IP: [exact dest_ip]
+- Time: [exact timestamp]
+- Port: [dest_port] / Protocol: [proto]
+- Severity: [1=Low / 2=Medium / 3=High]
+- Category: [alert category if available]
 
 WHAT THIS MEANS:
-Explain in 2-3 simple sentences what this threat actually is and why it is dangerous.
-No jargon. Imagine explaining to a friend who has never studied cybersecurity.
+2-3 sentences explaining what this attack type is in plain English.
+Then 1 sentence on why this specific instance is concerning.
+No acronyms without explanation.
 
 RISK ASSESSMENT:
-- Risk Level: CRITICAL or HIGH or MEDIUM or LOW
-- Why: one plain English sentence explaining the risk level
+- Risk Level: [CRITICAL / HIGH / MEDIUM / LOW]
+- Why: [One sentence — reference specific log evidence for your reasoning]
+- Confidence: [High / Medium / Low based on amount of log data available]
 
 RECOMMENDED ACTIONS:
-1. First action — explain why in plain English
-2. Second action — explain why in plain English
-3. Third action — explain why in plain English
+1. [Immediate action] — do this within the next 60 minutes because [reason]
+2. [Short term action] — do this today because [reason]
+3. [Long term action] — do this this week because [reason]
 
 Log Data:
 {context}
@@ -701,6 +706,146 @@ def log_info():
         "file_size_kb": round(file_size / 1024, 1)
     })
 
+
+@app.route('/attacker-profile/<ip>', methods=['GET'])
+def attacker_profile(ip):
+    import requests as req
+
+    # 1. Get all suricata events for this IP
+    logs = load_logs()
+    events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
+    alerts = [e for e in events if e.get('event_type') == 'alert']
+
+    # 2. AbuseIPDB
+    abuse_data = {}
+    try:
+        r = req.get("https://api.abuseipdb.com/api/v2/check",
+            headers={"Key": os.getenv("ABUSEIPDB_API_KEY"), "Accept": "application/json"},
+            params={"ipAddress": ip, "maxAgeInDays": 90})
+        abuse_data = r.json().get("data", {})
+    except: pass
+
+    # 3. Geolocation
+    geo = {}
+    try:
+        r = req.get(f"http://ip-api.com/json/{ip}", timeout=5)
+        geo = r.json()
+    except: pass
+
+    # 4. Attack signatures used
+    signatures = list(set(e.get('alert', {}).get('signature', '') for e in alerts if e.get('alert')))
+
+    # 5. Ports targeted
+    ports = list(set(str(e.get('dest_port', '')) for e in events if e.get('dest_port')))
+
+    # 6. Ask SIRA to profile the attacker
+    docs = retriever.invoke(f"attacks from {ip}")
+    context = "\n\n".join([d.page_content for d in docs[:8]])
+    prompt = f"""You are SIRA. Based on the log data, create a threat actor profile for IP {ip}.
+
+Log context:
+{context}
+
+Attack signatures seen: {', '.join(signatures[:5]) or 'None'}
+Ports targeted: {', '.join(ports[:10]) or 'Unknown'}
+AbuseIPDB score: {abuse_data.get('abuseConfidenceScore', 'Unknown')}
+Country: {geo.get('country', 'Unknown')}
+
+Respond EXACTLY in this format:
+
+THREAT ACTOR TYPE:
+One of: Script Kiddie / Opportunistic Scanner / Targeted Attacker / APT / Botnet Node
+
+LIKELY INTENT:
+One sentence — what is this attacker trying to achieve?
+
+TACTICS:
+- Tactic 1
+- Tactic 2
+- Tactic 3
+
+DANGER LEVEL:
+CRITICAL or HIGH or MEDIUM or LOW — one sentence why.
+
+RECOMMENDED BLOCK:
+YES or NO — one sentence justification."""
+
+    try:
+        llm = OllamaLLM(model="sira-model")
+        sira_assessment = llm.invoke(prompt)
+    except:
+        sira_assessment = "SIRA offline — manual review required"
+
+    return jsonify({
+        "ip": ip,
+        "geo": {
+            "country": geo.get("country", "Unknown"),
+            "city": geo.get("city", "Unknown"),
+            "isp": geo.get("isp", "Unknown"),
+            "flag": geo.get("countryCode", "")
+        },
+        "abuse": {
+            "score": abuse_data.get("abuseConfidenceScore", 0),
+            "reports": abuse_data.get("totalReports", 0),
+            "malicious": abuse_data.get("abuseConfidenceScore", 0) > 25
+        },
+        "stats": {
+            "total_events": len(events),
+            "total_alerts": len(alerts),
+            "signatures": signatures[:5],
+            "ports_targeted": ports[:10]
+        },
+        "sira_assessment": sira_assessment
+    })
+
+
+@app.route('/what-if', methods=['POST'])
+def what_if():
+    data = request.json
+    alert_signature = data.get('signature', '')
+    src_ip = data.get('src_ip', '')
+    dest_ip = data.get('dest_ip', '')
+
+    docs = retriever.invoke(f"{alert_signature} {src_ip}")
+    context = "\n\n".join([d.page_content for d in docs[:8]])
+
+    prompt = f"""You are SIRA. An analyst is asking: "What would have happened if this attack had NOT been blocked?"
+
+Alert: {alert_signature}
+Attacker IP: {src_ip}
+Target IP: {dest_ip}
+
+Log context:
+{context}
+
+Respond EXACTLY in this format:
+
+IMMEDIATE IMPACT:
+What would have happened in the first 60 seconds if this was not blocked.
+
+ATTACK CHAIN:
+Step 1: What the attacker does first
+Step 2: What they do next
+Step 3: The likely final goal
+
+POTENTIAL DAMAGE:
+- Data at risk: what data could be stolen
+- Systems at risk: what systems could be compromised
+- Business impact: what is the real world consequence
+
+LIKELIHOOD:
+CERTAIN or PROBABLE or POSSIBLE — one sentence on how likely this attack would have succeeded.
+
+LESSON:
+One plain English sentence on what this tells us about our defences."""
+
+    try:
+        llm = OllamaLLM(model="sira-model")
+        answer = llm.invoke(prompt)
+    except Exception as e:
+        answer = f"Error: {str(e)}"
+
+    return jsonify({"answer": answer, "signature": alert_signature, "src_ip": src_ip})
 
 # ─────────────────────────────────────────────────────────────────────────────
 
