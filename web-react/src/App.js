@@ -24,7 +24,7 @@ const QUICK_QUESTIONS = [
 const MAX_CHARS = 500;
 
 function parseSiraResponse(text) {
-  const sections = ["SUMMARY", "THREAT DETAILS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"];
+  const sections = ["SUMMARY", "THREAT DETAILS", "WHAT THIS MEANS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"];
   const result = [];
   for (let i = 0; i < sections.length; i++) {
     const current = sections[i];
@@ -40,6 +40,7 @@ function parseSiraResponse(text) {
 }
 
 function getRiskLevel(text) {
+  if (/CRITICAL/i.test(text)) return "critical";
   if (/HIGH/i.test(text)) return "high";
   if (/MEDIUM/i.test(text)) return "medium";
   if (/LOW/i.test(text)) return "low";
@@ -57,7 +58,7 @@ const darkCss = `
     --green: #00ff9d; --green-dim: rgba(0,255,157,0.08);
     --red: #ff3d5a; --red-dim: rgba(255,61,90,0.08);
     --orange: #ffaa00; --orange-dim: rgba(255,170,0,0.08);
-    --purple: #b47cff;
+    --purple: #b47cff; --purple-dim: rgba(180,124,255,0.08);
     --text: #e8f0fe; --text-mid: #7a8fa6; --text-dim: #3d4f63;
     --mono: 'Space Mono', monospace; --sans: 'Syne', sans-serif;
     --scroll-btn-bg: rgba(0,229,255,0.15);
@@ -78,7 +79,7 @@ const lightCss = `
     --green: #059669; --green-dim: rgba(5,150,105,0.08);
     --red: #dc2626; --red-dim: rgba(220,38,38,0.08);
     --orange: #d97706; --orange-dim: rgba(217,119,6,0.08);
-    --purple: #7c3aed;
+    --purple: #7c3aed; --purple-dim: rgba(124,58,237,0.08);
     --text: #0f172a; --text-mid: #475569; --text-dim: #94a3b8;
     --mono: 'Space Mono', monospace; --sans: 'Syne', sans-serif;
     --scroll-btn-bg: rgba(37,99,235,0.1);
@@ -94,6 +95,8 @@ const sharedCss = `
   ::-webkit-scrollbar { width: 2px; }
   ::-webkit-scrollbar-thumb { background: var(--border2); }
   .app { position: relative; z-index: 1; display: grid; grid-template-rows: 52px 1fr; grid-template-columns: var(--sidebar-width, 320px) 1fr; height: 100vh; width: 100vw; }
+
+  /* ── TOPNAV ── */
   .topnav { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--border); position: relative; z-index: 10; }
   .topnav::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0.4; }
   .nav-brand { display: flex; align-items: center; gap: 10px; }
@@ -107,7 +110,7 @@ const sharedCss = `
   .ndot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
   .ndot-green { background: var(--green); box-shadow: 0 0 6px var(--green); animation: blink 2s infinite; }
   .ndot-red   { background: var(--red);   box-shadow: 0 0 6px var(--red); }
-  .ndot-cyan  { background: var(--accent);box-shadow: 0 0 6px var(--accent); }
+  .ndot-cyan  { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
   .nav-time { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 2px; }
   .user-pill { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 3px; border: 1px solid var(--border2); background: var(--bg3); font-family: var(--mono); font-size: 9px; color: var(--accent); letter-spacing: 1px; }
@@ -120,6 +123,8 @@ const sharedCss = `
   .toggle-track.on { background: var(--accent); }
   .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: white; transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
   .toggle-thumb.on { transform: translateX(14px); }
+
+  /* ── LEFT PANEL ── */
   .left-panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
   .section-label { font-family: var(--mono); font-size: 8px; font-weight: 700; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; }
   .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border2); }
@@ -164,6 +169,8 @@ const sharedCss = `
   .feed-ips { font-family: var(--mono); font-size: 8px; color: var(--text-mid); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .feed-src { color: var(--accent); }
   .feed-time { font-family: var(--mono); font-size: 7px; color: var(--text-dim); flex-shrink: 0; }
+
+  /* ── CHAT ── */
   .chat-col { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
   .chat-header { display: flex; align-items: center; gap: 12px; padding: 0 20px; height: 52px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border); }
   .agent-avatar { width: 36px; height: 36px; flex-shrink: 0; background: linear-gradient(135deg, var(--accent), var(--purple)); clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 0 15px var(--accent-glow); }
@@ -173,31 +180,73 @@ const sharedCss = `
   .model-chip { margin-left: auto; font-family: var(--mono); font-size: 8px; letter-spacing: 1px; padding: 4px 10px; border-radius: 2px; background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,229,255,0.2); }
   .clear-btn { background: transparent; border: 1px solid var(--border2); color: var(--text-dim); padding: 5px 12px; border-radius: 3px; font-family: var(--mono); font-size: 9px; letter-spacing: 1px; cursor: pointer; transition: all 0.15s; text-transform: uppercase; }
   .clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+  /* ── MESSAGES ── */
   .messages-wrap { flex: 1; position: relative; overflow: hidden; }
   .messages { height: 100%; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
   .msg { display: flex; }
   .msg.user { justify-content: flex-end; }
   .bubble-wrap { display: flex; flex-direction: column; max-width: 72%; }
+  .msg.ai .bubble-wrap { max-width: 96%; width: 96%; }
   .msg.user .bubble-wrap { align-items: flex-end; }
   .bubble { padding: 12px 16px; font-size: 13px; line-height: 1.7; border-radius: 2px; }
-  .msg.ai .bubble { background: var(--panel); border: 1px solid var(--border2); border-left: 2px solid var(--accent); color: var(--text); }
+  .msg.ai .bubble { background: transparent; border: none; padding: 0; width: 100%; }
   .msg.user .bubble { background: var(--accent-dim); border: 1px solid var(--accent-glow); color: var(--text); }
-  .sira-section { margin-bottom: 14px; }
-  .sira-section:last-child { margin-bottom: 0; }
-  .sira-heading { font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 7px; padding-bottom: 5px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+
+  /* ── SIRA RESPONSE CARDS ── */
+  .sira-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .sira-section {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 10px 14px;
+    position: relative;
+    overflow: hidden;
+    animation: cardIn 0.3s ease both;
+  }
+  .sira-section.full-width { grid-column: 1 / -1; }
+  @keyframes cardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .sira-section::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+  .sira-section.summary::before  { background: linear-gradient(90deg, transparent, var(--accent), transparent); }
+  .sira-section.threat::before   { background: linear-gradient(90deg, transparent, var(--red), transparent); }
+  .sira-section.means::before    { background: linear-gradient(90deg, transparent, var(--purple), transparent); }
+  .sira-section.risk::before     { background: linear-gradient(90deg, transparent, var(--orange), transparent); }
+  .sira-section.actions::before  { background: linear-gradient(90deg, transparent, var(--green), transparent); }
+
+  .sira-section.summary { border-left: 2px solid var(--accent); }
+  .sira-section.threat  { border-left: 2px solid var(--red); }
+  .sira-section.means   { border-left: 2px solid var(--purple); }
+  .sira-section.risk    { border-left: 2px solid var(--orange); }
+  .sira-section.actions { border-left: 2px solid var(--green); }
+
+  .sira-heading { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
   .sira-heading.summary { color: var(--accent); }
   .sira-heading.threat  { color: var(--red); }
+  .sira-heading.means   { color: var(--purple); }
   .sira-heading.risk    { color: var(--orange); }
   .sira-heading.actions { color: var(--green); }
-  .sira-body { font-size: 12px; line-height: 1.85; color: var(--text-mid); white-space: pre-wrap; }
-  .risk-badge { display: inline-block; font-family: var(--mono); font-size: 9px; padding: 2px 8px; border-radius: 2px; font-weight: 700; letter-spacing: 1px; margin-left: 8px; }
-  .risk-high   { background: var(--red-dim);    color: var(--red);    border: 1px solid rgba(255,61,90,0.3); }
-  .risk-medium { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(255,170,0,0.3); }
-  .risk-low    { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(0,255,157,0.3); }
-  .msg-meta { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 5px; display: flex; align-items: center; gap: 10px; }
+
+  .sira-body { font-family: var(--sans); font-size: 12px; line-height: 1.65; color: var(--text-mid); }
+  .sira-key { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+  .sira-val { font-family: var(--mono); font-size: 10px; color: var(--text); font-weight: 700; }
+
+  .risk-badge { display: inline-block; font-family: var(--mono); font-weight: 900; letter-spacing: 3px; border-radius: 3px; }
+  .risk-critical { color: var(--red);    background: rgba(255,61,90,0.15);  border: 1px solid rgba(255,61,90,0.6);  box-shadow: 0 0 20px rgba(255,61,90,0.25);  font-size: 22px; padding: 8px 18px; }
+  .risk-high     { color: var(--red);    background: rgba(255,61,90,0.12);  border: 1px solid rgba(255,61,90,0.4);  box-shadow: 0 0 14px rgba(255,61,90,0.2);   font-size: 20px; padding: 6px 16px; }
+  .risk-medium   { color: var(--orange); background: var(--orange-dim);     border: 1px solid rgba(255,170,0,0.4);  box-shadow: 0 0 14px rgba(255,170,0,0.2);   font-size: 20px; padding: 6px 16px; }
+  .risk-low      { color: var(--green);  background: var(--green-dim);      border: 1px solid rgba(0,255,157,0.4);  box-shadow: 0 0 14px rgba(0,255,157,0.2);   font-size: 20px; padding: 6px 16px; }
+
+  .action-line { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 5px; font-size: 12px; color: var(--text-mid); }
+  .action-tick { color: var(--green); flex-shrink: 0; margin-top: 1px; font-size: 11px; }
+
+  .kv-line { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 4px; }
+
+  .msg-meta { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 6px; display: flex; align-items: center; gap: 10px; }
   .msg.user .msg-meta { justify-content: flex-end; }
   .copy-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-family: var(--mono); font-size: 8px; letter-spacing: 1px; text-transform: uppercase; padding: 0; transition: color 0.15s; }
   .copy-btn:hover { color: var(--accent); }
+
   .typing-wrap { display: flex; gap: 6px; align-items: center; padding: 12px 16px; background: var(--panel); border: 1px solid var(--border2); border-left: 2px solid var(--accent); border-radius: 2px; width: fit-content; }
   .typing-label { font-family: var(--mono); font-size: 9px; color: var(--accent); letter-spacing: 2px; }
   .typing-dot { width: 4px; height: 4px; border-radius: 50%; animation: bounce 1s infinite; }
@@ -205,11 +254,13 @@ const sharedCss = `
   .typing-dot:nth-child(3) { background: var(--purple); box-shadow: 0 0 6px var(--purple); animation-delay: 0.15s; }
   .typing-dot:nth-child(4) { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation-delay: 0.3s; }
   @keyframes bounce { 0%,100%{transform:translateY(0);opacity:0.3} 50%{transform:translateY(-5px);opacity:1} }
+
   .scroll-btn { position: absolute; bottom: 16px; right: 16px; width: 38px; height: 38px; border-radius: 50%; background: var(--scroll-btn-bg); border: 1px solid var(--scroll-btn-border); color: var(--scroll-btn-color); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(0,0,0,0.2); transition: all 0.2s; z-index: 20; backdrop-filter: blur(4px); }
-  .scroll-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
+  .scroll-btn:hover { transform: translateY(-2px); }
   .scroll-btn.hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
   .scroll-btn.visible { opacity: 1; pointer-events: all; transform: translateY(0); }
   .unread-badge { position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: var(--red); color: white; font-family: var(--mono); font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
   .input-area { padding: 12px 20px 16px; background: var(--panel); border-top: 1px solid var(--border); }
   .quick-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .qbtn { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding: 5px 12px; border-radius: 2px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
@@ -226,14 +277,18 @@ const sharedCss = `
   .char-counter.ok   { color: var(--char-ok); }
   .char-counter.warn { color: var(--char-warn); }
   .char-counter.over { color: var(--char-over); font-weight: 700; }
+
   .toast { position: fixed; bottom: 80px; right: 20px; background: var(--panel); border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 10px; padding: 8px 16px; border-radius: 3px; letter-spacing: 1px; z-index: 9999; box-shadow: 0 0 16px var(--accent-glow); animation: fadeIn 0.2s ease; }
   @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
   .welcome-card { background: var(--panel); border: 1px solid var(--border2); border-left: 2px solid var(--accent); border-radius: 2px; padding: 18px; }
   .welcome-title { font-size: 17px; font-weight: 800; letter-spacing: 1px; margin-bottom: 6px; color: var(--text); }
   .welcome-title span { color: var(--accent); }
   .welcome-body { font-family: var(--mono); font-size: 11px; color: var(--text-mid); line-height: 1.8; }
   .welcome-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
   .wtag { font-family: var(--mono); font-size: 8px; letter-spacing: 1px; padding: 3px 8px; border-radius: 2px; border: 1px solid var(--border2); color: var(--text-dim); }
+
+  /* ── PAGES ── */
   .page { flex: 1; overflow-y: auto; padding: 24px; background: var(--bg); }
   .page-title { font-size: 20px; font-weight: 800; letter-spacing: 2px; color: var(--text); margin-bottom: 4px; }
   .page-sub { font-family: var(--mono); font-size: 10px; color: var(--text-mid); letter-spacing: 2px; margin-bottom: 24px; }
@@ -268,6 +323,7 @@ const sharedCss = `
   .top-ip-bar { flex: 1; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
   .top-ip-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 3px; }
   .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
+
   @media (max-width: 768px) {
     body { overflow: auto; }
     .app { display: flex; flex-direction: column; height: auto; min-height: 100vh; }
@@ -277,26 +333,108 @@ const sharedCss = `
     .feed { max-height: 160px; }
     .messages { padding: 14px 16px; }
     .bubble-wrap { max-width: 88%; }
+    .sira-grid { grid-template-columns: 1fr; }
+    .sira-section.full-width { grid-column: 1; }
   }
 `;
 
+// ── SIRA line renderer ────────────────────────────────────────────────────
+function renderSiraLine(line, idx) {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  // numbered action: "1. Action — reason"
+  const numMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+  if (numMatch) {
+    const [, , rest] = numMatch;
+    const parts = rest.split(" — ");
+    return (
+      <div key={idx} className="action-line">
+        <span className="action-tick">✓</span>
+        <span><strong>{parts[0]}</strong>{parts.length > 1 && <span style={{ color: "var(--text-dim)", fontStyle: "italic" }}> — {parts.slice(1).join(" — ")}</span>}</span>
+      </div>
+    );
+  }
+
+  // key-value: "- Alert: value"
+  const kvMatch = trimmed.match(/^[-•]\s*([^:]+):\s*(.+)/);
+  if (kvMatch) {
+    return (
+      <div key={idx} className="kv-line">
+        <span className="sira-key">{kvMatch[1]}:</span>
+        <span className="sira-val">{kvMatch[2]}</span>
+      </div>
+    );
+  }
+
+  // plain bullet
+  if (trimmed.startsWith("-") || trimmed.startsWith("•")) {
+    return (
+      <div key={idx} className="action-line">
+        <span className="action-tick">▸</span>
+        <span>{trimmed.replace(/^[-•]\s*/, "")}</span>
+      </div>
+    );
+  }
+
+  return <div key={idx} style={{ fontSize: 12, lineHeight: 1.65, color: "var(--text-mid)", marginBottom: 3 }}>{trimmed}</div>;
+}
+
+// ── SIRA Message ──────────────────────────────────────────────────────────
 function SiraMessage({ text }) {
   const sections = parseSiraResponse(text);
+
+  const sectionClass = {
+    "SUMMARY": "summary",
+    "THREAT DETAILS": "threat",
+    "WHAT THIS MEANS": "means",
+    "RISK ASSESSMENT": "risk",
+    "RECOMMENDED ACTIONS": "actions"
+  };
+
+  const icons = {
+    "SUMMARY": "◉",
+    "THREAT DETAILS": "⚠",
+    "WHAT THIS MEANS": "◈",
+    "RISK ASSESSMENT": "◆",
+    "RECOMMENDED ACTIONS": "▶"
+  };
+
   if (!sections) {
-    return <div className="bubble"><div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8 }}>{text}</div></div>;
+    return (
+      <div className="sira-section summary full-width" style={{ gridColumn: "1 / -1" }}>
+        <div className="sira-body">{text}</div>
+      </div>
+    );
   }
-  const headingClass = { "SUMMARY": "summary", "THREAT DETAILS": "threat", "RISK ASSESSMENT": "risk", "RECOMMENDED ACTIONS": "actions" };
+
   return (
-    <div className="bubble">
+    <div className="sira-grid">
       {sections.map((s, i) => {
+        const cls = sectionClass[s.heading] || "summary";
         const riskLevel = s.heading === "RISK ASSESSMENT" ? getRiskLevel(s.content) : null;
+        const isFullWidth = s.heading === "SUMMARY" || s.heading === "RECOMMENDED ACTIONS" || s.heading === "WHAT THIS MEANS";
+        const lines = s.content.split("\n");
+
         return (
-          <div key={i} className="sira-section">
-            <div className={`sira-heading ${headingClass[s.heading] || ""}`}>
-              ▸ {s.heading}
-              {riskLevel && <span className={`risk-badge risk-${riskLevel}`}>{riskLevel.toUpperCase()}</span>}
+          <div key={i} className={`sira-section ${cls}${isFullWidth ? " full-width" : ""}`} style={{ animationDelay: `${i * 0.06}s` }}>
+            <div className={`sira-heading ${cls}`}>
+              <span>{icons[s.heading] || "▸"}</span>
+              {s.heading}
             </div>
-            <div className="sira-body">{s.content}</div>
+
+            {riskLevel ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span className={`risk-badge risk-${riskLevel}`}>{riskLevel.toUpperCase()}</span>
+                <div className="sira-body" style={{ flex: 1 }}>
+                  {lines.map((line, idx) => renderSiraLine(line, idx))}
+                </div>
+              </div>
+            ) : (
+              <div className="sira-body">
+                {lines.map((line, idx) => renderSiraLine(line, idx))}
+              </div>
+            )}
           </div>
         );
       })}
@@ -464,10 +602,7 @@ export default function App() {
     isResizing.current = true;
     const startX = e.clientX;
     const startWidth = sidebarWidth;
-    const onMove = (e) => {
-      if (!isResizing.current) return;
-      setSidebarWidth(Math.min(500, Math.max(220, startWidth + e.clientX - startX)));
-    };
+    const onMove = (e) => { if (!isResizing.current) return; setSidebarWidth(Math.min(500, Math.max(220, startWidth + e.clientX - startX))); };
     const onUp = () => { isResizing.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -509,18 +644,8 @@ export default function App() {
 
   useEffect(() => {
     if (isAtBottom.current) { scrollToBottom(false); } else { setUnreadCount(prev => prev + 1); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, loading]);
-
-  useEffect(() => {
-    const alertIPs = [...new Set(alerts.filter(a => a.event_type === "alert").map(a => a.src_ip).filter(Boolean))];
-    alertIPs.forEach(ip => checkReputation(ip));
-  }, [alerts]);
-
-  const handleModelChange = (e) => {
-    const val = e.target.value;
-    setSelectedModel(val);
-    showToast(`Switched to ${MODEL_OPTIONS.find(x => x.value === val).chip}`);
-  };
 
   const checkReputation = async (ip) => {
     if (reputations[ip]) return;
@@ -531,7 +656,18 @@ export default function App() {
     } catch {}
   };
 
-  // ── SEND MESSAGE — Firebase history save ────────────────────────────────
+  useEffect(() => {
+    const alertIPs = [...new Set(alerts.filter(a => a.event_type === "alert").map(a => a.src_ip).filter(Boolean))];
+    alertIPs.forEach(ip => checkReputation(ip));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alerts]);
+
+  const handleModelChange = (e) => {
+    const val = e.target.value;
+    setSelectedModel(val);
+    showToast(`Switched to ${MODEL_OPTIONS.find(x => x.value === val).chip}`);
+  };
+
   const sendMessage = async (text) => {
     const q = (text || input).trim();
     if (!q || loading || charCount > MAX_CHARS) return;
@@ -539,57 +675,19 @@ export default function App() {
     const now = new Date().toLocaleTimeString();
     setMessages(prev => [...prev, { role: "user", text: q, time: now }]);
     setLoading(true);
-
     const sessionTitle = q.length > 50 ? q.substring(0, 50) + "..." : q;
-
-    // Save user message to Firestore
     try {
-      await setDoc(doc(db, "soc_sessions", sessionId), {
-        username:   username,
-        title:      sessionTitle,
-        model_used: selectedModel,
-        updated_at: serverTimestamp(),
-        created_at: serverTimestamp(),
-      }, { merge: true });
-
-      await addDoc(collection(db, "soc_messages"), {
-        username:   username,
-        session_id: sessionId,
-        role:       "user",
-        message:    q,
-        model_used: selectedModel,
-        created_at: serverTimestamp(),
-      });
-    } catch (e) {
-      console.error("Firestore user save error:", e);
-    }
-
+      await setDoc(doc(db, "soc_sessions", sessionId), { username, title: sessionTitle, model_used: selectedModel, updated_at: serverTimestamp(), created_at: serverTimestamp() }, { merge: true });
+      await addDoc(collection(db, "soc_messages"), { username, session_id: sessionId, role: "user", message: q, model_used: selectedModel, created_at: serverTimestamp() });
+    } catch (e) { console.error("Firestore user save error:", e); }
     try {
-      const res  = await fetch(`${FLASK_URL}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, model: selectedModel })
-      });
+      const res  = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, model: selectedModel }) });
       const data = await res.json();
       setMessages(prev => [...prev, { role: "ai", text: data.answer, time: new Date().toLocaleTimeString(), model: modelObj.chip }]);
-
-      // Save AI response to Firestore
       try {
-        await addDoc(collection(db, "soc_messages"), {
-          username:   username,
-          session_id: sessionId,
-          role:       "ai",
-          message:    data.answer,
-          model_used: selectedModel,
-          created_at: serverTimestamp(),
-        });
-        await setDoc(doc(db, "soc_sessions", sessionId), {
-          updated_at: serverTimestamp(),
-        }, { merge: true });
-      } catch (e) {
-        console.error("Firestore AI save error:", e);
-      }
-
+        await addDoc(collection(db, "soc_messages"), { username, session_id: sessionId, role: "ai", message: data.answer, model_used: selectedModel, created_at: serverTimestamp() });
+        await setDoc(doc(db, "soc_sessions", sessionId), { updated_at: serverTimestamp() }, { merge: true });
+      } catch (e) { console.error("Firestore AI save error:", e); }
     } catch (err) {
       setMessages(prev => [...prev, { role: "ai", text: `Error: ${err.message}`, time: new Date().toLocaleTimeString() }]);
     }
@@ -598,20 +696,14 @@ export default function App() {
 
   const handleUpload = async () => {
     if (!uploadFile) { setUploadStatus("No file selected"); return; }
-    setUploading(true);
-    setUploadStatus("Uploading...");
+    setUploading(true); setUploadStatus("Uploading...");
     const formData = new FormData();
     formData.append("file", uploadFile);
     try {
       const res  = await fetch(`${FLASK_URL}/upload`, { method: "POST", body: formData });
       const data = await res.json();
-      if (data.message) {
-        setUploadStatus("✓ " + data.message);
-        showToast("Logs uploaded successfully");
-        setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000);
-      } else {
-        setUploadStatus("✗ " + (data.error || "Upload failed"));
-      }
+      if (data.message) { setUploadStatus("✓ " + data.message); showToast("Logs uploaded"); setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000); }
+      else { setUploadStatus("✗ " + (data.error || "Upload failed")); }
     } catch { setUploadStatus("✗ Cannot connect to Flask"); }
     setUploading(false);
   };
@@ -638,7 +730,7 @@ export default function App() {
               {uploadFile && <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>▸ {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)</div>}
             </div>
             <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.8 }}>
-              ⚠ Only <span style={{ color: "var(--orange)" }}>eve.json</span> and <span style={{ color: "var(--orange)" }}>conn.log</span> are accepted.<br />Existing file will be backed up before replacing.
+              ⚠ Only <span style={{ color: "var(--orange)" }}>eve.json</span> and <span style={{ color: "var(--orange)" }}>conn.log</span> are accepted.
             </div>
             {uploadStatus && (
               <div style={{ fontFamily: "var(--mono)", fontSize: 11, padding: "8px 12px", borderRadius: 4, marginBottom: 16,
@@ -799,7 +891,7 @@ export default function App() {
                           </div>
                         </div>
                       ) : m.role === "ai" ? (
-                        <SiraMessage text={m.text} />
+                        <div className="bubble"><SiraMessage text={m.text} /></div>
                       ) : (
                         <div className="bubble">{m.text}</div>
                       )}
@@ -824,7 +916,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-              <button className={`scroll-btn ${showScrollBtn ? "visible" : "hidden"}`} onClick={() => scrollToBottom(true)} title="Scroll to bottom">
+              <button className={`scroll-btn ${showScrollBtn ? "visible" : "hidden"}`} onClick={() => scrollToBottom(true)}>
                 {unreadCount > 0 && <span className="unread-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
                 ↓
               </button>
