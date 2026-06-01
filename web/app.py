@@ -196,6 +196,7 @@ def ask():
     api_key     = data.get('api_key', None)
     date_filter = data.get('date', None)
     hour_filter = data.get('hour', None)
+    history     = data.get('history', [])
 
     llm, llm_type = get_llm(model, api_key)
 
@@ -274,6 +275,9 @@ RECOMMENDED ACTIONS:
 
 Log Data:
 {context}
+
+Previous conversation:
+{chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in history[-4:] if m.get('content')]) or "None"}
 
 Question: {question}
 
