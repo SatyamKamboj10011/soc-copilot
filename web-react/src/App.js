@@ -561,7 +561,9 @@ function InvestigationPage({ onAskSira }) {
 // ── MAIN APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [selectedModel, setSelectedModel]   = useState("ollama");
-  const [messages, setMessages]             = useState([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]);
+  const [messages, setMessages] = useState([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [lastSession, setLastSession] = useState(null);
   const [input, setInput]                   = useState("");
   const [loading, setLoading]               = useState(false);
   const [alerts, setAlerts]                 = useState([]);
@@ -640,6 +642,25 @@ export default function App() {
   }, []);
 
   useEffect(() => { fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {}); }, []);
+  useEffect(() => {
+  const loadLastSession = async () => {
+    try {
+      const { collection, query, where, orderBy, limit, getDocs } = await import("firebase/firestore");
+      const sessionsRef = collection(db, "soc_sessions");
+      const q = query(sessionsRef, where("username", "==", username), orderBy("updated_at", "desc"), limit(1));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const session = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        setLastSession(session);
+        setShowResumePrompt(true);
+      }
+    } catch (e) { console.error("Session load error:", e); }
+  };
+  loadLastSession();
+}, []);
+  
+  
+  
   useEffect(() => { fetch(`${FLASK_URL}/health`).then(r => r.json()).then(setHealth).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -681,7 +702,12 @@ export default function App() {
       await addDoc(collection(db, "soc_messages"), { username, session_id: sessionId, role: "user", message: q, model_used: selectedModel, created_at: serverTimestamp() });
     } catch (e) { console.error("Firestore user save error:", e); }
     try {
-      const res  = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, model: selectedModel }) });
+      const recentHistory = messages.slice(-6).filter(m => !m.isWelcome).map(m => ({
+  role: m.role === "user" ? "user" : "assistant",
+  content: m.text
+}));
+
+const res = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, model: selectedModel, history: recentHistory }) });
       const data = await res.json();
       setMessages(prev => [...prev, { role: "ai", text: data.answer, time: new Date().toLocaleTimeString(), model: modelObj.chip }]);
       try {
@@ -702,8 +728,11 @@ export default function App() {
     try {
       const res  = await fetch(`${FLASK_URL}/upload`, { method: "POST", body: formData });
       const data = await res.json();
-      if (data.message) { setUploadStatus("✓ " + data.message); showToast("Logs uploaded"); setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000); }
-      else { setUploadStatus("✗ " + (data.error || "Upload failed")); }
+      if (data.message) { 
+         const eventsMsg = data.events_loaded ? ` (${data.events_loaded} events loaded)` : "";
+         setUploadStatus("✓ " + data.message + eventsMsg); 
+         showToast("Logs uploaded");
+      } else { setUploadStatus("✗ " + (data.error || "Upload failed")); }
     } catch { setUploadStatus("✗ Cannot connect to Flask"); }
     setUploading(false);
   };
@@ -716,7 +745,45 @@ export default function App() {
     <>
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
       {toast && <div className="toast">✓ {toast.toUpperCase()}</div>}
-
+      {showResumePrompt && lastSession && (
+  <div className="modal-overlay" onClick={() => setShowResumePrompt(false)}>
+    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 460 }}>
+      <div className="modal-title">Resume Last Session?</div>
+      <div className="modal-sub">YOU HAVE A PREVIOUS INVESTIGATION SESSION</div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mid)", margin: "16px 0", lineHeight: 1.8, background: "var(--bg3)", padding: "12px", borderRadius: 4, border: "1px solid var(--border2)" }}>
+        <div style={{ color: "var(--accent)", marginBottom: 6 }}>⬡ {lastSession.title}</div>
+        <div style={{ fontSize: 9, color: "var(--text-dim)" }}>MODEL: {lastSession.model_used?.toUpperCase()} — {lastSession.updated_at?.toDate?.()?.toLocaleString?.() || "Recent"}</div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={async () => {
+          try {
+            const { collection, query, where, orderBy, getDocs } = await import("firebase/firestore");
+            const msgsRef = collection(db, "soc_messages");
+            const q = query(msgsRef, where("session_id", "==", lastSession.id), orderBy("created_at", "asc"));
+            const snap = await getDocs(q);
+            const loaded = snap.docs.map(d => ({
+              role: d.data().role === "user" ? "user" : "ai",
+              text: d.data().message,
+              time: d.data().created_at?.toDate?.()?.toLocaleTimeString?.() || "",
+              model: d.data().model_used
+            }));
+            setMessages([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }, ...loaded]);
+            setSessionId(lastSession.id);
+            if (lastSession.model_used) setSelectedModel(lastSession.model_used);
+            showToast("Session resumed");
+          } catch (e) { console.error("Resume error:", e); }
+          setShowResumePrompt(false);
+        }} style={{ flex: 1, padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+          ↩ RESUME SESSION
+        </button>
+        <button onClick={() => { setShowResumePrompt(false); showToast("Starting fresh"); }} 
+          style={{ flex: 1, padding: "12px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+          + NEW SESSION
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {showUpload && (
         <div className="modal-overlay" onClick={() => setShowUpload(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
@@ -730,8 +797,8 @@ export default function App() {
               {uploadFile && <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>▸ {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)</div>}
             </div>
             <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.8 }}>
-              ⚠ Only <span style={{ color: "var(--orange)" }}>eve.json</span> and <span style={{ color: "var(--orange)" }}>conn.log</span> are accepted.
-            </div>
+  ⚠ Any <span style={{ color: "var(--orange)" }}>.json</span> file will be saved as eve.json. Any <span style={{ color: "var(--orange)" }}>.log</span> file will be saved as conn.log.
+</div>
             {uploadStatus && (
               <div style={{ fontFamily: "var(--mono)", fontSize: 11, padding: "8px 12px", borderRadius: 4, marginBottom: 16,
                 background: uploadStatus.startsWith("✓") ? "var(--green-dim)" : "var(--red-dim)",
@@ -802,7 +869,13 @@ export default function App() {
           </div>
           <div className={`model-badge ${modelObj.cloud ? "badge-cloud" : "badge-local"}`}>⬡ {modelObj.tag}</div>
           <div className="panel-divider" />
-          <div className="section-label">Overview</div>
+          <div className="section-label" style={{ justifyContent: "space-between" }}>
+  Overview
+  <button onClick={() => fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {})}
+    style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", letterSpacing: 1 }}>
+    ↻ REFRESH
+  </button>
+</div>
           <div className="stats-grid" style={{ marginTop: 10 }}>
             <div className="stat"><div className="stat-glow c" /><div className="stat-label">Total Events</div><div className="stat-value c">{stats?.total_events || alerts.length || "--"}</div></div>
             <div className="stat"><div className="stat-glow r" /><div className="stat-label">Alerts</div><div className="stat-value r">{String(stats?.alert_count ?? alertCount).padStart(2, "0")}</div></div>
