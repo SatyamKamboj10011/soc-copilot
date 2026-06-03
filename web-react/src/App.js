@@ -14,6 +14,8 @@ const MODEL_OPTIONS = [
   { value: "mistral",     label: "Mistral Small (cloud — free)",     tag: "CLOUD — FREE", chip: "mistral small (cloud)", cloud: true  },
 ];
 
+
+
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",
   "Suspicious activity?",
@@ -24,19 +26,31 @@ const QUICK_QUESTIONS = [
 const MAX_CHARS = 500;
 
 function parseSiraResponse(text) {
-  const sections = ["SUMMARY", "THREAT DETAILS", "WHAT THIS MEANS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"];
-  const result = [];
-  for (let i = 0; i < sections.length; i++) {
-    const current = sections[i];
-    const next = sections[i + 1];
-    const startIdx = text.indexOf(current);
-    if (startIdx === -1) continue;
-    const contentStart = startIdx + current.length;
-    const endIdx = next ? text.indexOf(next) : text.length;
-    const content = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
-    result.push({ heading: current, content });
+  const allSectionSets = [
+    ["SUMMARY", "THREAT DETAILS", "WHAT THIS MEANS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"],
+    ["OVERVIEW", "TOP THREATS", "PATTERNS DETECTED", "PRIORITY ACTIONS"],
+    ["ATTACKER PROFILE", "ATTACK TIMELINE", "RISK LEVEL", "BLOCK RECOMMENDATION"],
+    ["SITUATION", "IMMEDIATE ACTIONS", "SHORT TERM", "LONG TERM"],
+  ];
+
+  // Try each section set
+  for (const sections of allSectionSets) {
+    const result = [];
+    for (let i = 0; i < sections.length; i++) {
+      const current = sections[i];
+      const next = sections[i + 1];
+      const startIdx = text.indexOf(current);
+      if (startIdx === -1) continue;
+      const contentStart = startIdx + current.length;
+      const endIdx = next ? text.indexOf(next) : text.length;
+      const content = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
+      result.push({ heading: current, content });
+    }
+    if (result.length >= 2) return result;
   }
-  return result.length === 0 ? null : result;
+
+  // No sections found — return null so it renders as plain text
+  return null;
 }
 
 function getRiskLevel(text) {
@@ -265,7 +279,8 @@ const sharedCss = `
   .sira-action-num.n3 { background: rgba(0,255,157,0.12); color: var(--green); }
   .sira-action-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
   .sira-action-desc  { font-size: 11px; color: var(--text-mid); line-height: 1.6; }
-  .sira-fallback { background: var(--bg3); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 14px 16px; font-size: 13px; color: var(--text-mid); line-height: 1.75; }
+  .sira-fallback { background: var(--bg3); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 16px 18px; font-size: 13px; color: var(--text); line-height: 1.85; font-family: var(--sans); }
+.sira-fallback strong { color: var(--accent); font-weight: 700; }
 
   .msg-meta { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 6px; display: flex; align-items: center; gap: 10px; }
   .msg.user .msg-meta { justify-content: flex-end; }
@@ -822,6 +837,7 @@ export default function App() {
   const [uploadStatus, setUploadStatus]     = useState("");
   const [uploading, setUploading]           = useState(false);
   const [sessionId, setSessionId]           = useState(() => uuidv4());
+  const [didOpen, setDidOpen] = useState(false);
 
   const messagesRef = useRef(null);
   const toastTimer  = useRef(null);
@@ -1186,6 +1202,12 @@ export default function App() {
               </div>
               <div className="model-chip">{modelObj.chip}</div>
               <button className="clear-btn" onClick={() => { setMessages([]); setSessionId(uuidv4()); showToast("Chat cleared"); }}>CLEAR</button>
+              <button onClick={() => setDidOpen(true)} style={{
+  padding: "4px 12px", background: "var(--purple-dim)",
+  border: "1px solid var(--purple)", borderRadius: 2,
+  color: "var(--purple)", fontFamily: "var(--mono)",
+  fontSize: 8, letterSpacing: 1, cursor: "pointer"
+}}>◈ SIRA FACE</button>
             </div>
             <div className="messages-wrap">
               <div className="messages" ref={messagesRef} onScroll={handleScroll}>
@@ -1255,6 +1277,21 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {didOpen && (
+        <div className="modal-overlay" onClick={() => setDidOpen(false)}>
+          <div style={{ width: 420, height: 620, borderRadius: 12, overflow: "hidden", position: "relative" }} onClick={e => e.stopPropagation()}>
+            <button onClick={() => setDidOpen(false)} style={{ position: "absolute", top: 10, right: 10, zIndex: 10, background: "rgba(0,0,0,0.6)", border: "none", color: "white", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontSize: 14 }}>✕</button>
+            <iframe
+              src="https://studio.d-id.com/agents/share?id=v2_agt_HW-Wx0tu&key=Y2tfSU9mWFQ1YWc1V2dCQ1FmNTY4YUhP"
+              width="420"
+              height="620"
+              style={{ border: "none", borderRadius: 12 }}
+              allow="camera; microphone"
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 }
