@@ -368,6 +368,69 @@ const sharedCss = `
     .sira-grid { grid-template-columns: 1fr; }
     .sira-section.full-width { grid-column: 1; }
   }
+
+
+  /* ── THREAT SCORE RING ── */
+
+.sira-threat-ring{
+  width:140px;
+  height:140px;
+  margin:auto;
+  position:relative;
+}
+
+.sira-ring-svg{
+  width:140px;
+  height:140px;
+  transform:rotate(-90deg);
+}
+
+.sira-ring-bg{
+  fill:none;
+  stroke:var(--border2);
+  stroke-width:10;
+}
+
+.sira-ring-fill{
+  fill:none;
+  stroke-width:10;
+  stroke-linecap:round;
+}
+
+.sira-ring-fill.high,
+.sira-ring-fill.critical{
+  stroke:var(--red);
+}
+
+.sira-ring-fill.medium{
+  stroke:var(--orange);
+}
+
+.sira-ring-fill.low{
+  stroke:var(--green);
+}
+
+.sira-ring-center{
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+}
+
+.sira-ring-score{
+  font-size:34px;
+  font-weight:800;
+  color:var(--text);
+}
+
+.sira-ring-label{
+  font-family:var(--mono);
+  font-size:9px;
+  letter-spacing:2px;
+  color:var(--text-dim);
+}
 `;
 
 function extractKV(text) {
@@ -839,6 +902,13 @@ export default function App() {
   const [sessionId, setSessionId]           = useState(() => uuidv4());
   const [didOpen, setDidOpen] = useState(false);
 
+
+  const [hermesOpen, setHermesOpen]     = useState(false);
+const [hermesTask, setHermesTask]     = useState("");
+const [hermesLoading, setHermesLoading] = useState(false);
+const [hermesSteps, setHermesSteps]   = useState([]);
+const [hermesAnswer, setHermesAnswer] = useState("");
+
   const messagesRef = useRef(null);
   const toastTimer  = useRef(null);
   const isResizing  = useRef(false);
@@ -942,6 +1012,26 @@ export default function App() {
     const val = e.target.value;
     setSelectedModel(val);
     showToast(`Switched to ${MODEL_OPTIONS.find(x => x.value === val).chip}`);
+  };
+
+  const startHermes = async () => {
+    if (!hermesTask.trim()) return;
+    setHermesLoading(true);
+    setHermesSteps([]);
+    setHermesAnswer("");
+    try {
+      const res  = await fetch(`${FLASK_URL}/hermes-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: hermesTask })
+      });
+      const data = await res.json();
+      setHermesSteps(data.steps || []);
+      setHermesAnswer(data.answer || "Investigation complete");
+    } catch (err) {
+      setHermesAnswer(`Error: ${err.message}`);
+    }
+    setHermesLoading(false);
   };
 
   const sendMessage = async (text) => {
@@ -1093,6 +1183,14 @@ export default function App() {
                 border: page === p ? "1px solid var(--accent)" : "1px solid var(--border2)"
               }}>{p}</button>
             ))}
+
+            <button onClick={() => setHermesOpen(true)} style={{
+              fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1,
+              padding: "5px 14px", borderRadius: 2, cursor: "pointer",
+              background: "linear-gradient(135deg,rgba(180,124,255,0.2),rgba(0,229,255,0.1))",
+              color: "var(--purple)", border: "1px solid var(--purple)",
+              textTransform: "uppercase", fontWeight: 700
+            }}>⬡ HERMES AGENT</button>
           </div>
           <div className="nav-right">
             <div className="nav-status">
@@ -1292,6 +1390,135 @@ export default function App() {
           </div>
         </div>
       )}
+
+{/* ── HERMES AGENT MODAL ── */}
+{hermesOpen && (
+  <div className="modal-overlay" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>
+    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 700, maxHeight: "85vh" }}>
+      <button className="modal-close" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>✕</button>
+
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 3, marginBottom: 4 }}>⬡ AUTONOMOUS AI AGENT</div>
+        <div className="modal-title">Hermes Investigation Agent</div>
+        <div className="modal-sub">Powered by Nous Hermes2 — autonomous multi-step investigation</div>
+      </div>
+
+      {/* Task input */}
+      {!hermesLoading && !hermesAnswer && (
+        <div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>GIVE HERMES A TASK</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <input
+              value={hermesTask}
+              onChange={e => setHermesTask(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && hermesTask.trim() && startHermes()}
+              placeholder="e.g. Investigate 185.220.101.45 and give me a full report"
+              style={{ flex: 1, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 3, padding: "10px 14px", color: "var(--text)", fontFamily: "var(--mono)", fontSize: 11, outline: "none" }}
+            />
+            <button onClick={startHermes} disabled={!hermesTask.trim()} style={{
+              padding: "10px 20px", background: "linear-gradient(135deg,var(--purple),#8a5fd4)",
+              border: "none", borderRadius: 3, color: "white",
+              fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700,
+              letterSpacing: 2, cursor: "pointer", textTransform: "uppercase"
+            }}>INVESTIGATE ▶</button>
+          </div>
+
+          {/* Quick tasks */}
+          <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>QUICK TASKS</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {[
+              "Investigate the entire network and identify all threats",
+              "Who is attacking us and what are they doing?",
+              "Give me a complete threat assessment with CVEs",
+              "What is the most dangerous IP and why?",
+              "Summarise all attacks and recommend actions"
+            ].map((task, i) => (
+              <button key={i} onClick={() => setHermesTask(task)} style={{
+                fontFamily: "var(--mono)", fontSize: 8, letterSpacing: 1,
+                padding: "5px 10px", borderRadius: 2,
+                border: "1px solid var(--border2)", background: "var(--bg3)",
+                color: "var(--text-mid)", cursor: "pointer", textTransform: "uppercase"
+              }}>{task}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Loading — live steps */}
+      {hermesLoading && (
+        <div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--purple)", animation: "blink 1s infinite" }} />
+            HERMES IS INVESTIGATING...
+          </div>
+          <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: 16, marginBottom: 12, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-mid)" }}>
+            ⬡ Task: {hermesTask}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {hermesSteps.map((step, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--purple)", borderRadius: 3 }}>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", minWidth: 60 }}>Step {step.step}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text)", marginBottom: 3 }}>
+                    ✓ {step.tool}({step.input})
+                  </div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-mid)" }}>{step.result?.substring(0, 120)}...</div>
+                </div>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--accent)", borderRadius: 3 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "blink 1s infinite" }} />
+              <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>Analysing results...</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Final answer */}
+      {hermesAnswer && !hermesLoading && (
+        <div>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--green)", letterSpacing: 2, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            ✓ INVESTIGATION COMPLETE — {hermesSteps.length} steps executed
+          </div>
+
+          {/* Steps summary */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {hermesSteps.map((step, i) => (
+              <div key={i} style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "3px 8px", borderRadius: 2, background: "var(--purple-dim)", color: "var(--purple)", border: "1px solid rgba(180,124,255,0.3)" }}>
+                ✓ {step.tool}
+              </div>
+            ))}
+          </div>
+
+          {/* Full report */}
+          <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--purple)", borderRadius: 4, padding: 16, maxHeight: 400, overflowY: "auto" }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 12 }}>⬡ HERMES INVESTIGATION REPORT</div>
+            <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>
+              {hermesAnswer}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button onClick={() => { setHermesAnswer(""); setHermesSteps([]); setHermesTask(""); }} style={{
+              flex: 1, padding: "10px", background: "transparent",
+              border: "1px solid var(--border2)", borderRadius: 3,
+              color: "var(--text-mid)", fontFamily: "var(--mono)",
+              fontSize: 10, cursor: "pointer", letterSpacing: 1
+            }}>↩ NEW INVESTIGATION</button>
+            <button onClick={() => { navigator.clipboard.writeText(hermesAnswer); showToast("Report copied"); }} style={{
+              flex: 1, padding: "10px", background: "var(--purple-dim)",
+              border: "1px solid var(--purple)", borderRadius: 3,
+              color: "var(--purple)", fontFamily: "var(--mono)",
+              fontSize: 10, cursor: "pointer", letterSpacing: 1
+            }}>⊕ COPY REPORT</button>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+)}
+      
     </>
   );
 }
