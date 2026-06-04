@@ -15,11 +15,21 @@ import os
 import shutil
 import subprocess
 import uuid
+from langgraph.func import task
 from werkzeug.utils import secure_filename
 import csv 
 import io
 from flask import Response
 from dotenv import load_dotenv
+import os
+import sys
+
+ROOT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")
+)
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -884,6 +894,84 @@ One plain English sentence on what this tells us about our defences."""
     return jsonify({"answer": answer, "signature": alert_signature, "src_ip": src_ip})
 
 # ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/hermes-agent', methods=['POST'])
+def hermes_agent():
+    data = request.json
+    task = data.get('task', '').strip()
+    if not task:
+        return jsonify({"error": "No task provided"}), 400
+
+    try:
+        from ai.hermes_agent import run_hermes_agent
+        result = run_hermes_agent(task)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/cve-lookup', methods=['GET'])
+def cve_lookup():
+    import requests as req
+    signature = request.args.get('signature', '').strip()
+    if not signature:
+        return jsonify({"error": "No signature provided"}), 400
+
+    keywords = signature
+    for prefix in ['ET ', 'GPL ', 'SURICATA ', 'EMERGING-THREATS ', 'POLICY ', 'MALWARE ', 'SCAN ', 'WEB_SERVER ', 'EXPLOIT ']:
+        keywords = keywords.replace(prefix, '')
+    
+    search_term = ' '.join(keywords.split()[:3])
+
+    results = []
+    try:
+        response = req.get(
+            "https://services.nvd.nist.gov/rest/json/cves/2.0",
+            params={"keywordSearch": search_term, "resultsPerPage": 5, "startIndex": 0},
+            headers={"User-Agent": "SOC-Copilot/1.0"},
+            timeout=10
+        )
+        data = response.json()
+        vulnerabilities = data.get("vulnerabilities", [])
+
+        for vuln in vulnerabilities:
+            cve = vuln.get("cve", {})
+            cve_id = cve.get("id", "Unknown")
+            descriptions = cve.get("descriptions", [])
+            description = next((d["value"] for d in descriptions if d["lang"] == "en"), "No description")
+            
+            metrics = cve.get("metrics", {})
+            cvss_score = None
+            cvss_severity = "UNKNOWN"
+            
+            for version in ["cvssMetricV31", "cvssMetricV30", "cvssMetricV2"]:
+                metric = metrics.get(version, [])
+                if metric:
+                    cvss_data = metric[0].get("cvssData", {})
+                    cvss_score = cvss_data.get("baseScore")
+                    cvss_severity = cvss_data.get("baseSeverity", "UNKNOWN")
+                    break
+
+            results.append({
+                "cve_id": cve_id,
+                "description": description[:200] + "..." if len(description) > 200 else description,
+                "cvss_score": cvss_score,
+                "cvss_severity": cvss_severity,
+                "published": cve.get("published", "")[:10],
+                "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            })
+
+    except Exception as e:
+        return jsonify({"error": f"CVE lookup failed: {str(e)}", "results": []}), 500
+
+    return jsonify({
+        "signature": signature,
+        "search_term": search_term,
+        "results": results,
+        "total": len(results),
+        "source": "NVD — National Vulnerability Database"
+    })
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True, port=5000)
