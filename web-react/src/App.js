@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import Lottie from "lottie-react";
+import securityAnimation from "./security-animation.json";
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -433,30 +435,6 @@ const sharedCss = `
 }
 `;
 
-function extractKV(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const pairs = [];
-  for (const line of lines) {
-    const m = line.match(/^[-•]?\s*([^:]+):\s*(.+)/);
-    if (m) pairs.push({ key: m[1].trim(), val: m[2].trim() });
-    else if (line && pairs.length === 0) pairs.push({ key: null, val: line });
-  }
-  return pairs;
-}
-
-function extractActions(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const actions = [];
-  for (const line of lines) {
-    const m = line.match(/^(\d+)\.\s*(.+)/);
-    if (m) {
-      const parts = m[2].split(/\s*—\s*/);
-      actions.push({ title: parts[0].trim(), desc: parts.slice(1).join(" — ").trim() });
-    }
-  }
-  return actions;
-}
-
 function SiraMessage({ text, modelChip }) {
   if (!text) return null;
 
@@ -464,7 +442,7 @@ function SiraMessage({ text, modelChip }) {
   const sectionNames = ["SUMMARY", "THREAT DETAILS", "WHAT THIS MEANS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"];
   for (let i = 0; i < sectionNames.length; i++) {
     const current = sectionNames[i];
-    const next    = sectionNames[i + 1];
+    const next = sectionNames[i + 1];
     const startIdx = text.indexOf(current);
     if (startIdx === -1) continue;
     const contentStart = startIdx + current.length;
@@ -472,142 +450,94 @@ function SiraMessage({ text, modelChip }) {
     sections[current] = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
   }
 
-  if (Object.keys(sections).length === 0) {
-    return <div className="sira-fallback">{text}</div>;
-  }
-
   const riskText = sections["RISK ASSESSMENT"] || "";
   const riskLevel = /CRITICAL/i.test(riskText) ? "critical" : /HIGH/i.test(riskText) ? "high" : /MEDIUM/i.test(riskText) ? "medium" : /LOW/i.test(riskText) ? "low" : "medium";
   const riskLabel = riskLevel.toUpperCase();
+  const riskColor = riskLevel === "low" ? "var(--green)" : riskLevel === "medium" ? "var(--orange)" : "var(--red)";
 
   const confidenceMatch = riskText.match(/confidence[:\s]+(\w+)/i);
-  const confidenceText  = confidenceMatch ? confidenceMatch[1].toLowerCase() : null;
-  const confidencePct   = confidenceText === "high" ? 85 : confidenceText === "medium" ? 60 : confidenceText === "low" ? 35 : null;
+  const confidenceText = confidenceMatch ? confidenceMatch[1].toLowerCase() : null;
+  const confidencePct = confidenceText === "high" ? 85 : confidenceText === "medium" ? 60 : confidenceText === "low" ? 35 : null;
 
-  const threatKV  = extractKV(sections["THREAT DETAILS"] || "");
-  const actions   = extractActions(sections["RECOMMENDED ACTIONS"] || "");
-  const numColors = ["n1", "n2", "n3"];
+  const threatText = sections["THREAT DETAILS"] || "";
+  const ipMatches = threatText.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g) || [];
+  const portMatch = threatText.match(/[Pp]ort[:\s]+(\d+)/);
+  const sigMatch = text.match(/ET\s+\w+[^\n]*/);
+
+  const tags = [
+    ...ipMatches.slice(0, 2).map(ip => ({ label: ip, color: "var(--red)", bg: "rgba(255,61,90,0.08)", border: "rgba(255,61,90,0.2)" })),
+    portMatch ? { label: `PORT ${portMatch[1]}`, color: "var(--text)", bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)" } : null,
+    sigMatch ? { label: sigMatch[0].substring(0, 28) + "...", color: "var(--orange)", bg: "rgba(255,170,0,0.06)", border: "rgba(255,170,0,0.15)" } : null,
+    { label: `SEVERITY ${riskLabel}`, color: riskColor, bg: `rgba(${riskLevel === "low" ? "0,255,157" : riskLevel === "medium" ? "255,170,0" : "255,61,90"},0.08)`, border: `rgba(${riskLevel === "low" ? "0,255,157" : riskLevel === "medium" ? "255,170,0" : "255,61,90"},0.2)` },
+  ].filter(Boolean);
+
+  const actionsText = sections["RECOMMENDED ACTIONS"] || "";
+  const actionLines = actionsText.split("\n").map(l => l.trim()).filter(l => /^\d+\./.test(l));
+  const actions = actionLines.slice(0, 3).map(l => l.replace(/^\d+\.\s*/, "").split("—")[0].trim());
+  while (actions.length < 3) actions.push(null);
+
+  const hasStructure = Object.keys(sections).length > 0;
 
   return (
-    <div className="sira-response">
-
-      {/* Header */}
-      <div className="sira-header">
-        <div className="sira-header-icon">🛡</div>
-        <div>
-          <div className="sira-header-title">SIRA ANALYSIS</div>
-          <div className="sira-header-sub">Security Incident Response Assistant · {modelChip || "sira-model"}</div>
-        </div>
-        <div className={`sira-risk-pill ${riskLevel}`}>
-          <div className={`sira-risk-dot ${riskLevel}`} />
-          <span className={`sira-risk-label ${riskLevel}`}>{riskLabel}</span>
-        </div>
+    <div style={{background:"#090d14",borderRadius:10,overflow:"hidden",border:"0.5px solid rgba(255,255,255,0.07)",animation:"cardIn 0.3s ease both"}}>
+      {/* Meta row */}
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:hasStructure ? riskColor : "var(--accent)",flexShrink:0}}/>
+        <span style={{fontSize:10,fontFamily:"var(--mono)",letterSpacing:2,color:hasStructure ? riskColor : "var(--accent)"}}>{hasStructure ? `${riskLabel} RISK` : "SIRA ANALYSIS"}</span>
+        <span style={{color:"var(--text-dim)",fontSize:10,fontFamily:"var(--mono)"}}>·</span>
+        <span style={{fontSize:10,color:"var(--text-dim)",fontFamily:"var(--mono)"}}>{modelChip || "sira-model"}</span>
+        <span style={{fontSize:10,color:"var(--text-dim)",fontFamily:"var(--mono)",marginLeft:"auto"}}>{new Date().toLocaleTimeString()}</span>
       </div>
 
       {/* Summary */}
-      {sections["SUMMARY"] && (
-        <div className="sira-card summary">
-          <div className="sira-card-header">
-            <span className="sira-card-icon summary">◉</span>
-            <span className="sira-card-title summary">Summary</span>
-          </div>
-          <p className="sira-prose">{sections["SUMMARY"]}</p>
-        </div>
-      )}
-
-      {/* Threat Details + Risk Assessment side by side */}
-      <div className="sira-two-col">
-
-        {sections["THREAT DETAILS"] && (
-          <div className="sira-card threat" style={{ marginBottom: 0 }}>
-            <div className="sira-card-header">
-              <span className="sira-card-icon threat">⚠</span>
-              <span className="sira-card-title threat">Threat Details</span>
-            </div>
-            <div className="sira-kv">
-              {threatKV.map((item, i) => (
-                <div key={i} className="sira-kv-row">
-                  {item.key && <span className="sira-kv-key">{item.key}</span>}
-                  <span className={`sira-kv-val ${item.key?.toLowerCase().includes("attacker") || item.key?.toLowerCase().includes("src") ? "red" : ""}`}>
-                    {item.val}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {sections["RISK ASSESSMENT"] && (
-          <div className="sira-card risk" style={{ marginBottom: 0 }}>
-            <div className="sira-card-header">
-              <span className="sira-card-icon risk">◆</span>
-              <span className="sira-card-title risk">Risk Assessment</span>
-            </div>
-            <div className="sira-risk-center">
-              <div className={`sira-risk-box ${riskLevel}`}>
-                <div className={`sira-risk-box-label ${riskLevel}`}>{riskLabel}</div>
-                <div className={`sira-risk-box-sub ${riskLevel}`}>
-                  {riskLevel === "critical" ? "IMMEDIATE ACTION" : riskLevel === "high" ? "URGENT REVIEW" : riskLevel === "medium" ? "MONITOR CLOSELY" : "LOW PRIORITY"}
-                </div>
-              </div>
-            </div>
-            <p className="sira-prose" style={{ fontSize: 11 }}>
-              {riskText.replace(/CRITICAL|HIGH|MEDIUM|LOW/gi, "").replace(/Risk Level[:\s]*/i, "").replace(/Why[:\s]*/i, "").trim().split("\n").filter(Boolean)[0]}
-            </p>
-            {confidencePct && (
-              <div className="sira-confidence">
-                <span className="sira-confidence-label">Confidence</span>
-                <div className="sira-confidence-bar">
-                  <div className={`sira-confidence-fill ${riskLevel}`} style={{ width: `${confidencePct}%` }} />
-                </div>
-                <span className={`sira-confidence-pct ${riskLevel}`}>{confidencePct}%</span>
-              </div>
-            )}
-          </div>
+      <div style={{fontSize:13,color:"var(--text)",lineHeight:1.85,padding:14,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+        {(sections["SUMMARY"] || text).split(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g).map((part,i)=>
+          /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(part)
+            ? <span key={i} style={{color:"var(--red)",fontFamily:"var(--mono)",fontWeight:700}}>{part}</span>
+            : part
         )}
       </div>
 
-      {/* What This Means */}
-      {sections["WHAT THIS MEANS"] && (
-        <div className="sira-card means">
-          <div className="sira-card-header">
-            <span className="sira-card-icon means">◈</span>
-            <span className="sira-card-title means">What This Means</span>
-          </div>
-          <p className="sira-prose">{sections["WHAT THIS MEANS"]}</p>
+      {/* Tags — only if structured */}
+      {hasStructure && tags.length > 0 && (
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+          {tags.map((tag,i)=>(
+            <span key={i} style={{fontSize:10,padding:"3px 10px",borderRadius:3,fontFamily:"var(--mono)",color:tag.color,background:tag.bg,border:`1px solid ${tag.border}`}}>
+              {tag.label}
+            </span>
+          ))}
         </div>
       )}
 
-      {/* Recommended Actions */}
-      {sections["RECOMMENDED ACTIONS"] && (
-        <div className="sira-card actions">
-          <div className="sira-card-header">
-            <span className="sira-card-icon actions">▶</span>
-            <span className="sira-card-title actions">Recommended Actions</span>
+      {/* Actions */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,padding:"12px 14px"}}>
+        <div style={{padding:"10px 12px",borderRadius:5,background:"rgba(255,61,90,0.05)",border:"1px solid rgba(255,61,90,0.18)"}}>
+          <div style={{fontSize:7,color:"var(--red)",fontFamily:"var(--mono)",letterSpacing:1,marginBottom:5}}>NOW</div>
+          <div style={{fontSize:11,color:"var(--text)"}}>{actions[0] || "Block suspicious IPs at firewall"}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:5,background:"rgba(255,170,0,0.04)",border:"1px solid rgba(255,170,0,0.12)"}}>
+          <div style={{fontSize:7,color:"var(--orange)",fontFamily:"var(--mono)",letterSpacing:1,marginBottom:5}}>SOON</div>
+          <div style={{fontSize:11,color:"var(--text)"}}>{actions[1] || "Isolate affected hosts"}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:5,background:"rgba(0,255,157,0.03)",border:"1px solid rgba(0,255,157,0.1)"}}>
+          <div style={{fontSize:7,color:"var(--green)",fontFamily:"var(--mono)",letterSpacing:1,marginBottom:5}}>LATER</div>
+          <div style={{fontSize:11,color:"var(--text)"}}>{actions[2] || "Review full log history"}</div>
+        </div>
+      </div>
+
+      {/* Confidence bar — only if structured */}
+      {hasStructure && confidencePct && (
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",background:"rgba(255,255,255,0.02)",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+          <span style={{fontSize:9,color:"var(--text-dim)",fontFamily:"var(--mono)"}}>Confidence</span>
+          <div style={{flex:1,height:3,background:"rgba(255,255,255,0.06)",borderRadius:2,overflow:"hidden"}}>
+            <div style={{width:`${confidencePct}%`,height:"100%",borderRadius:2,background:riskColor}}/>
           </div>
-          {actions.length > 0 ? (
-            <div className="sira-action-list">
-              {actions.map((a, i) => (
-                <div key={i} className="sira-action-item">
-                  <div className={`sira-action-num ${numColors[i] || "n3"}`}>{i + 1}</div>
-                  <div>
-                    <div className="sira-action-title">{a.title}</div>
-                    {a.desc && <div className="sira-action-desc">{a.desc}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="sira-prose">{sections["RECOMMENDED ACTIONS"]}</p>
-          )}
+          <span style={{fontSize:10,fontFamily:"var(--mono)",fontWeight:700,color:riskColor}}>{confidencePct}%</span>
         </div>
       )}
-
     </div>
   );
 }
-
-
 
 function AnalyticsPage({ stats }) {
   const [topIPs, setTopIPs] = useState([]);
@@ -1299,7 +1229,7 @@ const [hermesAnswer, setHermesAnswer] = useState("");
                 </div>
               </div>
               <div className="model-chip">{modelObj.chip}</div>
-              <button className="clear-btn" onClick={() => { setMessages([]); setSessionId(uuidv4()); showToast("Chat cleared"); }}>CLEAR</button>
+             <button className="clear-btn" onClick={() => { setMessages([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]); setSessionId(uuidv4()); showToast("Chat cleared"); }}>CLEAR</button>
               <button onClick={() => setDidOpen(true)} style={{
   padding: "4px 12px", background: "var(--purple-dim)",
   border: "1px solid var(--purple)", borderRadius: 2,
@@ -1314,14 +1244,19 @@ const [hermesAnswer, setHermesAnswer] = useState("");
                     <div className="bubble-wrap">
                       {m.isWelcome ? (
                         <div className="bubble">
-                          <div className="welcome-card">
-                            <div className="welcome-title">Hello, I'm <span>SIRA</span></div>
-                            <div className="welcome-body">Security Incident Response Assistant — online and ready.<br />I have loaded your Suricata and Zeek logs.</div>
-                            <div className="welcome-tags">
-                              <span className="wtag">{alerts.length || "?"} EVENTS LOADED</span>
-                              <span className="wtag">{alertCount} ALERTS DETECTED</span>
-                              <span className="wtag">RAG ACTIVE</span>
-                              <span className="wtag">CHROMADB READY</span>
+                          <div className="welcome-card" style={{display:"flex",alignItems:"center",gap:16}}>
+                            <div style={{flexShrink:0,width:110,height:110}}>
+                              <Lottie animationData={securityAnimation} loop={true} />
+                            </div>
+                            <div style={{flex:1}}>
+                              <div className="welcome-title">Hello, I'm <span>SIRA</span></div>
+                              <div className="welcome-body">Security Incident Response Assistant — online and ready.<br />I have loaded your Suricata and Zeek logs.</div>
+                              <div className="welcome-tags">
+                                <span className="wtag">{alerts.length || "?"} EVENTS LOADED</span>
+                                <span className="wtag">{alertCount} ALERTS DETECTED</span>
+                                <span className="wtag">RAG ACTIVE</span>
+                                <span className="wtag">CHROMADB READY</span>
+                              </div>
                             </div>
                           </div>
                         </div>
