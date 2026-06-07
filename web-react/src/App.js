@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import SiraVoice from "./SiraVoice";
+// import SiraVoice from "./SiraVoice";
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -1375,21 +1377,22 @@ const [hermesAnswer, setHermesAnswer] = useState("");
           </div>
         )}
       </div>
-
-      {didOpen && (
-        <div className="modal-overlay" onClick={() => setDidOpen(false)}>
-          <div style={{ width: 420, height: 620, borderRadius: 12, overflow: "hidden", position: "relative" }} onClick={e => e.stopPropagation()}>
-            <button onClick={() => setDidOpen(false)} style={{ position: "absolute", top: 10, right: 10, zIndex: 10, background: "rgba(0,0,0,0.6)", border: "none", color: "white", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontSize: 14 }}>✕</button>
-            <iframe
-              src="https://studio.d-id.com/agents/share?id=v2_agt_HW-Wx0tu&key=Y2tfSU9mWFQ1YWc1V2dCQ1FmNTY4YUhP"
-              width="420"
-              height="620"
-              style={{ border: "none", borderRadius: 12 }}
-              allow="camera; microphone"
-            />
-          </div>
-        </div>
-      )}
+<SiraVoice isOpen={didOpen} onClose={() => setDidOpen(false)}/>
+{didOpen && (
+  <div className="modal-overlay" onClick={() => setDidOpen(false)}>
+    <div style={{ width: 420, height: 620, borderRadius: 12, overflow: "hidden", position: "relative" }} onClick={e => e.stopPropagation()}>
+      <button onClick={() => setDidOpen(false)} style={{ position: "absolute", top: 10, right: 10, zIndex: 10, background: "rgba(0,0,0,0.6)", border: "none", color: "white", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontSize: 14 }}>✕</button>
+      <iframe
+        src="https://studio.d-id.com/agents/share?id=v2_agt_HW-Wx0tu&key=Y2tfSU9mWFQ1YWc1V2dCQ1FmNTY4YUhP"
+        width="420"
+        height="620"
+        style={{ border: "none", borderRadius: 12 }}
+        allow="camera; microphone"
+      />
+    </div>
+  </div>
+)}
+    
 
 {/* ── HERMES AGENT MODAL ── */}
 {hermesOpen && (
