@@ -1,7 +1,7 @@
 @echo off
 echo Starting SOC Copilot...
 
-set PYTHON=C:\Users\satya\AppData\Local\Python\pythoncore-3.14-64\python.exe
+set PYTHON=C:\Users\prath\AppData\Local\Programs\Python\Python313\python.exe
 
 echo [1/4] Starting Ollama...
 start "" ollama serve
