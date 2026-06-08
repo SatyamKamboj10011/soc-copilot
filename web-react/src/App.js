@@ -1,10 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React from 'react';
+import { useState, useEffect, useRef, useCallback, memo, Suspense } from "react";
 import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import Lottie from "lottie-react";
+import securityAnimation from "./security-animation.json";
 import SiraVoice from "./SiraVoice";
-// import SiraVoice from "./SiraVoice";
+const ThreatMap = React.lazy(() => import("./ThreatMap"));
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -15,8 +18,6 @@ const MODEL_OPTIONS = [
   { value: "gemini",      label: "Google Gemini 2.0 Flash (cloud)",  tag: "CLOUD — FREE", chip: "gemini 2.0 (cloud)",    cloud: true  },
   { value: "mistral",     label: "Mistral Small (cloud — free)",     tag: "CLOUD — FREE", chip: "mistral small (cloud)", cloud: true  },
 ];
-
-
 
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",
@@ -34,8 +35,6 @@ function parseSiraResponse(text) {
     ["ATTACKER PROFILE", "ATTACK TIMELINE", "RISK LEVEL", "BLOCK RECOMMENDATION"],
     ["SITUATION", "IMMEDIATE ACTIONS", "SHORT TERM", "LONG TERM"],
   ];
-
-  // Try each section set
   for (const sections of allSectionSets) {
     const result = [];
     for (let i = 0; i < sections.length; i++) {
@@ -50,8 +49,6 @@ function parseSiraResponse(text) {
     }
     if (result.length >= 2) return result;
   }
-
-  // No sections found — return null so it renders as plain text
   return null;
 }
 
@@ -200,90 +197,10 @@ const sharedCss = `
   .bubble { padding: 12px 16px; font-size: 13px; line-height: 1.7; border-radius: 2px; }
   .msg.ai .bubble { background: transparent; border: none; padding: 0; width: 100%; }
   .msg.user .bubble { background: var(--accent-dim); border: 1px solid var(--accent-glow); color: var(--text); }
-  
-  /* ── SIRA RESPONSE CARDS ── */
   .sira-response { width: 100%; font-family: var(--sans); animation: cardIn 0.3s ease both; }
   @keyframes cardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  .sira-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border2); }
-  .sira-header-icon { width: 32px; height: 32px; background: var(--accent-dim); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
-  .sira-header-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text); letter-spacing: 2px; }
-  .sira-header-sub { font-family: var(--mono); font-size: 9px; color: var(--text-mid); margin-top: 2px; }
-  .sira-risk-pill { margin-left: auto; display: flex; align-items: center; gap: 5px; border-radius: 20px; padding: 4px 12px; flex-shrink: 0; }
-  .sira-risk-pill.critical { background: rgba(255,61,90,0.15); border: 1px solid rgba(255,61,90,0.4); }
-  .sira-risk-pill.high     { background: rgba(255,61,90,0.12); border: 1px solid rgba(255,61,90,0.3); }
-  .sira-risk-pill.medium   { background: rgba(255,170,0,0.12); border: 1px solid rgba(255,170,0,0.3); }
-  .sira-risk-pill.low      { background: rgba(0,255,157,0.10); border: 1px solid rgba(0,255,157,0.3); }
-  .sira-risk-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-  .sira-risk-dot.critical,.sira-risk-dot.high { background: var(--red); }
-  .sira-risk-dot.medium { background: var(--orange); }
-  .sira-risk-dot.low    { background: var(--green); }
-  .sira-risk-label { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2px; }
-  .sira-risk-label.critical,.sira-risk-label.high { color: var(--red); }
-  .sira-risk-label.medium { color: var(--orange); }
-  .sira-risk-label.low    { color: var(--green); }
-  .sira-card { background: var(--bg3); border-radius: 8px; border: 1px solid var(--border2); padding: 14px 16px; margin-bottom: 10px; border-left: 3px solid; }
-  .sira-card.summary { border-left-color: var(--accent); }
-  .sira-card.threat  { border-left-color: var(--red); }
-  .sira-card.means   { border-left-color: var(--orange); }
-  .sira-card.risk    { border-left-color: var(--red); }
-  .sira-card.actions { border-left-color: var(--green); }
-  .sira-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-  .sira-card-icon { font-size: 15px; }
-  .sira-card-icon.summary { color: var(--accent); }
-  .sira-card-icon.threat  { color: var(--red); }
-  .sira-card-icon.means   { color: var(--orange); }
-  .sira-card-icon.risk    { color: var(--red); }
-  .sira-card-icon.actions { color: var(--green); }
-  .sira-card-title { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
-  .sira-card-title.summary { color: var(--accent); }
-  .sira-card-title.threat  { color: var(--red); }
-  .sira-card-title.means   { color: var(--orange); }
-  .sira-card-title.risk    { color: var(--red); }
-  .sira-card-title.actions { color: var(--green); }
-  .sira-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-  .sira-prose { font-size: 13px; color: var(--text-mid); line-height: 1.75; margin: 0; }
-  .sira-kv { display: flex; flex-direction: column; gap: 6px; }
-  .sira-kv-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-  .sira-kv-row:last-child { border-bottom: none; padding-bottom: 0; }
-  .sira-kv-key { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 80px; flex-shrink: 0; }
-  .sira-kv-val { font-family: var(--mono); font-size: 10px; color: var(--text); font-weight: 700; text-align: right; }
-  .sira-kv-val.red { color: var(--red); }
-  .sira-risk-center { display: flex; flex-direction: column; align-items: center; margin-bottom: 12px; }
-  .sira-risk-box { text-align: center; border-radius: 6px; padding: 12px 24px; border: 1px solid; }
-  .sira-risk-box.critical { background: rgba(255,61,90,0.12); border-color: rgba(255,61,90,0.5); }
-  .sira-risk-box.high     { background: rgba(255,61,90,0.10); border-color: rgba(255,61,90,0.4); }
-  .sira-risk-box.medium   { background: rgba(255,170,0,0.10); border-color: rgba(255,170,0,0.4); }
-  .sira-risk-box.low      { background: rgba(0,255,157,0.08); border-color: rgba(0,255,157,0.4); }
-  .sira-risk-box-label { font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: 4px; }
-  .sira-risk-box-label.critical,.sira-risk-box-label.high { color: var(--red); }
-  .sira-risk-box-label.medium { color: var(--orange); }
-  .sira-risk-box-label.low    { color: var(--green); }
-  .sira-risk-box-sub { font-family: var(--mono); font-size: 9px; letter-spacing: 2px; margin-top: 4px; opacity: 0.7; }
-  .sira-risk-box-sub.critical,.sira-risk-box-sub.high { color: var(--red); }
-  .sira-risk-box-sub.medium { color: var(--orange); }
-  .sira-risk-box-sub.low    { color: var(--green); }
-  .sira-confidence { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-  .sira-confidence-label { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
-  .sira-confidence-bar { flex: 1; height: 4px; background: var(--border2); border-radius: 2px; overflow: hidden; }
-  .sira-confidence-fill { height: 100%; border-radius: 2px; }
-  .sira-confidence-fill.critical,.sira-confidence-fill.high { background: var(--red); }
-  .sira-confidence-fill.medium { background: var(--orange); }
-  .sira-confidence-fill.low    { background: var(--green); }
-  .sira-confidence-pct { font-family: var(--mono); font-size: 10px; font-weight: 700; }
-  .sira-confidence-pct.critical,.sira-confidence-pct.high { color: var(--red); }
-  .sira-confidence-pct.medium { color: var(--orange); }
-  .sira-confidence-pct.low    { color: var(--green); }
-  .sira-action-list { display: flex; flex-direction: column; gap: 8px; }
-  .sira-action-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; background: var(--bg2); border-radius: 6px; border: 1px solid var(--border); }
-  .sira-action-num { min-width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
-  .sira-action-num.n1 { background: rgba(255,61,90,0.15); color: var(--red); }
-  .sira-action-num.n2 { background: rgba(255,170,0,0.15); color: var(--orange); }
-  .sira-action-num.n3 { background: rgba(0,255,157,0.12); color: var(--green); }
-  .sira-action-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
-  .sira-action-desc  { font-size: 11px; color: var(--text-mid); line-height: 1.6; }
   .sira-fallback { background: var(--bg3); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 16px 18px; font-size: 13px; color: var(--text); line-height: 1.85; font-family: var(--sans); }
-.sira-fallback strong { color: var(--accent); font-weight: 700; }
-
+  .sira-fallback strong { color: var(--accent); font-weight: 700; }
   .msg-meta { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-top: 6px; display: flex; align-items: center; gap: 10px; }
   .msg.user .msg-meta { justify-content: flex-end; }
   .copy-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-family: var(--mono); font-size: 8px; letter-spacing: 1px; text-transform: uppercase; padding: 0; transition: color 0.15s; }
@@ -367,97 +284,8 @@ const sharedCss = `
     .feed { max-height: 160px; }
     .messages { padding: 14px 16px; }
     .bubble-wrap { max-width: 88%; }
-    .sira-grid { grid-template-columns: 1fr; }
-    .sira-section.full-width { grid-column: 1; }
   }
-
-
-  /* ── THREAT SCORE RING ── */
-
-.sira-threat-ring{
-  width:140px;
-  height:140px;
-  margin:auto;
-  position:relative;
-}
-
-.sira-ring-svg{
-  width:140px;
-  height:140px;
-  transform:rotate(-90deg);
-}
-
-.sira-ring-bg{
-  fill:none;
-  stroke:var(--border2);
-  stroke-width:10;
-}
-
-.sira-ring-fill{
-  fill:none;
-  stroke-width:10;
-  stroke-linecap:round;
-}
-
-.sira-ring-fill.high,
-.sira-ring-fill.critical{
-  stroke:var(--red);
-}
-
-.sira-ring-fill.medium{
-  stroke:var(--orange);
-}
-
-.sira-ring-fill.low{
-  stroke:var(--green);
-}
-
-.sira-ring-center{
-  position:absolute;
-  inset:0;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-}
-
-.sira-ring-score{
-  font-size:34px;
-  font-weight:800;
-  color:var(--text);
-}
-
-.sira-ring-label{
-  font-family:var(--mono);
-  font-size:9px;
-  letter-spacing:2px;
-  color:var(--text-dim);
-}
 `;
-
-function extractKV(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const pairs = [];
-  for (const line of lines) {
-    const m = line.match(/^[-•]?\s*([^:]+):\s*(.+)/);
-    if (m) pairs.push({ key: m[1].trim(), val: m[2].trim() });
-    else if (line && pairs.length === 0) pairs.push({ key: null, val: line });
-  }
-  return pairs;
-}
-
-function extractActions(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const actions = [];
-  for (const line of lines) {
-    const m = line.match(/^(\d+)\.\s*(.+)/);
-    if (m) {
-      const parts = m[2].split(/\s*—\s*/);
-      actions.push({ title: parts[0].trim(), desc: parts.slice(1).join(" — ").trim() });
-    }
-  }
-  return actions;
-}
 
 function SiraMessage({ text, modelChip }) {
   if (!text) return null;
@@ -466,7 +294,7 @@ function SiraMessage({ text, modelChip }) {
   const sectionNames = ["SUMMARY", "THREAT DETAILS", "WHAT THIS MEANS", "RISK ASSESSMENT", "RECOMMENDED ACTIONS"];
   for (let i = 0; i < sectionNames.length; i++) {
     const current = sectionNames[i];
-    const next    = sectionNames[i + 1];
+    const next = sectionNames[i + 1];
     const startIdx = text.indexOf(current);
     if (startIdx === -1) continue;
     const contentStart = startIdx + current.length;
@@ -474,142 +302,85 @@ function SiraMessage({ text, modelChip }) {
     sections[current] = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
   }
 
-  if (Object.keys(sections).length === 0) {
-    return <div className="sira-fallback">{text}</div>;
-  }
-
   const riskText = sections["RISK ASSESSMENT"] || "";
   const riskLevel = /CRITICAL/i.test(riskText) ? "critical" : /HIGH/i.test(riskText) ? "high" : /MEDIUM/i.test(riskText) ? "medium" : /LOW/i.test(riskText) ? "low" : "medium";
   const riskLabel = riskLevel.toUpperCase();
+  const riskColor = riskLevel === "low" ? "var(--green)" : riskLevel === "medium" ? "var(--orange)" : "var(--red)";
 
   const confidenceMatch = riskText.match(/confidence[:\s]+(\w+)/i);
-  const confidenceText  = confidenceMatch ? confidenceMatch[1].toLowerCase() : null;
-  const confidencePct   = confidenceText === "high" ? 85 : confidenceText === "medium" ? 60 : confidenceText === "low" ? 35 : null;
+  const confidenceText = confidenceMatch ? confidenceMatch[1].toLowerCase() : null;
+  const confidencePct = confidenceText === "high" ? 85 : confidenceText === "medium" ? 60 : confidenceText === "low" ? 35 : null;
 
-  const threatKV  = extractKV(sections["THREAT DETAILS"] || "");
-  const actions   = extractActions(sections["RECOMMENDED ACTIONS"] || "");
-  const numColors = ["n1", "n2", "n3"];
+  const threatText = sections["THREAT DETAILS"] || "";
+  const ipMatches = threatText.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g) || [];
+  const portMatch = threatText.match(/[Pp]ort[:\s]+(\d+)/);
+  const sigMatch = text.match(/ET\s+\w+[^\n]*/);
+
+  const tags = [
+    ...ipMatches.slice(0, 2).map(ip => ({ label: ip, color: "var(--red)", bg: "rgba(255,61,90,0.08)", border: "rgba(255,61,90,0.2)" })),
+    portMatch ? { label: `PORT ${portMatch[1]}`, color: "var(--text)", bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)" } : null,
+    sigMatch ? { label: sigMatch[0].substring(0, 28) + "...", color: "var(--orange)", bg: "rgba(255,170,0,0.06)", border: "rgba(255,170,0,0.15)" } : null,
+    { label: `SEVERITY ${riskLabel}`, color: riskColor, bg: `rgba(${riskLevel === "low" ? "0,255,157" : riskLevel === "medium" ? "255,170,0" : "255,61,90"},0.08)`, border: `rgba(${riskLevel === "low" ? "0,255,157" : riskLevel === "medium" ? "255,170,0" : "255,61,90"},0.2)` },
+  ].filter(Boolean);
+
+  const actionsText = sections["RECOMMENDED ACTIONS"] || "";
+  const actionLines = actionsText.split("\n").map(l => l.trim()).filter(l => /^\d+\./.test(l));
+  const actions = actionLines.slice(0, 3).map(l => l.replace(/^\d+\.\s*/, "").split("—")[0].trim());
+  while (actions.length < 3) actions.push(null);
+
+  const hasStructure = Object.keys(sections).length > 0;
 
   return (
-    <div className="sira-response">
-
-      {/* Header */}
-      <div className="sira-header">
-        <div className="sira-header-icon">🛡</div>
-        <div>
-          <div className="sira-header-title">SIRA ANALYSIS</div>
-          <div className="sira-header-sub">Security Incident Response Assistant · {modelChip || "sira-model"}</div>
-        </div>
-        <div className={`sira-risk-pill ${riskLevel}`}>
-          <div className={`sira-risk-dot ${riskLevel}`} />
-          <span className={`sira-risk-label ${riskLevel}`}>{riskLabel}</span>
-        </div>
+    <div style={{background:"#090d14",borderRadius:10,overflow:"hidden",border:"0.5px solid rgba(255,255,255,0.07)",animation:"cardIn 0.3s ease both"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:hasStructure ? riskColor : "var(--accent)",flexShrink:0}}/>
+        <span style={{fontSize:10,fontFamily:"var(--mono)",letterSpacing:2,color:hasStructure ? riskColor : "var(--accent)"}}>{hasStructure ? `${riskLabel} RISK` : "SIRA ANALYSIS"}</span>
+        <span style={{color:"var(--text-dim)",fontSize:10,fontFamily:"var(--mono)"}}>·</span>
+        <span style={{fontSize:10,color:"var(--text-dim)",fontFamily:"var(--mono)"}}>{modelChip || "sira-model"}</span>
+        <span style={{fontSize:10,color:"var(--text-dim)",fontFamily:"var(--mono)",marginLeft:"auto"}}>{new Date().toLocaleTimeString()}</span>
       </div>
-
-      {/* Summary */}
-      {sections["SUMMARY"] && (
-        <div className="sira-card summary">
-          <div className="sira-card-header">
-            <span className="sira-card-icon summary">◉</span>
-            <span className="sira-card-title summary">Summary</span>
-          </div>
-          <p className="sira-prose">{sections["SUMMARY"]}</p>
-        </div>
-      )}
-
-      {/* Threat Details + Risk Assessment side by side */}
-      <div className="sira-two-col">
-
-        {sections["THREAT DETAILS"] && (
-          <div className="sira-card threat" style={{ marginBottom: 0 }}>
-            <div className="sira-card-header">
-              <span className="sira-card-icon threat">⚠</span>
-              <span className="sira-card-title threat">Threat Details</span>
-            </div>
-            <div className="sira-kv">
-              {threatKV.map((item, i) => (
-                <div key={i} className="sira-kv-row">
-                  {item.key && <span className="sira-kv-key">{item.key}</span>}
-                  <span className={`sira-kv-val ${item.key?.toLowerCase().includes("attacker") || item.key?.toLowerCase().includes("src") ? "red" : ""}`}>
-                    {item.val}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {sections["RISK ASSESSMENT"] && (
-          <div className="sira-card risk" style={{ marginBottom: 0 }}>
-            <div className="sira-card-header">
-              <span className="sira-card-icon risk">◆</span>
-              <span className="sira-card-title risk">Risk Assessment</span>
-            </div>
-            <div className="sira-risk-center">
-              <div className={`sira-risk-box ${riskLevel}`}>
-                <div className={`sira-risk-box-label ${riskLevel}`}>{riskLabel}</div>
-                <div className={`sira-risk-box-sub ${riskLevel}`}>
-                  {riskLevel === "critical" ? "IMMEDIATE ACTION" : riskLevel === "high" ? "URGENT REVIEW" : riskLevel === "medium" ? "MONITOR CLOSELY" : "LOW PRIORITY"}
-                </div>
-              </div>
-            </div>
-            <p className="sira-prose" style={{ fontSize: 11 }}>
-              {riskText.replace(/CRITICAL|HIGH|MEDIUM|LOW/gi, "").replace(/Risk Level[:\s]*/i, "").replace(/Why[:\s]*/i, "").trim().split("\n").filter(Boolean)[0]}
-            </p>
-            {confidencePct && (
-              <div className="sira-confidence">
-                <span className="sira-confidence-label">Confidence</span>
-                <div className="sira-confidence-bar">
-                  <div className={`sira-confidence-fill ${riskLevel}`} style={{ width: `${confidencePct}%` }} />
-                </div>
-                <span className={`sira-confidence-pct ${riskLevel}`}>{confidencePct}%</span>
-              </div>
-            )}
-          </div>
+      <div style={{fontSize:13,color:"var(--text)",lineHeight:1.85,padding:14,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+        {(sections["SUMMARY"] || text).split(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g).map((part,i)=>
+          /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(part)
+            ? <span key={i} style={{color:"var(--red)",fontFamily:"var(--mono)",fontWeight:700}}>{part}</span>
+            : part
         )}
       </div>
-
-      {/* What This Means */}
-      {sections["WHAT THIS MEANS"] && (
-        <div className="sira-card means">
-          <div className="sira-card-header">
-            <span className="sira-card-icon means">◈</span>
-            <span className="sira-card-title means">What This Means</span>
-          </div>
-          <p className="sira-prose">{sections["WHAT THIS MEANS"]}</p>
+      {hasStructure && tags.length > 0 && (
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+          {tags.map((tag,i)=>(
+            <span key={i} style={{fontSize:10,padding:"3px 10px",borderRadius:3,fontFamily:"var(--mono)",color:tag.color,background:tag.bg,border:`1px solid ${tag.border}`}}>
+              {tag.label}
+            </span>
+          ))}
         </div>
       )}
-
-      {/* Recommended Actions */}
-      {sections["RECOMMENDED ACTIONS"] && (
-        <div className="sira-card actions">
-          <div className="sira-card-header">
-            <span className="sira-card-icon actions">▶</span>
-            <span className="sira-card-title actions">Recommended Actions</span>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,padding:"12px 14px"}}>
+        <div style={{padding:"10px 12px",borderRadius:5,background:"rgba(255,61,90,0.05)",border:"1px solid rgba(255,61,90,0.18)"}}>
+          <div style={{fontSize:7,color:"var(--red)",fontFamily:"var(--mono)",letterSpacing:1,marginBottom:5}}>NOW</div>
+          <div style={{fontSize:11,color:"var(--text)"}}>{actions[0] || "Block suspicious IPs at firewall"}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:5,background:"rgba(255,170,0,0.04)",border:"1px solid rgba(255,170,0,0.12)"}}>
+          <div style={{fontSize:7,color:"var(--orange)",fontFamily:"var(--mono)",letterSpacing:1,marginBottom:5}}>SOON</div>
+          <div style={{fontSize:11,color:"var(--text)"}}>{actions[1] || "Isolate affected hosts"}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:5,background:"rgba(0,255,157,0.03)",border:"1px solid rgba(0,255,157,0.1)"}}>
+          <div style={{fontSize:7,color:"var(--green)",fontFamily:"var(--mono)",letterSpacing:1,marginBottom:5}}>LATER</div>
+          <div style={{fontSize:11,color:"var(--text)"}}>{actions[2] || "Review full log history"}</div>
+        </div>
+      </div>
+      {hasStructure && confidencePct && (
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",background:"rgba(255,255,255,0.02)",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+          <span style={{fontSize:9,color:"var(--text-dim)",fontFamily:"var(--mono)"}}>Confidence</span>
+          <div style={{flex:1,height:3,background:"rgba(255,255,255,0.06)",borderRadius:2,overflow:"hidden"}}>
+            <div style={{width:`${confidencePct}%`,height:"100%",borderRadius:2,background:riskColor}}/>
           </div>
-          {actions.length > 0 ? (
-            <div className="sira-action-list">
-              {actions.map((a, i) => (
-                <div key={i} className="sira-action-item">
-                  <div className={`sira-action-num ${numColors[i] || "n3"}`}>{i + 1}</div>
-                  <div>
-                    <div className="sira-action-title">{a.title}</div>
-                    {a.desc && <div className="sira-action-desc">{a.desc}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="sira-prose">{sections["RECOMMENDED ACTIONS"]}</p>
-          )}
+          <span style={{fontSize:10,fontFamily:"var(--mono)",fontWeight:700,color:riskColor}}>{confidencePct}%</span>
         </div>
       )}
-
     </div>
   );
 }
-
-
 
 function AnalyticsPage({ stats }) {
   const [topIPs, setTopIPs] = useState([]);
@@ -665,7 +436,6 @@ function AnalyticsPage({ stats }) {
   );
 }
 
-// ── INVESTIGATION PAGE ────────────────────────────────────────────────────
 function InvestigationPage({ onAskSira }) {
   const [logs, setLogs]                     = useState([]);
   const [search, setSearch]                 = useState("");
@@ -676,19 +446,13 @@ function InvestigationPage({ onAskSira }) {
   const [whatIfLoading, setWhatIfLoading]   = useState(false);
 
   const loadProfile = async (ip) => {
-    setProfileLoading(true);
-    setProfile(null);
-    try {
-      const res  = await fetch(`${FLASK_URL}/attacker-profile/${ip}`);
-      const data = await res.json();
-      setProfile(data);
-    } catch { setProfile({ error: "Failed to load profile" }); }
+    setProfileLoading(true); setProfile(null);
+    try { const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}`); const data = await res.json(); setProfile(data); }
+    catch { setProfile({ error: "Failed to load profile" }); }
     setProfileLoading(false);
   };
 
-  useEffect(() => {
-    fetch(`${FLASK_URL}/logs?limit=200`).then(r => r.json()).then(setLogs).catch(() => {});
-  }, []);
+  useEffect(() => { fetch(`${FLASK_URL}/logs?limit=200`).then(r => r.json()).then(setLogs).catch(() => {}); }, []);
 
   const filtered = logs.filter(l =>
     !search || l.src_ip?.includes(search) || l.dest_ip?.includes(search) ||
@@ -719,7 +483,6 @@ function InvestigationPage({ onAskSira }) {
         </table>
       </div>
 
-      {/* ── EVENT DETAIL MODAL ── */}
       {selected && (
         <div className="modal-overlay" onClick={() => setSelected(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -737,37 +500,19 @@ function InvestigationPage({ onAskSira }) {
             </>}
             {selected.dns && <div className="modal-row"><span className="modal-key">DNS Query</span><span className="modal-val">{selected.dns.rrname}</span></div>}
             {selected.http && <div className="modal-row"><span className="modal-key">HTTP</span><span className="modal-val">{selected.http.http_method} {selected.http.hostname}{selected.http.url}</span></div>}
-
             {selected.src_ip && (
-              <button onClick={() => { loadProfile(selected.src_ip); setSelected(null); }}
-                style={{ marginTop: 12, width: "100%", padding: "10px", background: "var(--purple-dim)", border: "1px solid var(--purple)", borderRadius: 4, color: "var(--purple)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
+              <button onClick={() => { loadProfile(selected.src_ip); setSelected(null); }} style={{ marginTop: 12, width: "100%", padding: "10px", background: "var(--purple-dim)", border: "1px solid var(--purple)", borderRadius: 4, color: "var(--purple)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
                 ◈ VIEW ATTACKER PROFILE
               </button>
             )}
-
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="ask-sira-btn" style={{ flex: 1, marginTop: 0 }} onClick={() => {
-                onAskSira(`Analyse this ${selected.event_type} event from ${selected.src_ip} to ${selected.dest_ip} at ${selected.timestamp}`);
-                setSelected(null);
-              }}>⬡ ASK SIRA</button>
-
+              <button className="ask-sira-btn" style={{ flex: 1, marginTop: 0 }} onClick={() => { onAskSira(`Analyse this ${selected.event_type} event from ${selected.src_ip} to ${selected.dest_ip} at ${selected.timestamp}`); setSelected(null); }}>⬡ ASK SIRA</button>
               {selected.alert?.signature && (
                 <button onClick={async () => {
-                  const sig = selected.alert.signature;
-                  const src = selected.src_ip;
-                  const dst = selected.dest_ip;
-                  setSelected(null);
-                  setWhatIfLoading(true);
-                  setWhatIf(null);
-                  try {
-                    const res  = await fetch(`${FLASK_URL}/what-if`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ signature: sig, src_ip: src, dest_ip: dst })
-                    });
-                    const data = await res.json();
-                    setWhatIf(data);
-                  } catch { setWhatIf({ error: "Failed to load" }); }
+                  const sig = selected.alert.signature; const src = selected.src_ip; const dst = selected.dest_ip;
+                  setSelected(null); setWhatIfLoading(true); setWhatIf(null);
+                  try { const res = await fetch(`${FLASK_URL}/what-if`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ signature: sig, src_ip: src, dest_ip: dst }) }); const data = await res.json(); setWhatIf(data); }
+                  catch { setWhatIf({ error: "Failed to load" }); }
                   setWhatIfLoading(false);
                 }} style={{ flex: 1, padding: "10px", background: "var(--orange-dim)", border: "1px solid var(--orange)", borderRadius: 4, color: "var(--orange)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
                   ⚠ WHAT IF?
@@ -778,16 +523,11 @@ function InvestigationPage({ onAskSira }) {
         </div>
       )}
 
-      {/* ── ATTACKER PROFILE MODAL ── */}
       {(profile || profileLoading) && (
         <div className="modal-overlay" onClick={() => setProfile(null)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 680 }}>
             <button className="modal-close" onClick={() => setProfile(null)}>✕</button>
-            {profileLoading && (
-              <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--accent)" }}>
-                ◈ Building attacker profile...
-              </div>
-            )}
+            {profileLoading && <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--accent)" }}>◈ Building attacker profile...</div>}
             {profile && !profile.error && (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20, padding: "16px", background: "var(--bg3)", borderRadius: 6, border: "1px solid var(--purple)", borderLeft: "3px solid var(--purple)" }}>
@@ -802,56 +542,27 @@ function InvestigationPage({ onAskSira }) {
                   </div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
-                  {[
-                    { label: "Total Events", value: profile.stats.total_events, color: "var(--accent)" },
-                    { label: "Alerts", value: profile.stats.total_alerts, color: "var(--red)" },
-                    { label: "AbuseIPDB Reports", value: profile.abuse.reports, color: "var(--orange)" },
-                    { label: "Ports Targeted", value: profile.stats.ports_targeted.length, color: "var(--purple)" },
-                  ].map((s, i) => (
+                  {[{ label: "Total Events", value: profile.stats.total_events, color: "var(--accent)" }, { label: "Alerts", value: profile.stats.total_alerts, color: "var(--red)" }, { label: "AbuseIPDB Reports", value: profile.abuse.reports, color: "var(--orange)" }, { label: "Ports Targeted", value: profile.stats.ports_targeted.length, color: "var(--purple)" }].map((s, i) => (
                     <div key={i} style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: "12px", textAlign: "center" }}>
                       <div style={{ fontFamily: "var(--mono)", fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
                       <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 1, marginTop: 4 }}>{s.label}</div>
                     </div>
                   ))}
                 </div>
-                {profile.stats.signatures.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>ATTACK SIGNATURES USED</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {profile.stats.signatures.map((sig, i) => (
-                        <span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "3px 8px", borderRadius: 2, background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,61,90,0.3)" }}>{sig}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {profile.stats.ports_targeted.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>PORTS TARGETED</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {profile.stats.ports_targeted.map((port, i) => (
-                        <span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "3px 8px", borderRadius: 2, background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(0,229,255,0.2)" }}>{port}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {profile.stats.signatures.length > 0 && <div style={{ marginBottom: 16 }}><div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>ATTACK SIGNATURES USED</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{profile.stats.signatures.map((sig, i) => (<span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "3px 8px", borderRadius: 2, background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,61,90,0.3)" }}>{sig}</span>))}</div></div>}
+                {profile.stats.ports_targeted.length > 0 && <div style={{ marginBottom: 16 }}><div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>PORTS TARGETED</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{profile.stats.ports_targeted.map((port, i) => (<span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "3px 8px", borderRadius: 2, background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(0,229,255,0.2)" }}>{port}</span>))}</div></div>}
                 <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "2px solid var(--purple)", borderRadius: 4, padding: 16 }}>
                   <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 12 }}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
                   <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{profile.sira_assessment}</div>
                 </div>
-                <button className="ask-sira-btn" style={{ marginTop: 16 }} onClick={() => {
-                  onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`);
-                  setProfile(null);
-                }}>⬡ ASK SIRA FOR FULL ANALYSIS</button>
+                <button className="ask-sira-btn" style={{ marginTop: 16 }} onClick={() => { onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`); setProfile(null); }}>⬡ ASK SIRA FOR FULL ANALYSIS</button>
               </>
             )}
-            {profile?.error && (
-              <div style={{ color: "var(--red)", fontFamily: "var(--mono)", fontSize: 12, padding: 20 }}>✗ {profile.error}</div>
-            )}
+            {profile?.error && <div style={{ color: "var(--red)", fontFamily: "var(--mono)", fontSize: 12, padding: 20 }}>✗ {profile.error}</div>}
           </div>
         </div>
       )}
 
-      {/* ── WHAT IF MODAL ── */}
       {(whatIf || whatIfLoading) && (
         <div className="modal-overlay" onClick={() => { setWhatIf(null); setWhatIfLoading(false); }}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 640 }}>
@@ -859,11 +570,7 @@ function InvestigationPage({ onAskSira }) {
             <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--orange)", letterSpacing: 3, marginBottom: 4 }}>⚠ WHAT IF MODE</div>
             <div className="modal-title">If This Attack Wasn't Blocked...</div>
             <div className="modal-sub">{whatIf?.signature}</div>
-            {whatIfLoading && (
-              <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--orange)" }}>
-                ⚠ SIRA is simulating the attack chain...
-              </div>
-            )}
+            {whatIfLoading && <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--orange)" }}>⚠ SIRA is simulating the attack chain...</div>}
             {whatIf && !whatIfLoading && (
               <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap", background: "var(--bg3)", border: "1px solid var(--orange)", borderLeft: "3px solid var(--orange)", borderRadius: 4, padding: 16 }}>
                 {whatIf.error ? <span style={{ color: "var(--red)" }}>✗ {whatIf.error}</span> : whatIf.answer}
@@ -872,12 +579,118 @@ function InvestigationPage({ onAskSira }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }
 
-// ── MAIN APP ──────────────────────────────────────────────────────────────
+function BootSequence({ onComplete }) {
+  const [lines, setLines] = useState([]);
+  const [done, setDone] = useState(false);
+
+  const bootLines = [
+    { text: "SIRA v4.0 INITIALISING...", delay: 0, color: "#00e5ff" },
+    { text: "Loading threat intelligence database...", delay: 600, color: "#7a8fa6" },
+    { text: "✓ ChromaDB connected", delay: 1200, color: "#00ff9d" },
+    { text: "Connecting to Suricata IDS...", delay: 1600, color: "#7a8fa6" },
+    { text: "✓ Suricata online", delay: 2000, color: "#00ff9d" },
+    { text: "Connecting to Zeek network monitor...", delay: 2400, color: "#7a8fa6" },
+    { text: "✓ Zeek online", delay: 2800, color: "#00ff9d" },
+    { text: "Loading RAG pipeline...", delay: 3200, color: "#7a8fa6" },
+    { text: "✓ Neural network ready", delay: 3800, color: "#00ff9d" },
+    { text: "Establishing secure connection...", delay: 4200, color: "#7a8fa6" },
+    { text: "✓ Encryption active — AES-256", delay: 4800, color: "#00ff9d" },
+    { text: "▶ ALL SYSTEMS OPERATIONAL", delay: 5400, color: "#00e5ff" },
+    { text: "▶ SIRA ONLINE — STANDING BY", delay: 6000, color: "#00e5ff" },
+  ];
+
+  useEffect(() => {
+  const timers = [];
+  bootLines.forEach(({ text, delay, color }) => {
+    timers.push(setTimeout(() => {
+      setLines(prev => [...prev, { text, color }]);
+    }, delay));
+  });
+  timers.push(setTimeout(() => {
+    setDone(true);
+    timers.push(setTimeout(onComplete, 800));
+  }, 6800));
+  return () => timers.forEach(clearTimeout);
+}, []);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "#050a10",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      zIndex: 9999, fontFamily: "'Space Mono', monospace",
+      opacity: done ? 0 : 1, transition: "opacity 0.8s ease"
+    }}>
+      {/* Hexagon logo */}
+      <div style={{
+        width: 80, height: 80, marginBottom: 40,
+        background: "linear-gradient(135deg, #00e5ff, #b47cff)",
+        clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 0 40px rgba(0,229,255,0.5)",
+        animation: "pulse-icon 2s ease-in-out infinite"
+      }}>
+        <span style={{ fontSize: 32, color: "#050a10" }}>⬡</span>
+      </div>
+
+      {/* Boot lines */}
+      <div style={{ width: 500, maxWidth: "90vw" }}>
+        {lines.map((line, i) => (
+          <div key={i} style={{
+            color: line.color, fontSize: 12, letterSpacing: 1,
+            marginBottom: 8, opacity: 0,
+            animation: "fadeInLine 0.3s ease forwards"
+          }}>
+            {line.text}
+            {i === lines.length - 1 && !done && (
+              <span style={{
+                display: "inline-block", width: 8, height: 14,
+                background: "#00e5ff", marginLeft: 4,
+                animation: "blink 0.7s infinite"
+              }}/>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Progress bar */}
+      <div style={{
+        width: 500, maxWidth: "90vw", height: 2,
+        background: "rgba(0,229,255,0.1)", marginTop: 30, borderRadius: 1
+      }}>
+        <div style={{
+          height: "100%", background: "linear-gradient(90deg, #00e5ff, #b47cff)",
+          borderRadius: 1, transition: "width 6.8s linear",
+          width: lines.length > 0 ? "100%" : "0%"
+        }}/>
+      </div>
+
+      <style>{`
+        @keyframes fadeInLine {
+          from { opacity: 0; transform: translateX(-10px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function NavClock() {
+  const [time, setTime] = useState(new Date().toLocaleTimeString());
+  useEffect(() => {
+    const t = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--accent)", letterSpacing: 2 }}>
+      {time}
+    </span>
+  );
+} 
 export default function App() {
   const [selectedModel, setSelectedModel]   = useState("ollama");
   const [messages, setMessages]             = useState([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]);
@@ -902,14 +715,14 @@ export default function App() {
   const [uploadStatus, setUploadStatus]     = useState("");
   const [uploading, setUploading]           = useState(false);
   const [sessionId, setSessionId]           = useState(() => uuidv4());
-  const [didOpen, setDidOpen] = useState(false);
-
-
-  const [hermesOpen, setHermesOpen]     = useState(false);
-const [hermesTask, setHermesTask]     = useState("");
-const [hermesLoading, setHermesLoading] = useState(false);
-const [hermesSteps, setHermesSteps]   = useState([]);
-const [hermesAnswer, setHermesAnswer] = useState("");
+  const [didOpen, setDidOpen]               = useState(false);
+  const [bootDone, setBootDone] = useState(() => sessionStorage.getItem("bootDone") === "true");
+  const [hermesOpen, setHermesOpen]         = useState(false);
+  const [hermesTask, setHermesTask]         = useState("");
+  const [hermesLoading, setHermesLoading]   = useState(false);
+  const [hermesSteps, setHermesSteps]       = useState([]);
+  const [hermesAnswer, setHermesAnswer]     = useState("");
+  const [machines, setMachines] = useState([]);
 
   const messagesRef = useRef(null);
   const toastTimer  = useRef(null);
@@ -921,55 +734,28 @@ const [hermesAnswer, setHermesAnswer] = useState("");
   const charCount = input.length;
   const charClass = charCount === 0 ? "ok" : charCount > MAX_CHARS ? "over" : charCount > MAX_CHARS * 0.8 ? "warn" : "ok";
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("username");
-    window.location.href = "/login";
-  };
+  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("username"); window.location.href = "/login"; };
 
   const startResize = (e) => {
     isResizing.current = true;
-    const startX = e.clientX;
-    const startWidth = sidebarWidth;
+    const startX = e.clientX; const startWidth = sidebarWidth;
     const onMove = (e) => { if (!isResizing.current) return; setSidebarWidth(Math.min(500, Math.max(220, startWidth + e.clientX - startX))); };
     const onUp = () => { isResizing.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
-  const showToast = useCallback((msg) => {
-    setToast(msg);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2500);
-  }, []);
+  const showToast = useCallback((msg) => { setToast(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 2500); }, []);
+  const scrollToBottom = useCallback((smooth = true) => { if (messagesRef.current) { messagesRef.current.scrollTo({ top: messagesRef.current.scrollHeight, behavior: smooth ? "smooth" : "auto" }); setUnreadCount(0); } }, []);
+  const handleScroll = useCallback(() => { if (!messagesRef.current) return; const { scrollTop, scrollHeight, clientHeight } = messagesRef.current; const atBottom = scrollHeight - scrollTop - clientHeight < 60; isAtBottom.current = atBottom; setShowScrollBtn(!atBottom); if (atBottom) setUnreadCount(0); }, []);
 
-  const scrollToBottom = useCallback((smooth = true) => {
-    if (messagesRef.current) {
-      messagesRef.current.scrollTo({ top: messagesRef.current.scrollHeight, behavior: smooth ? "smooth" : "auto" });
-      setUnreadCount(0);
-    }
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    if (!messagesRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = messagesRef.current;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 60;
-    isAtBottom.current = atBottom;
-    setShowScrollBtn(!atBottom);
-    if (atBottom) setUnreadCount(0);
-  }, []);
-
-  useEffect(() => { const t = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000); return () => clearInterval(t); }, []);
-
+  
+  useEffect(() => { const fetchLogs = () => fetch(`${FLASK_URL}/logs`).then(r => r.json()).then(data => { if (Array.isArray(data) && data.length > 0) setAlerts(data); }).catch(() => {}); setTimeout(fetchLogs, 800);; const interval = setInterval(fetchLogs, 30000); return () => clearInterval(interval); }, []);
   useEffect(() => {
-    const fetchLogs = () => fetch(`${FLASK_URL}/logs`).then(r => r.json()).then(data => { if (Array.isArray(data) && data.length > 0) setAlerts(data); }).catch(() => {});
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => { fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {}); }, []);
-
+  const t = setTimeout(() => {
+    fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {});
+  }, 500);
+  return () => clearTimeout(t);
+}, []);
   useEffect(() => {
     const loadLastSession = async () => {
       try {
@@ -977,62 +763,80 @@ const [hermesAnswer, setHermesAnswer] = useState("");
         const sessionsRef = collection(db, "soc_sessions");
         const q = query(sessionsRef, where("username", "==", username), orderBy("updated_at", "desc"), limit(1));
         const snap = await getDocs(q);
-        if (!snap.empty) {
-          const session = { id: snap.docs[0].id, ...snap.docs[0].data() };
-          setLastSession(session);
-          setShowResumePrompt(true);
-        }
+        if (!snap.empty) { const session = { id: snap.docs[0].id, ...snap.docs[0].data() }; setLastSession(session); setShowResumePrompt(true); }
       } catch (e) { console.error("Session load error:", e); }
     };
     loadLastSession();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line
+ useEffect(() => { 
+  const t = setTimeout(() => {
+    fetch(`${FLASK_URL}/health`).then(r => r.json()).then(setHealth).catch(() => {});
+  }, 1000);
+  return () => clearTimeout(t);
+}, []);
+ 
+const voicePlayed = useRef(false);
 
-  useEffect(() => { fetch(`${FLASK_URL}/health`).then(r => r.json()).then(setHealth).catch(() => {}); }, []);
-
-  useEffect(() => {
-    if (isAtBottom.current) { scrollToBottom(false); } else { setUnreadCount(prev => prev + 1); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, loading]);
-
-  const checkReputation = async (ip) => {
-    if (reputations[ip]) return;
+useEffect(() => {
+  if (voicePlayed.current) return;
+  voicePlayed.current = true;
+  const timer = setTimeout(async () => {
     try {
-      const res = await fetch(`${FLASK_URL}/reputation/${ip}`);
-      const data = await res.json();
-      setReputations(prev => ({ ...prev, [ip]: data }));
+      const statsRes  = await fetch(`${FLASK_URL}/stats`);
+      const statsData = await statsRes.json();
+
+      const totalEvents  = statsData.total_events || 0;
+      const alertCount   = statsData.alert_count || 0;
+      const uniqueIPs    = statsData.unique_ips || 0;
+
+      const text = `SIRA online. All systems operational. I have loaded ${totalEvents.toLocaleString()} security events. ${alertCount} active alerts detected from ${uniqueIPs} unique IP addresses. Standing by for your instructions.`;
+const res  = await fetch(`${FLASK_URL}/sira-speak`, {
+  method:  "POST",
+  headers: { "Content-Type": "application/json" },
+  body:    JSON.stringify({ text })
+});
+const blob  = await res.blob();
+const url   = URL.createObjectURL(blob);
+const audio = new Audio(url);
+audio.onended = () => URL.revokeObjectURL(url);
+audio.play();
     } catch {}
-  };
+  }, 2000);
+  return () => clearTimeout(timer);
+}, []);
 
-  useEffect(() => {
-    const alertIPs = [...new Set(alerts.filter(a => a.event_type === "alert").map(a => a.src_ip).filter(Boolean))];
-    alertIPs.forEach(ip => checkReputation(ip));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alerts]);
+  useEffect(() => { if (isAtBottom.current) { scrollToBottom(false); } else { setUnreadCount(prev => prev + 1); } }, [messages, loading]); // eslint-disable-line
 
-  const handleModelChange = (e) => {
-    const val = e.target.value;
-    setSelectedModel(val);
-    showToast(`Switched to ${MODEL_OPTIONS.find(x => x.value === val).chip}`);
-  };
+
+useEffect(() => {
+  const t = setTimeout(() => {
+    fetch(`${FLASK_URL}/machines`).then(r => r.json()).then(setMachines).catch(() => {});
+    const interval = setInterval(() => {
+      fetch(`${FLASK_URL}/machines`).then(r => r.json()).then(setMachines).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, 2000);
+  return () => clearTimeout(t);
+}, []);
+
+
+  const checkReputation = async (ip) => { if (reputations[ip]) return; try { const res = await fetch(`${FLASK_URL}/reputation/${ip}`); const data = await res.json(); setReputations(prev => ({ ...prev, [ip]: data })); } catch {} };
+ useEffect(() => {
+  const alertIPs = [...new Set(alerts.filter(a => a.event_type === "alert").map(a => a.src_ip).filter(Boolean))];
+  alertIPs.slice(0, 3).forEach((ip, i) => {
+    setTimeout(() => checkReputation(ip), i * 1000);
+  });
+}, [alerts]); // eslint-disable-line
+  const handleModelChange = (e) => { const val = e.target.value; setSelectedModel(val); showToast(`Switched to ${MODEL_OPTIONS.find(x => x.value === val).chip}`); };
 
   const startHermes = async () => {
     if (!hermesTask.trim()) return;
-    setHermesLoading(true);
-    setHermesSteps([]);
-    setHermesAnswer("");
+    setHermesLoading(true); setHermesSteps([]); setHermesAnswer("");
     try {
-      const res  = await fetch(`${FLASK_URL}/hermes-agent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: hermesTask })
-      });
+      const res  = await fetch(`${FLASK_URL}/hermes-agent`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task: hermesTask }) });
       const data = await res.json();
-      setHermesSteps(data.steps || []);
-      setHermesAnswer(data.answer || "Investigation complete");
-    } catch (err) {
-      setHermesAnswer(`Error: ${err.message}`);
-    }
+      setHermesSteps(data.steps || []); setHermesAnswer(data.answer || "Investigation complete");
+    } catch (err) { setHermesAnswer(`Error: ${err.message}`); }
     setHermesLoading(false);
   };
 
@@ -1049,10 +853,7 @@ const [hermesAnswer, setHermesAnswer] = useState("");
       await addDoc(collection(db, "soc_messages"), { username, session_id: sessionId, role: "user", message: q, model_used: selectedModel, created_at: serverTimestamp() });
     } catch (e) { console.error("Firestore user save error:", e); }
     try {
-      const recentHistory = messages.slice(-6).filter(m => !m.isWelcome).map(m => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.text
-      }));
+      const recentHistory = messages.slice(-6).filter(m => !m.isWelcome).map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
       const res  = await fetch(`${FLASK_URL}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, model: selectedModel, history: recentHistory }) });
       const data = await res.json();
       setMessages(prev => [...prev, { role: "ai", text: data.answer, time: new Date().toLocaleTimeString(), model: modelObj.chip }]);
@@ -1060,26 +861,19 @@ const [hermesAnswer, setHermesAnswer] = useState("");
         await addDoc(collection(db, "soc_messages"), { username, session_id: sessionId, role: "ai", message: data.answer, model_used: selectedModel, created_at: serverTimestamp() });
         await setDoc(doc(db, "soc_sessions", sessionId), { updated_at: serverTimestamp() }, { merge: true });
       } catch (e) { console.error("Firestore AI save error:", e); }
-    } catch (err) {
-      setMessages(prev => [...prev, { role: "ai", text: `Error: ${err.message}`, time: new Date().toLocaleTimeString() }]);
-    }
+    } catch (err) { setMessages(prev => [...prev, { role: "ai", text: `Error: ${err.message}`, time: new Date().toLocaleTimeString() }]); }
     setLoading(false);
   };
 
   const handleUpload = async () => {
     if (!uploadFile) { setUploadStatus("No file selected"); return; }
     setUploading(true); setUploadStatus("Uploading...");
-    const formData = new FormData();
-    formData.append("file", uploadFile);
+    const formData = new FormData(); formData.append("file", uploadFile);
     try {
       const res  = await fetch(`${FLASK_URL}/upload`, { method: "POST", body: formData });
       const data = await res.json();
-      if (data.message) {
-        const eventsMsg = data.events_loaded ? ` (${data.events_loaded} events loaded)` : "";
-        setUploadStatus("✓ " + data.message + eventsMsg);
-        showToast("Logs uploaded");
-        setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000);
-      } else { setUploadStatus("✗ " + (data.error || "Upload failed")); }
+      if (data.message) { const eventsMsg = data.events_loaded ? ` (${data.events_loaded} events loaded)` : ""; setUploadStatus("✓ " + data.message + eventsMsg); showToast("Logs uploaded"); setTimeout(() => { setShowUpload(false); setUploadFile(null); setUploadStatus(""); }, 2000); }
+      else { setUploadStatus("✗ " + (data.error || "Upload failed")); }
     } catch { setUploadStatus("✗ Cannot connect to Flask"); }
     setUploading(false);
   };
@@ -1090,10 +884,10 @@ const [hermesAnswer, setHermesAnswer] = useState("");
 
   return (
     <>
+   {!bootDone && <BootSequence onComplete={() => { sessionStorage.setItem("bootDone", "true"); setBootDone(true); }} />}
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
       {toast && <div className="toast">✓ {toast.toUpperCase()}</div>}
 
-      {/* ── RESUME SESSION MODAL ── */}
       {showResumePrompt && lastSession && (
         <div className="modal-overlay" onClick={() => setShowResumePrompt(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 460 }}>
@@ -1110,31 +904,20 @@ const [hermesAnswer, setHermesAnswer] = useState("");
                   const msgsRef = collection(db, "soc_messages");
                   const q = query(msgsRef, where("session_id", "==", lastSession.id), orderBy("created_at", "asc"));
                   const snap = await getDocs(q);
-                  const loaded = snap.docs.map(d => ({
-                    role: d.data().role === "user" ? "user" : "ai",
-                    text: d.data().message,
-                    time: d.data().created_at?.toDate?.()?.toLocaleTimeString?.() || "",
-                    model: d.data().model_used
-                  }));
+                  const loaded = snap.docs.map(d => ({ role: d.data().role === "user" ? "user" : "ai", text: d.data().message, time: d.data().created_at?.toDate?.()?.toLocaleTimeString?.() || "", model: d.data().model_used }));
                   setMessages([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }, ...loaded]);
                   setSessionId(lastSession.id);
                   if (lastSession.model_used) setSelectedModel(lastSession.model_used);
                   showToast("Session resumed");
                 } catch (e) { console.error("Resume error:", e); }
                 setShowResumePrompt(false);
-              }} style={{ flex: 1, padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
-                ↩ RESUME SESSION
-              </button>
-              <button onClick={() => { setShowResumePrompt(false); showToast("Starting fresh"); }}
-                style={{ flex: 1, padding: "12px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>
-                + NEW SESSION
-              </button>
+              }} style={{ flex: 1, padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>↩ RESUME SESSION</button>
+              <button onClick={() => { setShowResumePrompt(false); showToast("Starting fresh"); }} style={{ flex: 1, padding: "12px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>+ NEW SESSION</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── UPLOAD MODAL ── */}
       {showUpload && (
         <div className="modal-overlay" onClick={() => setShowUpload(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
@@ -1143,23 +926,12 @@ const [hermesAnswer, setHermesAnswer] = useState("");
             <div className="modal-sub">REPLACE EVE.JSON OR CONN.LOG — CHROMADB WILL REBUILD AUTOMATICALLY</div>
             <div style={{ margin: "20px 0" }}>
               <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>SELECT FILE</div>
-              <input type="file" accept=".json,.log" onChange={e => { setUploadFile(e.target.files[0]); setUploadStatus(""); }}
-                style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text)", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: "10px", width: "100%" }} />
+              <input type="file" accept=".json,.log" onChange={e => { setUploadFile(e.target.files[0]); setUploadStatus(""); }} style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text)", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: "10px", width: "100%" }} />
               {uploadFile && <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>▸ {uploadFile.name} ({(uploadFile.size / 1024).toFixed(1)} KB)</div>}
             </div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.8 }}>
-              ⚠ Any <span style={{ color: "var(--orange)" }}>.json</span> file will be saved as eve.json. Any <span style={{ color: "var(--orange)" }}>.log</span> file will be saved as conn.log.
-            </div>
-            {uploadStatus && (
-              <div style={{ fontFamily: "var(--mono)", fontSize: 11, padding: "8px 12px", borderRadius: 4, marginBottom: 16,
-                background: uploadStatus.startsWith("✓") ? "var(--green-dim)" : "var(--red-dim)",
-                color: uploadStatus.startsWith("✓") ? "var(--green)" : "var(--red)",
-                border: `1px solid ${uploadStatus.startsWith("✓") ? "rgba(0,255,157,0.3)" : "rgba(255,61,90,0.3)"}` }}>
-                {uploadStatus}
-              </div>
-            )}
-            <button onClick={handleUpload} disabled={!uploadFile || uploading}
-              style={{ width: "100%", padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: uploadFile && !uploading ? "pointer" : "not-allowed", opacity: uploadFile && !uploading ? 1 : 0.4, textTransform: "uppercase" }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.8 }}>⚠ Any <span style={{ color: "var(--orange)" }}>.json</span> file will be saved as eve.json. Any <span style={{ color: "var(--orange)" }}>.log</span> file will be saved as conn.log.</div>
+            {uploadStatus && <div style={{ fontFamily: "var(--mono)", fontSize: 11, padding: "8px 12px", borderRadius: 4, marginBottom: 16, background: uploadStatus.startsWith("✓") ? "var(--green-dim)" : "var(--red-dim)", color: uploadStatus.startsWith("✓") ? "var(--green)" : "var(--red)", border: `1px solid ${uploadStatus.startsWith("✓") ? "rgba(0,255,157,0.3)" : "rgba(255,61,90,0.3)"}` }}>{uploadStatus}</div>}
+            <button onClick={handleUpload} disabled={!uploadFile || uploading} style={{ width: "100%", padding: "12px", background: "linear-gradient(135deg, var(--accent), var(--accent2))", border: "none", borderRadius: 4, color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, letterSpacing: 2, cursor: uploadFile && !uploading ? "pointer" : "not-allowed", opacity: uploadFile && !uploading ? 1 : 0.4, textTransform: "uppercase" }}>
               {uploading ? "UPLOADING..." : "⬆ UPLOAD AND REBUILD"}
             </button>
           </div>
@@ -1170,29 +942,13 @@ const [hermesAnswer, setHermesAnswer] = useState("");
         <nav className="topnav">
           <div className="nav-brand">
             <div className="brand-icon">⬡</div>
-            <div>
-              <div className="brand-name">SOC Copilot</div>
-              <div className="brand-sub">SIRA v3 — Threat Intelligence</div>
-            </div>
+            <div><div className="brand-name">SOC Copilot</div><div className="brand-sub">SIRA v4 — Threat Intelligence</div></div>
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            {["dashboard", "analytics", "investigation", "history"].map(p => (
-              <button key={p} onClick={() => setPage(p)} style={{
-                fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase",
-                padding: "5px 14px", borderRadius: 2, cursor: "pointer", transition: "all 0.15s",
-                background: page === p ? "var(--accent)" : "transparent",
-                color: page === p ? "var(--bg)" : "var(--text-dim)",
-                border: page === p ? "1px solid var(--accent)" : "1px solid var(--border2)"
-              }}>{p}</button>
+            {["dashboard", "analytics", "investigation", "history", "threatmap"].map(p => (
+              <button key={p} onClick={() => setPage(p)} style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", padding: "5px 14px", borderRadius: 2, cursor: "pointer", transition: "all 0.15s", background: page === p ? "var(--accent)" : "transparent", color: page === p ? "var(--bg)" : "var(--text-dim)", border: page === p ? "1px solid var(--accent)" : "1px solid var(--border2)" }}>{p}</button>
             ))}
-
-            <button onClick={() => setHermesOpen(true)} style={{
-              fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1,
-              padding: "5px 14px", borderRadius: 2, cursor: "pointer",
-              background: "linear-gradient(135deg,rgba(180,124,255,0.2),rgba(0,229,255,0.1))",
-              color: "var(--purple)", border: "1px solid var(--purple)",
-              textTransform: "uppercase", fontWeight: 700
-            }}>⬡ HERMES AGENT</button>
+            <button onClick={() => setHermesOpen(true)} style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1, padding: "5px 14px", borderRadius: 2, cursor: "pointer", background: "linear-gradient(135deg,rgba(180,124,255,0.2),rgba(0,229,255,0.1))", color: "var(--purple)", border: "1px solid var(--purple)", textTransform: "uppercase", fontWeight: 700 }}>⬡ HERMES AGENT</button>
           </div>
           <div className="nav-right">
             <div className="nav-status">
@@ -1200,12 +956,9 @@ const [hermesAnswer, setHermesAnswer] = useState("");
               <div className="status-pill"><div className={`ndot ${health?.status === "ok" ? "ndot-green" : "ndot-red"}`} />ZEEK</div>
               <div className="status-pill"><div className="ndot ndot-red" />{stats?.alert_count ?? alertCount} ALERTS</div>
               <div className="status-pill"><div className={`ndot ${health?.ollama === "ok" ? "ndot-cyan" : "ndot-red"}`} />AI {health?.ollama === "ok" ? "READY" : "OFFLINE"}</div>
-              <div className="nav-time">{time}</div>
+              <div className="nav-time"><NavClock /></div>
             </div>
-            <div className="user-pill">
-              <div className="user-avatar">{username[0].toUpperCase()}</div>
-              {username.toUpperCase()}
-            </div>
+            <div className="user-pill"><div className="user-avatar">{username[0].toUpperCase()}</div>{username.toUpperCase()}</div>
             <button className="logout-btn" onClick={handleLogout}>⏻ LOGOUT</button>
             <button className="theme-toggle" onClick={() => { setIsDark(d => !d); showToast(isDark ? "Light theme" : "Dark theme"); }}>
               {isDark ? "☀" : "☾"}
@@ -1216,9 +969,7 @@ const [hermesAnswer, setHermesAnswer] = useState("");
         </nav>
 
         <aside className="left-panel" style={{ position: "relative" }}>
-          <div onMouseDown={startResize} style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 4, cursor: "col-resize", zIndex: 10, background: "transparent", transition: "background 0.15s" }}
-            onMouseEnter={e => e.target.style.background = "var(--accent)"}
-            onMouseLeave={e => e.target.style.background = "transparent"} />
+          <div onMouseDown={startResize} style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 4, cursor: "col-resize", zIndex: 10, background: "transparent", transition: "background 0.15s" }} onMouseEnter={e => e.target.style.background = "var(--accent)"} onMouseLeave={e => e.target.style.background = "transparent"} />
           <div className="section-label">AI Engine</div>
           <div className="model-select-wrap">
             <select className="model-select" value={selectedModel} onChange={handleModelChange}>
@@ -1229,10 +980,7 @@ const [hermesAnswer, setHermesAnswer] = useState("");
           <div className="panel-divider" />
           <div className="section-label" style={{ justifyContent: "space-between" }}>
             Overview
-            <button onClick={() => fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {})}
-              style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", letterSpacing: 1 }}>
-              ↻ REFRESH
-            </button>
+            <button onClick={() => fetch(`${FLASK_URL}/stats`).then(r => r.json()).then(setStats).catch(() => {})} style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", letterSpacing: 1 }}>↻ REFRESH</button>
           </div>
           <div className="stats-grid" style={{ marginTop: 10 }}>
             <div className="stat"><div className="stat-glow c" /><div className="stat-label">Total Events</div><div className="stat-value c">{stats?.total_events || alerts.length || "--"}</div></div>
@@ -1240,37 +988,66 @@ const [hermesAnswer, setHermesAnswer] = useState("");
             <div className="stat"><div className="stat-glow o" /><div className="stat-label">Unique IPs</div><div className="stat-value o">{stats?.unique_ips || uniqueIPs || "--"}</div></div>
             <div className="stat"><div className="stat-glow g" /><div className="stat-label">Status</div><div className="stat-value g">ONLINE</div></div>
           </div>
+
+          
+
+          {/* Connected Machines */}
+<div className="section-label">Connected Machines</div>
+<div style={{ padding: "8px 16px" }}>
+  {machines.length === 0 && (
+    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 1 }}>
+      NO AGENTS CONNECTED
+    </div>
+  )}
+  {machines.map((m, i) => (
+    <div key={i} style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "6px 0", borderBottom: "1px solid var(--border)"
+    }}>
+      <div style={{
+        width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+        background: m.alert ? "var(--red)" : "var(--green)",
+        boxShadow: m.alert ? "0 0 6px var(--red)" : "0 0 6px var(--green)",
+        animation: "blink 2s infinite"
+      }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text)", fontWeight: 700 }}>
+          {m.id}
+        </div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 7, color: "var(--text-dim)" }}>
+          {m.local_ip} — {m.platform}
+        </div>
+      </div>
+      {m.alert && (
+        <span style={{
+          fontFamily: "var(--mono)", fontSize: 7, padding: "2px 6px",
+          borderRadius: 2, background: "var(--red-dim)",
+          color: "var(--red)", border: "1px solid rgba(255,61,90,0.3)"
+        }}>⚠ {m.suspicious_count}</span>
+      )}
+    </div>
+  ))}
+</div>
           <div className="panel-divider" />
           <div className="feed-wrap">
             <div style={{ padding: "0 16px 10px" }}>
-              <button onClick={() => setShowUpload(true)} style={{ width: "100%", padding: "8px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer", transition: "all 0.15s" }}
-                onMouseEnter={e => e.target.style.borderColor = "var(--accent)"}
-                onMouseLeave={e => e.target.style.borderColor = "var(--border2)"}>⬆ Upload Logs</button>
+              <button onClick={() => setShowUpload(true)} style={{ width: "100%", padding: "8px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, color: "var(--accent)", fontFamily: "var(--mono)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", cursor: "pointer", transition: "all 0.15s" }} onMouseEnter={e => e.target.style.borderColor = "var(--accent)"} onMouseLeave={e => e.target.style.borderColor = "var(--border2)"}>⬆ Upload Logs</button>
             </div>
             <div className="section-label">Live Feed</div>
             <div style={{ display: "flex", gap: 4, padding: "8px 16px 6px", flexWrap: "wrap" }}>
               {["all", "alert", "dns", "http", "tls", "flow"].map(f => (
-                <button key={f} onClick={() => setSeverityFilter(f)} style={{
-                  fontFamily: "var(--mono)", fontSize: 8, letterSpacing: 1, textTransform: "uppercase",
-                  padding: "3px 8px", borderRadius: 2, cursor: "pointer", transition: "all 0.15s",
-                  background: severityFilter === f ? "var(--accent)" : "var(--bg3)",
-                  color: severityFilter === f ? "var(--bg)" : "var(--text-dim)",
-                  border: severityFilter === f ? "1px solid var(--accent)" : "1px solid var(--border2)"
-                }}>{f}</button>
+                <button key={f} onClick={() => setSeverityFilter(f)} style={{ fontFamily: "var(--mono)", fontSize: 8, letterSpacing: 1, textTransform: "uppercase", padding: "3px 8px", borderRadius: 2, cursor: "pointer", transition: "all 0.15s", background: severityFilter === f ? "var(--accent)" : "var(--bg3)", color: severityFilter === f ? "var(--bg)" : "var(--text-dim)", border: severityFilter === f ? "1px solid var(--accent)" : "1px solid var(--border2)" }}>{f}</button>
               ))}
             </div>
             <div className="feed">
               {alerts.length === 0 && <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", padding: "8px 0", letterSpacing: 1 }}>WAITING FOR FLASK...</div>}
-              {alerts.filter(a => severityFilter === "all" || a.event_type === severityFilter).slice(0, 25).map((a, i) => (
+              {alerts.filter(a => severityFilter === "all" || a.event_type === severityFilter).slice(0,8).map((a, i) => (
                 <div key={i} className={`feed-item ${a.event_type}`}>
                   <span className={`feed-type ${a.event_type}`}>{a.event_type?.substring(0, 4).toUpperCase()}</span>
                   <span className="feed-ips">
                     <span className="feed-src">{a.src_ip}</span>
                     {reputations[a.src_ip] && (
-                      <span style={{ marginLeft: 4, fontFamily: "var(--mono)", fontSize: 7, padding: "1px 5px", borderRadius: 2, fontWeight: 700,
-                        background: reputations[a.src_ip].malicious ? "var(--red-dim)" : "var(--green-dim)",
-                        color: reputations[a.src_ip].malicious ? "var(--red)" : "var(--green)",
-                        border: reputations[a.src_ip].malicious ? "1px solid rgba(255,61,90,0.3)" : "1px solid rgba(0,255,157,0.3)" }}>
+                      <span style={{ marginLeft: 4, fontFamily: "var(--mono)", fontSize: 7, padding: "1px 5px", borderRadius: 2, fontWeight: 700, background: reputations[a.src_ip].malicious ? "var(--red-dim)" : "var(--green-dim)", color: reputations[a.src_ip].malicious ? "var(--red)" : "var(--green)", border: reputations[a.src_ip].malicious ? "1px solid rgba(255,61,90,0.3)" : "1px solid rgba(0,255,157,0.3)" }}>
                         {reputations[a.src_ip].malicious ? `⚠ ${reputations[a.src_ip].score}%` : "✓ CLEAN"}
                       </span>
                     )}
@@ -1282,10 +1059,13 @@ const [hermesAnswer, setHermesAnswer] = useState("");
             </div>
           </div>
         </aside>
-
-        {page === "analytics" ? (
-          <AnalyticsPage stats={stats} />
-        ) : page === "investigation" ? (
+{page === "threatmap" ? (
+   <Suspense fallback={<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--mono)",color:"var(--accent)"}}>LOADING MAP...</div>}>
+    <ThreatMap />
+    </Suspense>
+) :page === "analytics" ? (
+  <AnalyticsPage stats={stats} />
+) : page === "investigation" ? (
           <InvestigationPage onAskSira={(q) => { setPage("dashboard"); setTimeout(() => sendMessage(q), 300); }} />
         ) : page === "history" ? (
           <History />
@@ -1295,19 +1075,11 @@ const [hermesAnswer, setHermesAnswer] = useState("");
               <div className="agent-avatar">⬡</div>
               <div>
                 <div className="agent-name">SIRA</div>
-                <div className="agent-sub">
-                  <span className="sdot" />
-                  {loading ? `Analysing with ${loadingLabel[selectedModel]}...` : "Security Incident Response Assistant"}
-                </div>
+                <div className="agent-sub"><span className="sdot" />{loading ? `Analysing with ${loadingLabel[selectedModel]}...` : "Security Incident Response Assistant"}</div>
               </div>
               <div className="model-chip">{modelObj.chip}</div>
-              <button className="clear-btn" onClick={() => { setMessages([]); setSessionId(uuidv4()); showToast("Chat cleared"); }}>CLEAR</button>
-              <button onClick={() => setDidOpen(true)} style={{
-  padding: "4px 12px", background: "var(--purple-dim)",
-  border: "1px solid var(--purple)", borderRadius: 2,
-  color: "var(--purple)", fontFamily: "var(--mono)",
-  fontSize: 8, letterSpacing: 1, cursor: "pointer"
-}}>◈ SIRA FACE</button>
+              <button className="clear-btn" onClick={() => { setMessages([{ role: "ai", text: null, time: new Date().toLocaleTimeString(), isWelcome: true }]); setSessionId(uuidv4()); showToast("Chat cleared"); }}>CLEAR</button>
+              <button onClick={() => setDidOpen(true)} style={{ padding: "4px 12px", background: "var(--purple-dim)", border: "1px solid var(--purple)", borderRadius: 2, color: "var(--purple)", fontFamily: "var(--mono)", fontSize: 8, letterSpacing: 1, cursor: "pointer" }}>◈ SIRA FACE</button>
             </div>
             <div className="messages-wrap">
               <div className="messages" ref={messagesRef} onScroll={handleScroll}>
@@ -1316,19 +1088,24 @@ const [hermesAnswer, setHermesAnswer] = useState("");
                     <div className="bubble-wrap">
                       {m.isWelcome ? (
                         <div className="bubble">
-                          <div className="welcome-card">
-                            <div className="welcome-title">Hello, I'm <span>SIRA</span></div>
-                            <div className="welcome-body">Security Incident Response Assistant — online and ready.<br />I have loaded your Suricata and Zeek logs.</div>
-                            <div className="welcome-tags">
-                              <span className="wtag">{alerts.length || "?"} EVENTS LOADED</span>
-                              <span className="wtag">{alertCount} ALERTS DETECTED</span>
-                              <span className="wtag">RAG ACTIVE</span>
-                              <span className="wtag">CHROMADB READY</span>
+                          <div className="welcome-card" style={{display:"flex",alignItems:"center",gap:16}}>
+                            <div style={{flexShrink:0,width:110,height:110}}>
+                              <Lottie animationData={securityAnimation} loop={true} />
+                            </div>
+                            <div style={{flex:1}}>
+                              <div className="welcome-title">Hello, I'm <span>SIRA</span></div>
+                              <div className="welcome-body">Security Incident Response Assistant — online and ready.<br />I have loaded your Suricata and Zeek logs.</div>
+                              <div className="welcome-tags">
+                                <span className="wtag">{alerts.length || "?"} EVENTS LOADED</span>
+                                <span className="wtag">{alertCount} ALERTS DETECTED</span>
+                                <span className="wtag">RAG ACTIVE</span>
+                                <span className="wtag">CHROMADB READY</span>
+                              </div>
                             </div>
                           </div>
                         </div>
                       ) : m.role === "ai" ? (
-  <div className="bubble"><SiraMessage text={m.text} modelChip={m.model} /></div>
+                        <div className="bubble"><SiraMessage text={m.text} modelChip={m.model} /></div>
                       ) : (
                         <div className="bubble">{m.text}</div>
                       )}
@@ -1354,174 +1131,90 @@ const [hermesAnswer, setHermesAnswer] = useState("");
                 )}
               </div>
               <button className={`scroll-btn ${showScrollBtn ? "visible" : "hidden"}`} onClick={() => scrollToBottom(true)}>
-                {unreadCount > 0 && <span className="unread-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
-                ↓
+                {unreadCount > 0 && <span className="unread-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}↓
               </button>
             </div>
             <div className="input-area">
-              <div className="quick-btns">
-                {QUICK_QUESTIONS.map((q, i) => (
-                  <button key={i} className="qbtn" onClick={() => sendMessage(q)}>{q}</button>
-                ))}
-              </div>
+              <div className="quick-btns">{QUICK_QUESTIONS.map((q, i) => (<button key={i} className="qbtn" onClick={() => sendMessage(q)}>{q}</button>))}</div>
               <div className="input-row">
                 <input className="chat-input" value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendMessage()} placeholder="Ask SIRA about your logs..." maxLength={MAX_CHARS + 50} />
                 <button className="send-btn" onClick={() => sendMessage()} disabled={loading || charCount > MAX_CHARS}>SEND ▶</button>
               </div>
-              <div className="input-meta">
-                <span className={`char-counter ${charClass}`}>
-                  {charCount > 0 ? `${charCount} / ${MAX_CHARS}${charCount > MAX_CHARS ? " — TOO LONG" : ""}` : `MAX ${MAX_CHARS} CHARS`}
-                </span>
-              </div>
+              <div className="input-meta"><span className={`char-counter ${charClass}`}>{charCount > 0 ? `${charCount} / ${MAX_CHARS}${charCount > MAX_CHARS ? " — TOO LONG" : ""}` : `MAX ${MAX_CHARS} CHARS`}</span></div>
             </div>
           </div>
         )}
       </div>
-<SiraVoice isOpen={didOpen} onClose={() => setDidOpen(false)}/>
-{didOpen && (
-  <div className="modal-overlay" onClick={() => setDidOpen(false)}>
-    <div style={{ width: 420, height: 620, borderRadius: 12, overflow: "hidden", position: "relative" }} onClick={e => e.stopPropagation()}>
-      <button onClick={() => setDidOpen(false)} style={{ position: "absolute", top: 10, right: 10, zIndex: 10, background: "rgba(0,0,0,0.6)", border: "none", color: "white", width: 28, height: 28, borderRadius: "50%", cursor: "pointer", fontSize: 14 }}>✕</button>
-      <iframe
-        src="https://studio.d-id.com/agents/share?id=v2_agt_HW-Wx0tu&key=Y2tfSU9mWFQ1YWc1V2dCQ1FmNTY4YUhP"
-        width="420"
-        height="620"
-        style={{ border: "none", borderRadius: 12 }}
-        allow="camera; microphone"
-      />
-    </div>
-  </div>
-)}
-    
 
-{/* ── HERMES AGENT MODAL ── */}
-{hermesOpen && (
-  <div className="modal-overlay" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>
-    <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 700, maxHeight: "85vh" }}>
-      <button className="modal-close" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>✕</button>
+      <SiraVoice isOpen={didOpen} onClose={() => setDidOpen(false)} />
 
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 3, marginBottom: 4 }}>⬡ AUTONOMOUS AI AGENT</div>
-        <div className="modal-title">Hermes Investigation Agent</div>
-        <div className="modal-sub">Powered by Nous Hermes2 — autonomous multi-step investigation</div>
-      </div>
-
-      {/* Task input */}
-      {!hermesLoading && !hermesAnswer && (
-        <div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>GIVE HERMES A TASK</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <input
-              value={hermesTask}
-              onChange={e => setHermesTask(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && hermesTask.trim() && startHermes()}
-              placeholder="e.g. Investigate 185.220.101.45 and give me a full report"
-              style={{ flex: 1, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 3, padding: "10px 14px", color: "var(--text)", fontFamily: "var(--mono)", fontSize: 11, outline: "none" }}
-            />
-            <button onClick={startHermes} disabled={!hermesTask.trim()} style={{
-              padding: "10px 20px", background: "linear-gradient(135deg,var(--purple),#8a5fd4)",
-              border: "none", borderRadius: 3, color: "white",
-              fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700,
-              letterSpacing: 2, cursor: "pointer", textTransform: "uppercase"
-            }}>INVESTIGATE ▶</button>
-          </div>
-
-          {/* Quick tasks */}
-          <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>QUICK TASKS</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {[
-              "Investigate the entire network and identify all threats",
-              "Who is attacking us and what are they doing?",
-              "Give me a complete threat assessment with CVEs",
-              "What is the most dangerous IP and why?",
-              "Summarise all attacks and recommend actions"
-            ].map((task, i) => (
-              <button key={i} onClick={() => setHermesTask(task)} style={{
-                fontFamily: "var(--mono)", fontSize: 8, letterSpacing: 1,
-                padding: "5px 10px", borderRadius: 2,
-                border: "1px solid var(--border2)", background: "var(--bg3)",
-                color: "var(--text-mid)", cursor: "pointer", textTransform: "uppercase"
-              }}>{task}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Loading — live steps */}
-      {hermesLoading && (
-        <div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--purple)", animation: "blink 1s infinite" }} />
-            HERMES IS INVESTIGATING...
-          </div>
-          <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: 16, marginBottom: 12, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-mid)" }}>
-            ⬡ Task: {hermesTask}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {hermesSteps.map((step, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--purple)", borderRadius: 3 }}>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", minWidth: 60 }}>Step {step.step}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text)", marginBottom: 3 }}>
-                    ✓ {step.tool}({step.input})
-                  </div>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-mid)" }}>{step.result?.substring(0, 120)}...</div>
+      {hermesOpen && (
+        <div className="modal-overlay" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 700, maxHeight: "85vh" }}>
+            <button className="modal-close" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>✕</button>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 3, marginBottom: 4 }}>⬡ AUTONOMOUS AI AGENT</div>
+              <div className="modal-title">Hermes Investigation Agent</div>
+              <div className="modal-sub">Powered by Nous Hermes2 — autonomous multi-step investigation</div>
+            </div>
+            {!hermesLoading && !hermesAnswer && (
+              <div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>GIVE HERMES A TASK</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <input value={hermesTask} onChange={e => setHermesTask(e.target.value)} onKeyDown={e => e.key === "Enter" && hermesTask.trim() && startHermes()} placeholder="e.g. Investigate 185.220.101.45 and give me a full report" style={{ flex: 1, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 3, padding: "10px 14px", color: "var(--text)", fontFamily: "var(--mono)", fontSize: 11, outline: "none" }} />
+                  <button onClick={startHermes} disabled={!hermesTask.trim()} style={{ padding: "10px 20px", background: "linear-gradient(135deg,var(--purple),#8a5fd4)", border: "none", borderRadius: 3, color: "white", fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, letterSpacing: 2, cursor: "pointer", textTransform: "uppercase" }}>INVESTIGATE ▶</button>
+                </div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 8 }}>QUICK TASKS</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {["Investigate the entire network and identify all threats","Who is attacking us and what are they doing?","Give me a complete threat assessment with CVEs","What is the most dangerous IP and why?","Summarise all attacks and recommend actions"].map((task, i) => (
+                    <button key={i} onClick={() => setHermesTask(task)} style={{ fontFamily: "var(--mono)", fontSize: 8, letterSpacing: 1, padding: "5px 10px", borderRadius: 2, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text-mid)", cursor: "pointer", textTransform: "uppercase" }}>{task}</button>
+                  ))}
                 </div>
               </div>
-            ))}
-            <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--accent)", borderRadius: 3 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "blink 1s infinite" }} />
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>Analysing results...</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Final answer */}
-      {hermesAnswer && !hermesLoading && (
-        <div>
-          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--green)", letterSpacing: 2, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            ✓ INVESTIGATION COMPLETE — {hermesSteps.length} steps executed
-          </div>
-
-          {/* Steps summary */}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-            {hermesSteps.map((step, i) => (
-              <div key={i} style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "3px 8px", borderRadius: 2, background: "var(--purple-dim)", color: "var(--purple)", border: "1px solid rgba(180,124,255,0.3)" }}>
-                ✓ {step.tool}
+            )}
+            {hermesLoading && (
+              <div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--purple)", animation: "blink 1s infinite" }} />
+                  HERMES IS INVESTIGATING...
+                </div>
+                <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 4, padding: 16, marginBottom: 12, fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-mid)" }}>⬡ Task: {hermesTask}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {hermesSteps.map((step, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--purple)", borderRadius: 3 }}>
+                      <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", minWidth: 60 }}>Step {step.step}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--text)", marginBottom: 3 }}>✓ {step.tool}({step.input})</div>
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-mid)" }}>{step.result?.substring(0, 120)}...</div>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "10px 14px", background: "var(--bg2)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--accent)", borderRadius: 3 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "blink 1s infinite" }} />
+                    <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)" }}>Analysing results...</span>
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
-
-          {/* Full report */}
-          <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--purple)", borderRadius: 4, padding: 16, maxHeight: 400, overflowY: "auto" }}>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 12 }}>⬡ HERMES INVESTIGATION REPORT</div>
-            <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>
-              {hermesAnswer}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <button onClick={() => { setHermesAnswer(""); setHermesSteps([]); setHermesTask(""); }} style={{
-              flex: 1, padding: "10px", background: "transparent",
-              border: "1px solid var(--border2)", borderRadius: 3,
-              color: "var(--text-mid)", fontFamily: "var(--mono)",
-              fontSize: 10, cursor: "pointer", letterSpacing: 1
-            }}>↩ NEW INVESTIGATION</button>
-            <button onClick={() => { navigator.clipboard.writeText(hermesAnswer); showToast("Report copied"); }} style={{
-              flex: 1, padding: "10px", background: "var(--purple-dim)",
-              border: "1px solid var(--purple)", borderRadius: 3,
-              color: "var(--purple)", fontFamily: "var(--mono)",
-              fontSize: 10, cursor: "pointer", letterSpacing: 1
-            }}>⊕ COPY REPORT</button>
+            )}
+            {hermesAnswer && !hermesLoading && (
+              <div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--green)", letterSpacing: 2, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>✓ INVESTIGATION COMPLETE — {hermesSteps.length} steps executed</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                  {hermesSteps.map((step, i) => (<div key={i} style={{ fontFamily: "var(--mono)", fontSize: 8, padding: "3px 8px", borderRadius: 2, background: "var(--purple-dim)", color: "var(--purple)", border: "1px solid rgba(180,124,255,0.3)" }}>✓ {step.tool}</div>))}
+                </div>
+                <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "3px solid var(--purple)", borderRadius: 4, padding: 16, maxHeight: 400, overflowY: "auto" }}>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 2, marginBottom: 12 }}>⬡ HERMES INVESTIGATION REPORT</div>
+                  <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{hermesAnswer}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button onClick={() => { setHermesAnswer(""); setHermesSteps([]); setHermesTask(""); }} style={{ flex: 1, padding: "10px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 3, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 10, cursor: "pointer", letterSpacing: 1 }}>↩ NEW INVESTIGATION</button>
+                  <button onClick={() => { navigator.clipboard.writeText(hermesAnswer); showToast("Report copied"); }} style={{ flex: 1, padding: "10px", background: "var(--purple-dim)", border: "1px solid var(--purple)", borderRadius: 3, color: "var(--purple)", fontFamily: "var(--mono)", fontSize: 10, cursor: "pointer", letterSpacing: 1 }}>⊕ COPY REPORT</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
-    </div>
-  </div>
-)}
-      
     </>
   );
 }
