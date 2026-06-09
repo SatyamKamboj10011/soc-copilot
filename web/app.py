@@ -24,6 +24,11 @@ from dotenv import load_dotenv
 import os
 import sys
 
+# for agentic voice
+import numpy as np
+import soundfile as sf
+from kokoro_onnx import Kokoro
+
 ROOT_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 )
@@ -34,7 +39,7 @@ if ROOT_DIR not in sys.path:
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["http://localhost:3000"])
 
 # JWT Config
 app.config["JWT_SECRET_KEY"] = "soc-copilot-secret-key-2024"
@@ -124,6 +129,7 @@ def get_llm(model, api_key=None):
 
 
 def load_logs():
+    
     logs = []
     log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
     try:
@@ -139,6 +145,37 @@ def load_logs():
         pass
     return logs
 
+# ── ADD HERE ──────────────────────────────────────────────────────────────────
+import re
+
+def format_ts(ts):
+    if not ts: return "unknown time"
+    m = re.match(r'(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})', ts)
+    if m: return f"{m.group(3)}/{m.group(2)}/{m.group(1)} at {m.group(4)}:{m.group(5)}"
+    return ts
+
+
+# Load once at startup — not inside the route
+kokoro_model = Kokoro("kokoro-v0_19.onnx", "voices.bin")
+
+@app.route("/sira-speak", methods=["POST"])
+def sira_speak():
+    text = request.json.get("text", "")
+    if not text:
+        return jsonify({"error": "no text"}), 400
+    try:
+        samples, sample_rate = kokoro_model.create(
+            text=text[:500],
+            voice="am_adam",   # calm female — change to "am_adam" for male JARVIS voice
+            speed=0.88,
+            lang="en-us"
+        )
+        buf = io.BytesIO()
+        sf.write(buf, samples, sample_rate, format="WAV")
+        buf.seek(0)
+        return Response(buf.read(), mimetype="audio/wav")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ── AUTH ENDPOINTS ───────────────────────────────────────────────────────────
 
@@ -225,15 +262,15 @@ def ask():
     docs = alert_docs + other_docs
 
 # If question contains an IP, fetch extra targeted logs for that IP
-    import re
     ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', question)
     if ip_match:
+        extra_docs = []
         for ip in ip_match:
             ip_docs = retriever.invoke(f"src_ip {ip} alert")
-            alert_ip_docs = [d for d in ip_docs if
-                             d.metadata.get('src_ip') == ip or
-                             d.metadata.get('dest_ip') == ip]
-        docs = alert_ip_docs + docs
+            extra_docs += [d for d in ip_docs if
+                           d.metadata.get('src_ip') == ip or
+                           d.metadata.get('dest_ip') == ip]
+        docs = extra_docs + docs
 
 # Deduplicate while preserving order
     seen = set()
@@ -245,12 +282,22 @@ def ask():
     docs = unique_docs[:15]
 
     context = "\n\n".join([d.page_content for d in docs])
+    context = re.sub(
+    r'\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2}):\d{2}[.\d]*\+\d{4}',
+    lambda m: f"at {m.group(1)}:{m.group(2)}",
+    context
+)
 
-    prompt = f"""You are SIRA — Security Incident Response Assistant embedded in SOC Copilot.
-You speak like a calm, experienced SOC analyst. Direct, specific, never robotic.
+    prompt = f"""You are SIRA — Security Incident Response Assistant.
+Speak exactly like JARVIS from Iron Man. Calm, authoritative, precise.
+Address the analyst as "Sir" occasionally.
+Never ramble. Lead with the most critical information first.
+Be definitive — never say "I think" or "maybe".
+Short sentences. Maximum impact per word.
 
 STRICT RULES:
 - Only use facts from the log data below — never invent details
+- Write timestamps as "at HH:MM" not raw ISO format
 - Always use exact IPs, timestamps, ports and alert names from the logs
 - If information is missing say "Not available in logs"
 - Write so a junior analyst with 3 months experience can understand
@@ -787,8 +834,7 @@ def attacker_profile(ip):
     # 6. Ask SIRA to profile the attacker
     docs = retriever.invoke(f"attacks from {ip}")
     context = "\n\n".join([d.page_content for d in docs[:8]])
-    prompt = f"""You are SIRA. Based on the log data, create a threat actor profile for IP {ip}.
-
+    prompt = f"""You are SIRA — speak like JARVIS from Iron Man. Calm, authoritative, precise. Address the analyst as Sir occasionally. Based on the log data, create a threat actor profile for IP {ip}.
 Log context:
 {context}
 
@@ -855,7 +901,7 @@ def what_if():
     docs = retriever.invoke(f"{alert_signature} {src_ip}")
     context = "\n\n".join([d.page_content for d in docs[:8]])
 
-    prompt = f"""You are SIRA. An analyst is asking: "What would have happened if this attack had NOT been blocked?"
+    prompt = f"""You are SIRA. Respond like JARVIS — calm, authoritative, precise. Address the analyst as Sir occasionally."
 
 Alert: {alert_signature}
 Attacker IP: {src_ip}
@@ -972,6 +1018,66 @@ def cve_lookup():
         "source": "NVD — National Vulnerability Database"
     })
 
+
+# Store connected machines in memory
+connected_machines = {}
+ips_to_block = []
+
+@app.route("/ingest/<machine_id>", methods=["POST"])
+def ingest(machine_id):
+    data = request.json
+    secret = data.get("secret")
+    if secret != os.getenv("SENTINEL_SECRET", "sira-sentinel-2026"):
+        return jsonify({"error": "unauthorized"}), 401
+    connected_machines[machine_id] = {
+        "last_seen":   data.get("timestamp"),
+        "platform":    data.get("platform"),
+        "local_ip":    data.get("local_ip"),
+        "connections": data.get("connections", []),
+        "processes":   data.get("processes", []),
+        "suspicious":  data.get("suspicious", []),
+        "alert":       data.get("alert", False)
+    }
+
+    commands = []
+
+    # Send back any IPs to block
+    for ip in ips_to_block:
+        commands.append({"action": "block_ip", "ip": ip})
+    ips_to_block.clear()
+
+    # Auto-trigger Hermes if suspicious activity detected
+    if data.get("alert") and data.get("suspicious"):
+        suspicious = data["suspicious"]
+        print(f"[SENTINEL] Suspicious activity on {machine_id}: {suspicious}")
+
+    return jsonify({"status": "received", "machine": machine_id, "commands": commands})
+
+@app.route("/machines", methods=["GET"])
+def get_machines():
+    return jsonify([
+        {
+            "id":       mid,
+            "last_seen": info["last_seen"],
+            "platform": info["platform"],
+            "local_ip": info["local_ip"],
+            "alert":    info["alert"],
+            "suspicious_count": len(info["suspicious"])
+        }
+        for mid, info in connected_machines.items()
+    ])
+
+@app.route("/machine/<machine_id>", methods=["GET"])
+def get_machine(machine_id):
+    return jsonify(connected_machines.get(machine_id, {}))
+
+@app.route("/block-ip", methods=["POST"])
+def block_ip_route():
+    ip = request.json.get("ip")
+    if ip:
+        ips_to_block.append(ip)
+        return jsonify({"status": "queued", "ip": ip})
+    return jsonify({"error": "no ip"}), 400
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True, port=5000)
