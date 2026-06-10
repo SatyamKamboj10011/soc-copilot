@@ -5,6 +5,7 @@ import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp, increment } from "firebase/firestore";
 // import Lottie from "lottie-react";
 // import securityAnimation from "./security-animation.json";
+
 import SiraVoice from "./SiraVoice";
 
 const FLASK_URL = "http://localhost:5000";
@@ -397,7 +398,7 @@ function SiraMessage({ text, modelChip }) {
 }
 
 const AnalyticsPage = memo(function AnalyticsPage({ stats }) {
-  const [topIPs, setTopIPs]       = useState([]);
+  const [topIPs, setTopIPs] = useState([]);
   const [timeline, setTimeline]   = useState([]);
   const hourChartRef              = useRef(null);
   const typeChartRef              = useRef(null);
@@ -405,7 +406,7 @@ const AnalyticsPage = memo(function AnalyticsPage({ stats }) {
   const typeChartInstance         = useRef(null);
 
   useEffect(() => {
-    fetch(`${FLASK_URL}/top-ips?limit=10`).then(r=>r.json()).then(setTopIPs).catch(()=>{});
+    fetch(`${FLASK_URL}/top-ips?limit=10`).then(r=>r.json()).then(data=>setTopIPs(Array.isArray(data)?data:[])).catch(()=>{});
     fetch(`${FLASK_URL}/timeline`).then(r=>r.json()).then(setTimeline).catch(()=>{});
   }, []);
 
@@ -799,6 +800,7 @@ const [sessionId, setSessionId] = useState(() => {
   const [hermesSteps, setHermesSteps]     = useState([]);
   const [hermesAnswer, setHermesAnswer]   = useState("");
   const [machines, setMachines]           = useState([]);
+  const [selectedMachine, setSelectedMachine] = useState(null);
 
   const messagesRef  = useRef(null);
   const toastTimer   = useRef(null);
@@ -1041,7 +1043,9 @@ setLoading(false);
           <div style={{padding:"8px 16px"}}>
             {machines.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO AGENTS CONNECTED</div>}
             {machines.map((m,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid var(--border)"}}>
+  <div key={i} onClick={()=>setSelectedMachine(m)} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid var(--border)",cursor:"pointer",transition:"all 0.15s"}}
+  onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
+  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:m.alert?"var(--red)":"var(--green)",boxShadow:m.alert?"0 0 6px var(--red)":"0 0 6px var(--green)",animation:"blink 2s infinite"}}/>
                 <div style={{flex:1}}>
                   <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700}}>{m.id}</div>
@@ -1164,6 +1168,91 @@ setLoading(false);
           </div>
         </div>
       </div>
+
+
+      {selectedMachine && (
+  <div className="modal-overlay" onClick={()=>setSelectedMachine(null)}>
+    <div className="modal" onClick={e=>e.stopPropagation()} style={{width:580}}>
+      <button className="modal-close" onClick={()=>setSelectedMachine(null)}>✕</button>
+
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,padding:16,background:"var(--bg3)",borderRadius:6,border:`1px solid ${selectedMachine.alert?"var(--red)":"var(--green)"}`,borderLeft:`3px solid ${selectedMachine.alert?"var(--red)":"var(--green)"}`}}>
+        <div style={{width:10,height:10,borderRadius:"50%",background:selectedMachine.alert?"var(--red)":"var(--green)",boxShadow:`0 0 8px ${selectedMachine.alert?"var(--red)":"var(--green)"}`,animation:"blink 2s infinite"}}/>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:700,color:"var(--text)"}}>{selectedMachine.id}</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text-mid)",marginTop:3}}>{selectedMachine.local_ip} — {selectedMachine.platform}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"var(--mono)",fontSize:22,fontWeight:700,color:selectedMachine.alert?"var(--red)":"var(--green)"}}>{selectedMachine.suspicious_count}</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:2}}>SUSPICIOUS</div>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:2,marginBottom:8}}>QUICK ACTIONS</div>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button onClick={()=>{
+          setSelectedMachine(null);
+          setPage("dashboard");
+        setTimeout(()=>sendMessage(`What suspicious connections and threats are currently active on our network? Focus on any lateral movement or exploit attempts.`),300);
+        }} style={{flex:1,padding:"10px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:4,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>
+          ⬡ ASK SIRA
+        </button>
+        <button onClick={()=>{
+          setSelectedMachine(null);
+          setPage("dashboard");
+          setTimeout(()=>sendMessage(`Run full Hermes investigation on machine ${selectedMachine.id} at IP ${selectedMachine.local_ip}`),300);
+        }} style={{flex:1,padding:"10px",background:"var(--purple-dim)",border:"1px solid var(--purple)",borderRadius:4,color:"var(--purple)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>
+          ◈ HERMES SCAN
+        </button>
+        <button onClick={async()=>{
+          if(selectedMachine.suspicious[0]){
+            const ip = selectedMachine.suspicious[0].remote?.split(":")[0];
+            if(ip){
+              await fetch(`${FLASK_URL}/block-ip`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ip})});
+              showToast(`Blocking ${ip}`);
+            }
+          }
+        }} style={{flex:1,padding:"10px",background:"var(--red-dim)",border:"1px solid var(--red)",borderRadius:4,color:"var(--red)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>
+          ✕ BLOCK TOP IP
+        </button>
+      </div>
+
+      {/* Suspicious connections */}
+      {selectedMachine.suspicious?.length > 0 && (
+        <div style={{marginBottom:16}}>
+          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:2,marginBottom:8}}>SUSPICIOUS CONNECTIONS</div>
+          {selectedMachine.suspicious.map((c,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"var(--bg3)",border:"1px solid rgba(255,61,90,0.15)",borderLeft:"2px solid var(--red)",borderRadius:3,marginBottom:4}}>
+              <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)"}}>{c.remote}</span>
+              <button onClick={async()=>{
+                const ip = c.remote?.split(":")[0];
+                await fetch(`${FLASK_URL}/block-ip`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ip})});
+                showToast(`Blocking ${ip}`);
+              }} style={{fontFamily:"var(--mono)",fontSize:8,padding:"3px 8px",borderRadius:2,background:"var(--red-dim)",border:"1px solid rgba(255,61,90,0.3)",color:"var(--red)",cursor:"pointer"}}>
+                BLOCK
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Top processes */}
+      {selectedMachine.processes?.length > 0 && (
+        <div>
+          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:2,marginBottom:8}}>TOP PROCESSES</div>
+          {selectedMachine.processes.map((p,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",background:"var(--bg3)",borderRadius:3,marginBottom:3,border:"1px solid var(--border)"}}>
+              <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text-mid)"}}>{p.name}</span>
+              <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)"}}>{p.cpu_percent}% CPU</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+    </div>
+  </div>
+)}
 
       <SiraVoice isOpen={didOpen} onClose={()=>setDidOpen(false)}/>
 

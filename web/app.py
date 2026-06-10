@@ -1057,12 +1057,15 @@ def ingest(machine_id):
 def get_machines():
     return jsonify([
         {
-            "id":       mid,
-            "last_seen": info["last_seen"],
-            "platform": info["platform"],
-            "local_ip": info["local_ip"],
-            "alert":    info["alert"],
-            "suspicious_count": len(info["suspicious"])
+            "id":               mid,
+            "last_seen":        info["last_seen"],
+            "platform":         info["platform"],
+            "local_ip":         info["local_ip"],
+            "alert":            info["alert"],
+            "suspicious_count": len(info["suspicious"]),
+            "suspicious":       info["suspicious"][:5],
+            "processes":        info["processes"][:5],
+            "connections":      info["connections"][:5],
         }
         for mid, info in connected_machines.items()
     ])
