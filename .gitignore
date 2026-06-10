@@ -3,19 +3,41 @@ ai/chroma_db/
 web/chroma_db/
 chroma_db/
 
+# Large binary files
+dist/
+build/
+*.onnx
+*.bin
+*.exe
+*.zip
+*.pkg
+
 # Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Environment files
 .env
+*.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # Node
 node_modules/
 web-react/node_modules/
+/.pnp
+.pnp.js
+/coverage
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Environment files with API keys
-.env
-*.env
-
-# local files
+# Local files
 users.db
 start.bat
+
+# OS
+.DS_Store
