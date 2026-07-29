@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -8,9 +8,96 @@ export default function SiraVoice({ isOpen, onClose }) {
   const [loading, setLoading]     = useState(false);
   const [speaking, setSpeaking]   = useState(false);
   const [listening, setListening] = useState(false);
-  const audioRef                  = useRef(null);
+
+  const audioRef     = useRef(null);
+  const audioCtxRef   = useRef(null);
+  const analyserRef  = useRef(null);
+  const sourceRef    = useRef(null);
+  const canvasRef    = useRef(null);
+  const videoRef     = useRef(null);
+  const rafRef       = useRef(null);
+
+  // Continuous render loop: audio-reactive while speaking, gentle idle pulse otherwise
+  useEffect(() => {
+    if (!isOpen) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
+    let t = 0;
+    const bufferLength = 64;
+    const data = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      t += 0.02;
+      ctx.clearRect(0, 0, W, H);
+
+      let level = 0.15 + Math.sin(t) * 0.05; // idle breathing fallback
+      let bars = new Array(28).fill(0).map((_, i) => 0.2 + Math.sin(t * 1.5 + i * 0.4) * 0.15);
+
+      if (speaking && analyserRef.current) {
+        analyserRef.current.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        level = Math.min(1, avg / 130);
+        bars = Array.from({ length: 28 }, (_, i) => {
+          const idx = Math.floor((i / 28) * bufferLength);
+          return Math.max(0.06, data[idx] / 255);
+        });
+      }
+
+      // outer glow ring — radius/opacity driven by real amplitude when speaking
+      const ringColor = speaking ? "41,211,255" : listening ? "139,124,255" : "34,217,122";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 78 + level * 18, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${ringColor},${0.25 + level * 0.5})`;
+      ctx.lineWidth = 2 + level * 3;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, 92, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${ringColor},0.15)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // circular waveform bars around the ring — real frequency data while speaking
+      bars.forEach((v, i) => {
+        const angle = (i / bars.length) * Math.PI * 2 - Math.PI / 2;
+        const rInner = 100;
+        const rOuter = rInner + v * 34;
+        const x1 = cx + Math.cos(angle) * rInner, y1 = cy + Math.sin(angle) * rInner;
+        const x2 = cx + Math.cos(angle) * rOuter, y2 = cy + Math.sin(angle) * rOuter;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = `rgba(${ringColor},${0.4 + v * 0.6})`;
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = "round";
+        ctx.stroke();
+      });
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isOpen, speaking, listening]);
 
   if (!isOpen) return null;
+
+  const ensureAudioGraph = (audioEl) => {
+    if (!audioCtxRef.current) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtxRef.current = new AC();
+    }
+    const ctx = audioCtxRef.current;
+    if (ctx.state === "suspended") ctx.resume();
+    const source = ctx.createMediaElementSource(audioEl);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 128;
+    source.connect(analyser);
+    analyser.connect(ctx.destination);
+    analyserRef.current = analyser;
+    sourceRef.current = source;
+  };
 
   const speak = async (text) => {
     setSpeaking(true);
@@ -24,6 +111,7 @@ export default function SiraVoice({ isOpen, onClose }) {
       if (audioRef.current) { audioRef.current.pause(); }
       const audio = new Audio(url);
       audioRef.current = audio;
+      try { ensureAudioGraph(audio); } catch { /* graph setup best-effort */ }
       audio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); };
       audio.onerror = () => { setSpeaking(false); URL.revokeObjectURL(url); };
       audio.play();
@@ -74,241 +162,114 @@ export default function SiraVoice({ isOpen, onClose }) {
   };
 
   const status = speaking ? "SPEAKING" : listening ? "LISTENING" : loading ? "PROCESSING" : "STANDBY";
-  const statusColor = speaking ? "#00e5ff" : listening ? "#b47cff" : loading ? "#ffaa00" : "#00ff9d";
+  const statusColor = speaking ? "#29D3FF" : listening ? "#8B7CFF" : loading ? "#F0A857" : "#22D97A";
 
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)",
-      zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center"
+      position: "fixed", inset: 0, background: "rgba(4,6,10,0.85)", backdropFilter: "blur(4px)",
+      zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20
     }} onClick={onClose}>
       <div style={{
-        background: "#060b14", border: "1px solid rgba(0,229,255,0.15)",
-        borderRadius: 4, width: 520, fontFamily: "'Space Mono',monospace",
-        position: "relative", overflow: "hidden"
+        background: "#0A121C", border: "1px solid rgba(41,211,255,0.2)",
+        borderRadius: 18, width: 520, maxWidth: "100%", fontFamily: "'Inter',sans-serif",
+        position: "relative", overflow: "hidden", boxShadow: "0 30px 80px -20px rgba(0,0,0,0.7)"
       }} onClick={e => e.stopPropagation()}>
 
-        {/* Top bar */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 20px", borderBottom: "1px solid rgba(0,229,255,0.1)",
-          background: "rgba(0,229,255,0.03)"
+          padding: "14px 22px", borderBottom: "1px solid rgba(41,211,255,0.12)",
+          background: "rgba(41,211,255,0.04)"
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: statusColor, boxShadow: `0 0 8px ${statusColor}`
-            }}/>
-            <span style={{ fontSize: 9, color: statusColor, letterSpacing: 3 }}>{status}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 8px ${statusColor}` }}/>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9, color: statusColor, letterSpacing: 2 }}>{status}</span>
           </div>
-          <span style={{ fontSize: 9, color: "#3d4f63", letterSpacing: 2 }}>S.I.R.A. v4.0</span>
+          <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 13, fontWeight: 600, letterSpacing: 0.5, color: "#F2F6FA" }}>S.I.R.A.</span>
           <button onClick={onClose} style={{
-            background: "none", border: "none", color: "#3d4f63",
-            fontSize: 16, cursor: "pointer", padding: 0
+            background: "rgba(41,211,255,0.08)", border: "1px solid rgba(41,211,255,0.15)", borderRadius: 8,
+            width: 26, height: 26, color: "#8FA3B5", fontSize: 14, cursor: "pointer", padding: 0,
+            display: "flex", alignItems: "center", justifyContent: "center"
           }}>✕</button>
         </div>
 
-        {/* SVG Face */}
-        <div style={{ position: "relative", background: "#050a10" }}>
-          <svg viewBox="0 0 520 300" xmlns="http://www.w3.org/2000/svg"
-            style={{ width: "100%", height: 300, display: "block" }}>
-            <defs>
-              <filter id="jglow">
-                <feGaussianBlur stdDeviation="4" result="blur"/>
-                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-              <filter id="jglow2">
-                <feGaussianBlur stdDeviation="8" result="blur"/>
-                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-              <radialGradient id="bg-grad" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#00e5ff" stopOpacity="0.08"/>
-                <stop offset="100%" stopColor="#050a10" stopOpacity="0"/>
-              </radialGradient>
-            </defs>
+        <div style={{ position: "relative", background: "#060A11", height: 280, overflow: "hidden" }}>
+          <video
+            ref={videoRef}
+            autoPlay muted loop playsInline
+            src="/robot-face.mp4"
+            style={{
+              position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+              width: 180, height: 180, borderRadius: "50%", objectFit: "cover",
+              filter: speaking ? "brightness(1.05) saturate(1.15)" : "brightness(0.9) saturate(0.9)",
+              transition: "filter 0.2s", zIndex: 1
+            }}
+          />
+          <canvas ref={canvasRef} width={520} height={280} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 2 }} />
 
-            {/* Background glow */}
-            <ellipse cx="260" cy="150" rx="180" ry="140" fill="url(#bg-grad)"/>
+          <div style={{ position: "absolute", top: 14, left: 18, zIndex: 3, fontFamily: "'IBM Plex Mono',monospace" }}>
+            <div style={{ fontSize: 8, color: "rgba(41,211,255,0.5)" }}>S.I.R.A.</div>
+            <div style={{ fontSize: 7, color: "rgba(41,211,255,0.28)" }}>AUDIO-REACTIVE CORE</div>
+          </div>
+          <div style={{ position: "absolute", top: 14, right: 18, zIndex: 3, textAlign: "right", fontFamily: "'IBM Plex Mono',monospace" }}>
+            <div style={{ fontSize: 8, color: statusColor }}>{status}</div>
+            <div style={{ fontSize: 7, color: "rgba(41,211,255,0.28)" }}>SECURE CHANNEL</div>
+          </div>
 
-            {/* Grid lines */}
-            {[100,180,260,340,420].map(x => (
-              <line key={`x${x}`} x1={x} y1="0" x2={x} y2="300" stroke="rgba(0,229,255,0.04)" strokeWidth="0.5"/>
-            ))}
-            {[60,120,180,240].map(y => (
-              <line key={`y${y}`} x1="0" y1={y} x2="520" y2={y} stroke="rgba(0,229,255,0.04)" strokeWidth="0.5"/>
-            ))}
-
-            {/* Outer ring */}
-            <circle cx="260" cy="150" r="130" fill="none" stroke="rgba(0,229,255,0.1)" strokeWidth="1" strokeDasharray="6 4">
-              <animateTransform attributeName="transform" type="rotate" from="0 260 150" to="360 260 150" dur="25s" repeatCount="indefinite"/>
-            </circle>
-
-            {/* Middle ring */}
-            <circle cx="260" cy="150" r="110" fill="none" stroke="rgba(180,124,255,0.12)" strokeWidth="1" strokeDasharray="3 6">
-              <animateTransform attributeName="transform" type="rotate" from="360 260 150" to="0 260 150" dur="18s" repeatCount="indefinite"/>
-            </circle>
-
-            {/* Inner ring — pulses when speaking */}
-            <circle cx="260" cy="150" r="88" fill="none"
-              stroke={speaking ? "rgba(0,229,255,0.4)" : "rgba(0,229,255,0.12)"}
-              strokeWidth={speaking ? "2" : "1"}
-              filter={speaking ? "url(#jglow)" : "none"}>
-              {speaking && <animate attributeName="r" values="88;92;88" dur="0.8s" repeatCount="indefinite"/>}
-            </circle>
-
-            {/* Hexagon */}
-            <polygon
-              points="260,72 318,104 318,196 260,228 202,196 202,104"
-              fill="rgba(0,229,255,0.02)"
-              stroke={speaking ? "rgba(0,229,255,0.5)" : "rgba(0,229,255,0.2)"}
-              strokeWidth="1.5"
-              filter="url(#jglow)">
-              <animate attributeName="opacity" values="0.6;1;0.6" dur="3s" repeatCount="indefinite"/>
-            </polygon>
-
-            {/* Left eye */}
-            <g filter="url(#jglow2)">
-              <ellipse cx="234" cy="138" rx="16" ry="7" fill="none" stroke="#00e5ff" strokeWidth="1.5">
-                <animate attributeName="ry" values="7;0.5;7" dur="5s" begin="1s" repeatCount="indefinite"/>
-              </ellipse>
-              <ellipse cx="234" cy="138" rx="8" ry="4" fill="#00e5ff" opacity="0.9">
-                <animate attributeName="ry" values="4;0.3;4" dur="5s" begin="1s" repeatCount="indefinite"/>
-              </ellipse>
-            </g>
-
-            {/* Right eye */}
-            <g filter="url(#jglow2)">
-              <ellipse cx="286" cy="138" rx="16" ry="7" fill="none" stroke="#00e5ff" strokeWidth="1.5">
-                <animate attributeName="ry" values="7;0.5;7" dur="5s" begin="1s" repeatCount="indefinite"/>
-              </ellipse>
-              <ellipse cx="286" cy="138" rx="8" ry="4" fill="#00e5ff" opacity="0.9">
-                <animate attributeName="ry" values="4;0.3;4" dur="5s" begin="1s" repeatCount="indefinite"/>
-              </ellipse>
-            </g>
-
-            {/* Nose */}
-            <line x1="260" y1="148" x2="256" y2="164" stroke="rgba(0,229,255,0.25)" strokeWidth="1.5"/>
-            <line x1="256" y1="164" x2="264" y2="164" stroke="rgba(0,229,255,0.25)" strokeWidth="1.5"/>
-
-            {/* Mouth */}
-            {speaking ? (
-              <g filter="url(#jglow)">
-                {[0,1,2,3,4,5,6,7].map(i => (
-                  <rect key={i} x={228 + i*9} y={182} width="5" height="10" rx="2" fill="#00e5ff" opacity="0.85">
-                    <animate attributeName="height" values={`${3+(i*4)%14};${10+(i*3)%10};${3+(i*4)%14}`} dur={`${0.25+i*0.06}s`} repeatCount="indefinite"/>
-                    <animate attributeName="y" values="184;178;184" dur={`${0.25+i*0.06}s`} repeatCount="indefinite"/>
-                  </rect>
-                ))}
-              </g>
-            ) : (
-              <path d="M 232 186 Q 260 194 288 186" fill="none"
-                stroke="rgba(0,229,255,0.4)" strokeWidth="1.5" strokeLinecap="round">
-                <animate attributeName="opacity" values="0.4;0.7;0.4" dur="3s" repeatCount="indefinite"/>
-              </path>
-            )}
-
-            {/* Data lines left */}
-            <line x1="100" y1="138" x2="190" y2="138" stroke="rgba(0,229,255,0.2)" strokeWidth="1"/>
-            <line x1="120" y1="144" x2="190" y2="144" stroke="rgba(0,229,255,0.1)" strokeWidth="0.5"/>
-            <line x1="100" y1="162" x2="190" y2="162" stroke="rgba(0,229,255,0.15)" strokeWidth="0.5"/>
-
-            {/* Data lines right */}
-            <line x1="330" y1="138" x2="420" y2="138" stroke="rgba(0,229,255,0.2)" strokeWidth="1"/>
-            <line x1="330" y1="144" x2="400" y2="144" stroke="rgba(0,229,255,0.1)" strokeWidth="0.5"/>
-            <line x1="330" y1="162" x2="420" y2="162" stroke="rgba(0,229,255,0.15)" strokeWidth="0.5"/>
-
-            {/* Core pulse */}
-            <circle cx="260" cy="150" r="3" fill="#00e5ff" filter="url(#jglow2)">
-              <animate attributeName="r" values="3;6;3" dur="2s" repeatCount="indefinite"/>
-              <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite"/>
-            </circle>
-
-            {/* Status text */}
-            <text x="20" y="20" fontFamily="monospace" fontSize="8" fill="rgba(0,229,255,0.4)">S.I.R.A.</text>
-            <text x="20" y="32" fontFamily="monospace" fontSize="7" fill="rgba(0,229,255,0.2)">NEURAL NET ACTIVE</text>
-            <text x="500" y="20" fontFamily="monospace" fontSize="8" fill={statusColor} textAnchor="end">{status}</text>
-            <text x="500" y="32" fontFamily="monospace" fontSize="7" fill="rgba(0,229,255,0.2)" textAnchor="end">SECURE CHANNEL</text>
-
-            {/* Scan line when speaking */}
-            {speaking && (
-              <line x1="0" y1="150" x2="520" y2="150" stroke="rgba(0,229,255,0.08)" strokeWidth="40">
-                <animate attributeName="y1" values="50;250;50" dur="2s" repeatCount="indefinite"/>
-                <animate attributeName="y2" values="50;250;50" dur="2s" repeatCount="indefinite"/>
-              </line>
-            )}
-
-            {/* Corner brackets */}
-            <path d="M8,8 L8,24 M8,8 L24,8" stroke="rgba(0,229,255,0.3)" strokeWidth="1.5" fill="none"/>
-            <path d="M512,8 L512,24 M512,8 L496,8" stroke="rgba(0,229,255,0.3)" strokeWidth="1.5" fill="none"/>
-            <path d="M8,292 L8,276 M8,292 L24,292" stroke="rgba(0,229,255,0.3)" strokeWidth="1.5" fill="none"/>
-            <path d="M512,292 L512,276 M512,292 L496,292" stroke="rgba(0,229,255,0.3)" strokeWidth="1.5" fill="none"/>
-
-            {/* Scanlines overlay */}
-            <rect x="0" y="0" width="520" height="300" fill="none"
-              style={{backgroundImage: "repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,0.01) 3px,rgba(0,229,255,0.01) 4px)"}}/>
-          </svg>
+          <div style={{ position: "absolute", inset: 14, zIndex: 3, pointerEvents: "none" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, width: 16, height: 16, borderTop: "1.5px solid rgba(41,211,255,0.35)", borderLeft: "1.5px solid rgba(41,211,255,0.35)", borderRadius: "4px 0 0 0" }} />
+            <div style={{ position: "absolute", top: 0, right: 0, width: 16, height: 16, borderTop: "1.5px solid rgba(41,211,255,0.35)", borderRight: "1.5px solid rgba(41,211,255,0.35)", borderRadius: "0 4px 0 0" }} />
+            <div style={{ position: "absolute", bottom: 0, left: 0, width: 16, height: 16, borderBottom: "1.5px solid rgba(41,211,255,0.35)", borderLeft: "1.5px solid rgba(41,211,255,0.35)", borderRadius: "0 0 0 4px" }} />
+            <div style={{ position: "absolute", bottom: 0, right: 0, width: 16, height: 16, borderBottom: "1.5px solid rgba(41,211,255,0.35)", borderRight: "1.5px solid rgba(41,211,255,0.35)", borderRadius: "0 0 4px 0" }} />
+          </div>
         </div>
 
-        {/* Response */}
         <div style={{
-          padding: "14px 20px", borderTop: "1px solid rgba(0,229,255,0.08)",
-          borderBottom: "1px solid rgba(0,229,255,0.08)",
-          minHeight: 60, maxHeight: 80, overflowY: "auto"
+          padding: "16px 22px", borderTop: "1px solid rgba(41,211,255,0.1)",
+          borderBottom: "1px solid rgba(41,211,255,0.1)",
+          minHeight: 60, maxHeight: 90, overflowY: "auto"
         }}>
-          <div style={{ fontSize: 9, color: "#3d4f63", letterSpacing: 2, marginBottom: 6 }}>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9, color: "#4C6478", letterSpacing: 2, marginBottom: 7 }}>
             SIRA RESPONSE
           </div>
-          <div style={{ fontSize: 12, color: "#7a8fa6", lineHeight: 1.7 }}>{response}</div>
+          <div style={{ fontSize: 13, color: "#B7C4D1", lineHeight: 1.7 }}>{response}</div>
         </div>
 
-        {/* Input area */}
-        <div style={{ padding: "14px 20px" }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ padding: "16px 22px" }}>
+          <div style={{ display: "flex", gap: 9, marginBottom: 12 }}>
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && askSira(input)}
               placeholder="Ask SIRA..."
               style={{
-                flex: 1, background: "rgba(0,229,255,0.03)",
-                border: "1px solid rgba(0,229,255,0.15)",
-                borderRadius: 3, padding: "10px 14px",
-                color: "#e8f0fe", fontSize: 11, outline: "none",
-                fontFamily: "'Space Mono',monospace"
+                flex: 1, background: "#060A11", border: "1px solid rgba(41,211,255,0.18)",
+                borderRadius: 10, padding: "11px 15px", color: "#F2F6FA", fontSize: 12.5,
+                outline: "none", fontFamily: "'IBM Plex Mono',monospace"
               }}
             />
             <button onClick={() => askSira(input)} disabled={loading || !input.trim()} style={{
-              padding: "10px 18px",
-              background: "linear-gradient(135deg,#00e5ff,#00b4cc)",
-              border: "none", borderRadius: 3, color: "#060b14",
-              fontSize: 9, fontWeight: 700, letterSpacing: 2,
-              cursor: "pointer", fontFamily: "'Space Mono',monospace"
+              padding: "11px 20px", background: "linear-gradient(135deg,#29D3FF,#1FA8CC)",
+              border: "none", borderRadius: 10, color: "#04121C", fontSize: 10, fontWeight: 700,
+              letterSpacing: 1.5, cursor: loading || !input.trim() ? "not-allowed" : "pointer",
+              opacity: loading || !input.trim() ? 0.5 : 1, fontFamily: "'IBM Plex Mono',monospace"
             }}>SEND</button>
           </div>
 
-          {/* Controls */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
             <button onClick={startListening} disabled={listening} style={{
-              flex: 1, padding: "8px",
-              background: listening ? "rgba(180,124,255,0.15)" : "transparent",
-              border: "1px solid rgba(180,124,255,0.3)",
-              borderRadius: 3, color: "#b47cff",
-              fontSize: 9, letterSpacing: 1, cursor: "pointer",
-              fontFamily: "'Space Mono',monospace"
+              flex: 1, padding: "9px", background: listening ? "rgba(139,124,255,0.15)" : "rgba(139,124,255,0.05)",
+              border: "1px solid rgba(139,124,255,0.3)", borderRadius: 10, color: "#8B7CFF",
+              fontSize: 9, letterSpacing: 1, cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace"
             }}>
               {listening ? "◎ LISTENING..." : "◎ VOICE INPUT"}
             </button>
             <button onClick={stopSpeaking} style={{
-              padding: "8px 14px",
-              background: "transparent",
-              border: "1px solid rgba(255,61,90,0.2)",
-              borderRadius: 3, color: "#ff3d5a",
-              fontSize: 9, cursor: "pointer",
-              fontFamily: "'Space Mono',monospace"
+              padding: "9px 16px", background: "rgba(225,85,84,0.06)", border: "1px solid rgba(225,85,84,0.25)",
+              borderRadius: 10, color: "#E15554", fontSize: 9, cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace"
             }}>■ STOP</button>
           </div>
 
-          {/* Quick commands */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {[
               "Current threat level?",
               "Who is attacking us?",
@@ -316,16 +277,13 @@ export default function SiraVoice({ isOpen, onClose }) {
               "Run full analysis"
             ].map((q, i) => (
               <button key={i} onClick={() => askSira(q)} style={{
-                fontSize: 8, padding: "4px 10px", borderRadius: 2,
-                border: "1px solid rgba(255,255,255,0.06)",
-                background: "transparent", color: "#3d4f63",
-                cursor: "pointer", letterSpacing: 1,
-                fontFamily: "'Space Mono',monospace",
-                textTransform: "uppercase",
-                transition: "all 0.15s"
+                fontSize: 8.5, padding: "5px 11px", borderRadius: 20,
+                border: "1px solid rgba(41,211,255,0.12)", background: "rgba(41,211,255,0.03)",
+                color: "#4C6478", cursor: "pointer", letterSpacing: 0.5,
+                fontFamily: "'IBM Plex Mono',monospace", textTransform: "uppercase", transition: "all 0.15s"
               }}
-              onMouseEnter={e => { e.target.style.borderColor = "rgba(0,229,255,0.3)"; e.target.style.color = "#00e5ff"; }}
-              onMouseLeave={e => { e.target.style.borderColor = "rgba(255,255,255,0.06)"; e.target.style.color = "#3d4f63"; }}
+              onMouseEnter={e => { e.target.style.borderColor = "rgba(41,211,255,0.4)"; e.target.style.color = "#29D3FF"; }}
+              onMouseLeave={e => { e.target.style.borderColor = "rgba(41,211,255,0.12)"; e.target.style.color = "#4C6478"; }}
               >{q}</button>
             ))}
           </div>
