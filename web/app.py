@@ -591,6 +591,7 @@ def correlate_ip():
 
 @app.route('/upload', methods=['POST'])
 def upload():
+    os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
     if 'file' not in request.files:
         return jsonify({"error" : "No file provided"}), 400
 
@@ -613,8 +614,11 @@ def upload():
     file.save(save_path)
 
     try:
+        # rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
+        # subprocess.run(['python', rag_script], timeout=120, check=True)
         rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
-        subprocess.run(['python', rag_script], timeout=120, check=True)
+        ai_dir = os.path.join(os.path.dirname(__file__), '..', 'ai')
+        subprocess.run([sys.executable, rag_script], timeout=120, check=True, cwd=ai_dir)
         new_logs = load_logs()
         return jsonify({
             "message": f"{save_as} uploaded and ChromaDB rebuilt successfully",

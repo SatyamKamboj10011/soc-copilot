@@ -6,10 +6,11 @@ import argparse
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
+os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 USEFUL_TYPES = {"alert", "dns", "http", "tls", "flow"}
-MAX_EVENTS   = 500
+MAX_EVENTS   = 50000
 
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
