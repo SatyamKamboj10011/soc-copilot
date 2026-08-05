@@ -1,7 +1,19 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 import { auth, googleProvider } from "./firebase";
 import { createUserWithEmailAndPassword, signInWithPopup } from "firebase/auth";
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 16 },
+  show: (delay = 0) => ({ opacity: 1, y: 0, transition: { duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] } }),
+};
+
+const STATS = [
+  { value: "22,847", label: "EVENTS MONITORED" },
+  { value: "2", label: "SENSORS ONLINE" },
+  { value: "6", label: "AGENT TOOLS" },
+];
 
 export default function Register() {
   const [email, setEmail] = useState("");
@@ -9,20 +21,7 @@ export default function Register() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
-  const [particles, setParticles] = useState([]);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const p = Array.from({ length: 20 }, (_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      top: Math.random() * 100,
-      size: Math.random() * 2 + 1,
-      duration: Math.random() * 4 + 3,
-      delay: Math.random() * 3,
-    }));
-    setParticles(p);
-  }, []);
 
   const handleRegister = async () => {
     if (!email || !password) { setError("All fields required"); return; }
@@ -32,7 +31,7 @@ export default function Register() {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       localStorage.setItem("token", await result.user.getIdToken());
       localStorage.setItem("username", email.split("@")[0]);
-      setSuccess("Account created! Redirecting...");
+      setSuccess("Account created — redirecting...");
       setTimeout(() => navigate("/dashboard"), 1500);
     } catch (err) {
       setError(err.message.replace("Firebase: ", "").replace(/\(auth.*\)/, "").trim());
@@ -54,98 +53,188 @@ export default function Register() {
   };
 
   return (
-    <div style={s.page}>
+    <div className="reg-root">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
-        @keyframes floatUp { 0%{transform:translateY(0);opacity:0.4} 50%{transform:translateY(-20px);opacity:1} 100%{transform:translateY(0);opacity:0.4} }
-        @keyframes scanline { 0%{top:-10%} 100%{top:110%} }
-        @keyframes glow { 0%,100%{box-shadow:0 0 10px #00ffff44} 50%{box-shadow:0 0 25px #00ffff99,0 0 50px #00ffff33} }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-        .soc-input { background:#0a0e1a; border:1px solid #00ffff33; border-radius:6px; padding:14px 16px; color:#e0f7ff; font-size:14px; font-family:'Share Tech Mono',monospace; outline:none; transition:all 0.3s; width:100%; box-sizing:border-box; }
-        .soc-input:focus { border-color:#00ffff; box-shadow:0 0 15px #00ffff33; background:#0d1520; }
-        .soc-input::placeholder { color:#3a5566; }
-        .register-btn { background:linear-gradient(135deg,#00ffff22,#0066ff22); border:1px solid #00ffff; border-radius:6px; padding:14px; color:#00ffff; font-size:15px; font-family:'Rajdhani',sans-serif; font-weight:700; letter-spacing:3px; cursor:pointer; transition:all 0.3s; width:100%; animation:glow 3s infinite; }
-        .register-btn:hover { background:linear-gradient(135deg,#00ffff44,#0066ff44); box-shadow:0 0 30px #00ffff55; transform:translateY(-1px); }
-        .google-btn { background:#ffffff08; border:1px solid #ffffff22; border-radius:6px; padding:12px; color:#ffffff; font-size:13px; font-family:'Rajdhani',sans-serif; font-weight:600; letter-spacing:2px; cursor:pointer; transition:all 0.3s; width:100%; display:flex; align-items:center; justify-content:center; gap:10px; }
-        .google-btn:hover { background:#ffffff15; border-color:#ffffff44; transform:translateY(-1px); }
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+        * { box-sizing: border-box; }
+        .reg-root { min-height:100vh; display:flex; background:#060A11; color:#E9F1F7; font-family:'Inter',sans-serif; }
+
+        /* ---------- left panel: visual side ---------- */
+        .reg-left { position:relative; flex:0 0 51%; min-height:100vh; overflow:hidden; }
+        .reg-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+        .reg-left-overlay { position:absolute; inset:0;
+          background:
+            linear-gradient(180deg, rgba(6,10,17,0.35) 0%, rgba(6,10,17,0.15) 30%, rgba(6,10,17,0.55) 70%, rgba(6,10,17,0.95) 100%),
+            linear-gradient(90deg, rgba(6,10,17,0.2) 0%, transparent 30%); }
+
+        .reg-brand { position:absolute; top:28px; left:32px; z-index:2; display:flex; align-items:center; gap:10px;
+          font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; letter-spacing:.5px; }
+        .reg-brand-mark { width:26px; height:26px; background:rgba(10,18,28,0.6); border:1.5px solid #29D3FF;
+          clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+          display:flex; align-items:center; justify-content:center; }
+
+        .reg-scan-ring { position:absolute; left:56px; top:270px; width:96px; height:96px; z-index:2;
+          border:1px solid rgba(41,211,255,0.35); border-radius:50%; }
+        .reg-scan-ring::before { content:''; position:absolute; top:-1px; left:-1px; width:14px; height:14px;
+          border-radius:50%; background:#060A11; border:1px solid #29D3FF; }
+        .reg-scan-dot { position:absolute; left:96px; top:308px; width:6px; height:6px; border-radius:50%;
+          background:#29D3FF; box-shadow:0 0 10px #29D3FF; z-index:2; }
+
+        .reg-left-copy { position:absolute; left:32px; right:32px; bottom:96px; z-index:2; }
+        .reg-left-title { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:clamp(24px, 2.4vw, 32px);
+          line-height:1.2; margin:0 0 14px; max-width:420px; }
+        .reg-left-status { font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.06em; color:#8FA2B4; }
+        .reg-left-status .accent { color:#22D97A; }
+
+        .reg-stats { position:absolute; left:32px; right:32px; bottom:28px; z-index:2; display:flex; gap:44px; }
+        .reg-stat-value { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; color:#29D3FF; line-height:1; }
+        .reg-stat-label { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.08em; color:#5A7185; margin-top:6px; }
+
+        /* ---------- right panel: form side ---------- */
+        .reg-right { flex:1; display:flex; align-items:center; justify-content:center; padding:40px 32px; background:#070B12; }
+        .reg-form-wrap { width:100%; max-width:360px; }
+        .reg-header { text-align:center; margin-bottom:28px; }
+        .reg-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; margin:0 0 8px; color:#E9F1F7; }
+        .reg-subtitle { font-size:14px; color:#8FA2B4; margin:0; }
+
+        .reg-form { display:flex; flex-direction:column; gap:16px; }
+        .reg-field { display:flex; flex-direction:column; gap:8px; }
+        .reg-label { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.06em; color:#29D3FF; }
+        .reg-input { background:rgba(10,18,28,0.6); border:1px solid #12314A; border-radius:6px; padding:13px 15px;
+          color:#E9F1F7; font-size:14px; font-family:'IBM Plex Mono',monospace; outline:none; transition:all .2s; width:100%; }
+        .reg-input::placeholder { color:#3A5570; }
+        .reg-input:focus { border-color:#29D3FF; box-shadow:0 0 0 3px rgba(41,211,255,0.12); }
+
+        .reg-error { background:rgba(255,68,68,0.06); border:1px solid rgba(255,68,68,0.25); border-radius:5px;
+          padding:11px 14px; font-size:12.5px; color:#FF7A7A; font-family:'IBM Plex Mono',monospace; }
+        .reg-success { background:rgba(34,217,122,0.06); border:1px solid rgba(34,217,122,0.3); border-radius:5px;
+          padding:11px 14px; font-size:12.5px; color:#22D97A; font-family:'IBM Plex Mono',monospace; }
+
+        .reg-submit { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; color:#060A11;
+          background:#29D3FF; border:none; border-radius:6px; padding:15px; cursor:pointer; width:100%; transition:all .2s; }
+        .reg-submit:hover { background:#5CE0FF; }
+        .reg-submit:disabled { opacity:.6; cursor:not-allowed; }
+
+        .reg-or { display:flex; align-items:center; gap:12px; margin:2px 0; }
+        .reg-or-line { flex:1; height:1px; background:#12314A; }
+        .reg-or-text { font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#3A5570; letter-spacing:.1em; }
+
+        .reg-google { background:transparent; border:1px solid #12314A; border-radius:6px; padding:13px;
+          color:#E9F1F7; font-size:13.5px; font-family:'Inter',sans-serif; font-weight:500; cursor:pointer;
+          width:100%; display:flex; align-items:center; justify-content:center; gap:10px; transition:all .2s; }
+        .reg-google:hover { background:rgba(255,255,255,0.04); border-color:#29354A; }
+
+        .reg-login-text { color:#5A7185; font-size:13.5px; text-align:center; margin:6px 0 0; }
+        .reg-login-link { color:#29D3FF; cursor:pointer; text-decoration:underline; }
+
+        @media (max-width: 900px) {
+          .reg-left { display:none; }
+          .reg-right { flex:1; }
+        }
       `}</style>
 
-      {particles.map(p => (
-        <div key={p.id} style={{ position:"fixed", left:`${p.left}%`, top:`${p.top}%`, width:`${p.size}px`, height:`${p.size}px`, borderRadius:"50%", background:"#00ffff", animation:`floatUp ${p.duration}s ${p.delay}s infinite ease-in-out`, pointerEvents:"none", zIndex:0 }} />
-      ))}
-      <div style={{ position:"fixed", left:0, right:0, height:"3px", background:"linear-gradient(transparent,#00ffff22,transparent)", animation:"scanline 6s linear infinite", zIndex:1, pointerEvents:"none" }} />
-      <div style={{ position:"fixed", inset:0, zIndex:0, backgroundImage:`linear-gradient(#00ffff08 1px,transparent 1px),linear-gradient(90deg,#00ffff08 1px,transparent 1px)`, backgroundSize:"40px 40px" }} />
+      {/* ---------- left: visual panel ---------- */}
+      <div className="reg-left">
+        <video className="reg-video" autoPlay muted loop playsInline src="/robot-face.mp4" />
+        <div className="reg-left-overlay" />
 
-      <div style={{ ...s.card, animation:"fadeIn 0.6s ease forwards" }}>
-        <div style={s.header}>
-          <div style={s.hexagon}><span style={{ fontSize:24 }}>🔐</span></div>
-          <h1 style={s.title}>SOC COPILOT</h1>
-          <p style={s.subtitle}>// REQUEST SYSTEM ACCESS</p>
-          <div style={s.statusBar}>
-            <span style={{ ...s.dot, background:"#00ffff" }} /><span style={s.statusText}>NEW USER REGISTRATION</span>
-          </div>
+        <div className="reg-brand">
+          <div className="reg-brand-mark"><span style={{ color: "#29D3FF", fontSize: 13 }}>⬡</span></div>
+          SIRA v4
         </div>
 
-        <div style={s.divider} />
+        <div className="reg-scan-ring" />
+        <div className="reg-scan-dot" />
 
-        <div style={s.form}>
-          <div style={s.fieldGroup}>
-            <label style={s.label}>▸ EMAIL</label>
-            <input className="soc-input" placeholder="Enter email address" value={email} onChange={e => setEmail(e.target.value)} />
+        <motion.div className="reg-left-copy" initial="hidden" animate="show" custom={0.1} variants={fadeUp}>
+          <h2 className="reg-left-title">Every investigation starts with a verified analyst.</h2>
+          <div className="reg-left-status">
+            SOC ACCESS TERMINAL — <span className="accent">REGISTRATION OPEN</span>
           </div>
-          <div style={s.fieldGroup}>
-            <label style={s.label}>▸ PASSWORD</label>
-            <input className="soc-input" type="password" placeholder="Min 6 characters" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRegister()} />
+        </motion.div>
+
+        <motion.div className="reg-stats" initial="hidden" animate="show" custom={0.2} variants={fadeUp}>
+          {STATS.map((s) => (
+            <div key={s.label}>
+              <div className="reg-stat-value">{s.value}</div>
+              <div className="reg-stat-label">{s.label}</div>
+            </div>
+          ))}
+        </motion.div>
+      </div>
+
+      {/* ---------- right: form panel ---------- */}
+      <div className="reg-right">
+        <motion.div className="reg-form-wrap" initial="hidden" animate="show" custom={0} variants={fadeUp}>
+          <div className="reg-header">
+            <h1 className="reg-title">Create Access</h1>
+            <p className="reg-subtitle">Register to start your investigation.</p>
           </div>
 
-          {error && <div style={s.errorBox}><span style={{ color:"#ff4444" }}>⚠ {error}</span></div>}
-          {success && <div style={s.successBox}><span style={{ color:"#00ff88" }}>✓ {success}</span></div>}
+          <div className="reg-form">
+            <div className="reg-field">
+              <label className="reg-label">Email</label>
+              <input
+                className="reg-input"
+                placeholder="analyst@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="reg-field">
+              <label className="reg-label">Password</label>
+              <input
+                className="reg-input"
+                type="password"
+                placeholder="Min 6 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleRegister()}
+              />
+            </div>
 
-          <button className="register-btn" onClick={handleRegister}>
-            {loading ? "CREATING ACCOUNT..." : "REQUEST ACCESS"}
-          </button>
+            {error && <div className="reg-error">⚠ {error}</div>}
+            {success && <div className="reg-success">✓ {success}</div>}
 
-          <div style={{ display:"flex", alignItems:"center", gap:10, margin:"4px 0" }}>
-            <div style={{ flex:1, height:1, background:"#ffffff11" }} />
-            <span style={{ color:"#3a5566", fontSize:11, fontFamily:"'Share Tech Mono'" }}>OR</span>
-            <div style={{ flex:1, height:1, background:"#ffffff11" }} />
+            <motion.button
+              whileHover={{ scale: loading ? 1 : 1.02 }}
+              whileTap={{ scale: loading ? 1 : 0.98 }}
+              className="reg-submit"
+              onClick={handleRegister}
+              disabled={loading}
+            >
+              {loading ? "Creating account..." : "Create Account"}
+            </motion.button>
+
+            <div className="reg-or">
+              <div className="reg-or-line" />
+              <span className="reg-or-text">OR</span>
+              <div className="reg-or-line" />
+            </div>
+
+            <motion.button
+              whileHover={{ scale: loading ? 1 : 1.02 }}
+              whileTap={{ scale: loading ? 1 : 0.98 }}
+              className="reg-google"
+              onClick={handleGoogle}
+              disabled={loading}
+            >
+              <svg width="17" height="17" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              </svg>
+              Continue with Google
+            </motion.button>
+
+            <p className="reg-login-text">
+              Already have access?{" "}
+              <span className="reg-login-link" onClick={() => navigate("/login")}>Login →</span>
+            </p>
           </div>
-
-          <button className="google-btn" onClick={handleGoogle}>
-            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-            CONTINUE WITH GOOGLE
-          </button>
-
-          <p style={s.loginText}>
-            Already have access?{" "}
-            <span style={s.loginLink} onClick={() => navigate("/login")}>LOGIN →</span>
-          </p>
-        </div>
-
-        <div style={s.footer}><span style={s.footerText}>SIRA v3.0 — THREAT INTELLIGENCE ENGINE</span></div>
+        </motion.div>
       </div>
     </div>
   );
 }
-
-const s = {
-  page: { display:"flex", justifyContent:"center", alignItems:"center", minHeight:"100vh", background:"#060a12", fontFamily:"'Share Tech Mono',monospace", position:"relative", overflow:"hidden" },
-  card: { background:"linear-gradient(145deg,#0d1520,#0a1018)", border:"1px solid #00ffff33", borderRadius:"12px", padding:"40px", width:"400px", zIndex:10, position:"relative", boxShadow:"0 0 40px #00ffff11,inset 0 0 40px #00000033" },
-  header: { textAlign:"center", marginBottom:"24px" },
-  hexagon: { width:"60px", height:"60px", background:"#00ffff11", border:"1px solid #00ffff55", borderRadius:"12px", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px" },
-  title: { color:"#00ffff", fontSize:"26px", fontFamily:"'Rajdhani',sans-serif", fontWeight:700, letterSpacing:"6px", margin:"0 0 6px" },
-  subtitle: { color:"#2a5566", fontSize:"11px", margin:"0 0 14px", letterSpacing:"1px" },
-  statusBar: { display:"flex", alignItems:"center", justifyContent:"center", gap:"6px" },
-  dot: { width:"7px", height:"7px", borderRadius:"50%", background:"#00ff88", display:"inline-block" },
-  statusText: { color:"#3a6677", fontSize:"11px", letterSpacing:"1px" },
-  divider: { height:"1px", background:"linear-gradient(90deg,transparent,#00ffff33,transparent)", margin:"20px 0" },
-  form: { display:"flex", flexDirection:"column", gap:"18px" },
-  fieldGroup: { display:"flex", flexDirection:"column", gap:"8px" },
-  label: { color:"#00ffff88", fontSize:"11px", letterSpacing:"2px" },
-  errorBox: { background:"#ff000011", border:"1px solid #ff444433", borderRadius:"6px", padding:"10px 14px", fontSize:"13px" },
-  successBox: { background:"#00ff8811", border:"1px solid #00ff8833", borderRadius:"6px", padding:"10px 14px", fontSize:"13px" },
-  loginText: { color:"#2a4455", fontSize:"13px", textAlign:"center", margin:0 },
-  loginLink: { color:"#00ffff", cursor:"pointer" },
-  footer: { marginTop:"24px", textAlign:"center" },
-  footerText: { color:"#1a3344", fontSize:"10px", letterSpacing:"1px" },
-};

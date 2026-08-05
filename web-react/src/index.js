@@ -7,6 +7,7 @@ import Login from "./Login";
 import Register from "./Register";
 import LandingPage from "./LandingPage";
 import ProtectedRoute from "./ProtectedRoute";
+import FAQ from "./Faq";
 import 'leaflet/dist/leaflet.css';
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
@@ -19,6 +20,7 @@ root.render(
       <Route path="/dashboard" element={
         <ProtectedRoute><App /></ProtectedRoute>
       } />
+      <Route path="/faq" element={<FAQ />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   </BrowserRouter>
