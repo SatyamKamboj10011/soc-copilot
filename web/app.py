@@ -17,7 +17,7 @@ import subprocess
 import uuid
 from langgraph.func import task
 from werkzeug.utils import secure_filename
-import csv 
+import csv
 import io
 from flask import Response
 from dotenv import load_dotenv
@@ -87,6 +87,12 @@ def init_db():
             updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS sentinel_block_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip TEXT NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
     print("SQLite database ready — users.db")
@@ -129,7 +135,7 @@ def get_llm(model, api_key=None):
 
 
 def load_logs():
-    
+
     logs = []
     log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
     try:
@@ -176,6 +182,81 @@ def sira_speak():
         return Response(buf.read(), mimetype="audio/wav")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── SIRA FACE: Kokoro TTS -> Wav2Lip -> synced video ────────────────────────
+import subprocess
+import uuid
+
+WAV2LIP_DIR = os.path.join(os.path.dirname(__file__), 'Wav2Lip')
+WAV2LIP_PYTHON = os.path.join(WAV2LIP_DIR, 'venv', 'Scripts', 'python.exe')
+WAV2LIP_CHECKPOINT = os.path.join('checkpoints', 'wav2lip_gan.pth')  # relative -- cwd is WAV2LIP_DIR
+WAV2LIP_FACE = os.path.join(WAV2LIP_DIR, 'sira_face.jpg')
+
+
+@app.route('/sira-face-speak', methods=['POST'])
+def sira_face_speak():
+    """
+    Text -> Kokoro TTS -> Wav2Lip (runs in its own Python 3.10 venv,
+    separate from Flask's interpreter) -> synced video, returned directly.
+    """
+    text = request.json.get("text", "")
+    if not text:
+        return jsonify({"error": "no text"}), 400
+
+    request_id = uuid.uuid4().hex[:8]
+    audio_path = os.path.join(WAV2LIP_DIR, f"temp_audio_{request_id}.wav")
+    video_path = os.path.join(WAV2LIP_DIR, f"temp_output_{request_id}.mp4")
+
+    try:
+        samples, sample_rate = kokoro_model.create(
+            text=text[:500],
+            voice="am_adam",
+            speed=0.88,
+            lang="en-us",
+        )
+        sf.write(audio_path, samples, sample_rate)
+
+        result = subprocess.run(
+            [
+                WAV2LIP_PYTHON, "inference.py",
+                "--checkpoint_path", WAV2LIP_CHECKPOINT,
+                "--face", WAV2LIP_FACE,
+                "--audio", audio_path,
+                "--outfile", video_path,
+                "--pads", "0", "20", "0", "0",  # extra bottom padding -- reduces the mouth-region seam
+                "--nosmooth",                    # disable over-smoothing that can cause blur/ghosting
+                "--resize_factor", "2",          # downscale processing -- genuine speed win, real quality tradeoff
+            ],
+            cwd=WAV2LIP_DIR,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0 or not os.path.exists(video_path):
+            return jsonify({
+                "error": "Wav2Lip generation failed",
+                "details": result.stderr[-800:] if result.stderr else "unknown error",
+            }), 500
+
+        with open(video_path, "rb") as f:
+            video_bytes = f.read()
+
+        return Response(video_bytes, mimetype="video/mp4")
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Lip-sync generation timed out"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        for p in (audio_path, video_path):
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
 
 # ── AUTH ENDPOINTS ───────────────────────────────────────────────────────────
 
@@ -970,7 +1051,7 @@ def cve_lookup():
     keywords = signature
     for prefix in ['ET ', 'GPL ', 'SURICATA ', 'EMERGING-THREATS ', 'POLICY ', 'MALWARE ', 'SCAN ', 'WEB_SERVER ', 'EXPLOIT ']:
         keywords = keywords.replace(prefix, '')
-    
+
     search_term = ' '.join(keywords.split()[:3])
 
     results = []
@@ -989,11 +1070,11 @@ def cve_lookup():
             cve_id = cve.get("id", "Unknown")
             descriptions = cve.get("descriptions", [])
             description = next((d["value"] for d in descriptions if d["lang"] == "en"), "No description")
-            
+
             metrics = cve.get("metrics", {})
             cvss_score = None
             cvss_severity = "UNKNOWN"
-            
+
             for version in ["cvssMetricV31", "cvssMetricV30", "cvssMetricV2"]:
                 metric = metrics.get(version, [])
                 if metric:
@@ -1023,68 +1104,181 @@ def cve_lookup():
     })
 
 
-# Store connected machines in memory
-connected_machines = {}
-ips_to_block = []
+# ── SENTINEL: SQLite-backed machine state (survives restarts/debug reloads) ──
+
+def init_sentinel_db():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS sentinel_machines (
+            machine_id    TEXT PRIMARY KEY,
+            last_seen     TEXT,
+            platform      TEXT,
+            local_ip      TEXT,
+            connections   TEXT,
+            processes     TEXT,
+            suspicious    TEXT,
+            alert         INTEGER DEFAULT 0
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_sentinel_db()
+
+# Ports commonly associated with backdoors, RATs, and C2 channels.
+# Heuristic only — a starting point, not a substitute for real threat intel.
+SUSPICIOUS_PORTS = {
+    4444, 1337, 31337, 6667, 6666, 12345, 54321, 9001, 4443, 8888
+}
+
+def detect_suspicious(connections):
+    """
+    The agent only reports raw connections — it makes no judgment calls.
+    That judgment happens here, server-side, where reputation/context lives.
+    """
+    flagged = []
+    for c in connections:
+        remote = c.get("remote", "")
+        try:
+            port = int(remote.rsplit(":", 1)[-1])
+        except (ValueError, IndexError):
+            continue
+        if port in SUSPICIOUS_PORTS:
+            flagged.append(c)
+    return flagged
+
 
 @app.route("/ingest/<machine_id>", methods=["POST"])
 def ingest(machine_id):
-    data = request.json
-    secret = data.get("secret")
-    if secret != os.getenv("SENTINEL_SECRET", "sira-sentinel-2026"):
+    auth_header = request.headers.get("Authorization", "")
+    expected_key = os.getenv("SENTINEL_SECRET", "sira-sentinel-2026")
+    if not auth_header.startswith("Bearer ") or auth_header[len("Bearer "):].strip() != expected_key:
         return jsonify({"error": "unauthorized"}), 401
-    connected_machines[machine_id] = {
-        "last_seen":   data.get("timestamp"),
-        "platform":    data.get("platform"),
-        "local_ip":    data.get("local_ip"),
-        "connections": data.get("connections", []),
-        "processes":   data.get("processes", []),
-        "suspicious":  data.get("suspicious", []),
-        "alert":       data.get("alert", False)
-    }
+
+    data = request.json or {}
+    connections = data.get("connections", [])
+    suspicious = detect_suspicious(connections)
+
+    conn = get_db()
+    conn.execute('''
+        INSERT INTO sentinel_machines
+            (machine_id, last_seen, platform, local_ip, connections, processes, suspicious, alert)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(machine_id) DO UPDATE SET
+            last_seen=excluded.last_seen,
+            platform=excluded.platform,
+            local_ip=excluded.local_ip,
+            connections=excluded.connections,
+            processes=excluded.processes,
+            suspicious=excluded.suspicious,
+            alert=excluded.alert
+    ''', (
+        machine_id,
+        data.get("timestamp"),
+        data.get("platform"),
+        data.get("local_ip"),
+        json.dumps(connections),
+        json.dumps(data.get("processes", [])),
+        json.dumps(suspicious),
+        1 if suspicious else 0,
+    ))
+    conn.commit()
 
     commands = []
+    rows = conn.execute("SELECT ip FROM sentinel_block_queue").fetchall()
+    for row in rows:
+        commands.append({"action": "block_ip", "ip": row["ip"]})
+    conn.execute("DELETE FROM sentinel_block_queue")
+    conn.commit()
+    conn.close()
 
-    # Send back any IPs to block
-    for ip in ips_to_block:
-        commands.append({"action": "block_ip", "ip": ip})
-    ips_to_block.clear()
-
-    # Auto-trigger Hermes if suspicious activity detected
-    if data.get("alert") and data.get("suspicious"):
-        suspicious = data["suspicious"]
+    if suspicious:
         print(f"[SENTINEL] Suspicious activity on {machine_id}: {suspicious}")
 
     return jsonify({"status": "received", "machine": machine_id, "commands": commands})
 
+
 @app.route("/machines", methods=["GET"])
 def get_machines():
-    return jsonify([
-        {
-            "id":               mid,
-            "last_seen":        info["last_seen"],
-            "platform":         info["platform"],
-            "local_ip":         info["local_ip"],
-            "alert":            info["alert"],
-            "suspicious_count": len(info["suspicious"]),
-            "suspicious":       info["suspicious"][:5],
-            "processes":        info["processes"][:5],
-            "connections":      info["connections"][:5],
-        }
-        for mid, info in connected_machines.items()
-    ])
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM sentinel_machines").fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        suspicious = json.loads(r["suspicious"] or "[]")
+        processes = json.loads(r["processes"] or "[]")
+        connections = json.loads(r["connections"] or "[]")
+        result.append({
+            "id":               r["machine_id"],
+            "last_seen":        r["last_seen"],
+            "platform":         r["platform"],
+            "local_ip":         r["local_ip"],
+            "alert":            bool(r["alert"]),
+            "suspicious_count": len(suspicious),
+            "suspicious":       suspicious[:5],
+            "processes":        processes[:5],
+            "connections":      connections[:5],
+        })
+    return jsonify(result)
+
 
 @app.route("/machine/<machine_id>", methods=["GET"])
 def get_machine(machine_id):
-    return jsonify(connected_machines.get(machine_id, {}))
+    conn = get_db()
+    r = conn.execute("SELECT * FROM sentinel_machines WHERE machine_id = ?", (machine_id,)).fetchone()
+    conn.close()
+    if not r:
+        return jsonify({})
+    return jsonify({
+        "id":          r["machine_id"],
+        "last_seen":   r["last_seen"],
+        "platform":    r["platform"],
+        "local_ip":    r["local_ip"],
+        "alert":       bool(r["alert"]),
+        "suspicious":  json.loads(r["suspicious"] or "[]"),
+        "processes":   json.loads(r["processes"] or "[]"),
+        "connections": json.loads(r["connections"] or "[]"),
+    })
+
 
 @app.route("/block-ip", methods=["POST"])
 def block_ip_route():
     ip = request.json.get("ip")
-    if ip:
-        ips_to_block.append(ip)
-        return jsonify({"status": "queued", "ip": ip})
-    return jsonify({"error": "no ip"}), 400
+    if not ip:
+        return jsonify({"error": "no ip"}), 400
+    conn = get_db()
+    conn.execute("INSERT INTO sentinel_block_queue (ip) VALUES (?)", (ip,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "queued", "ip": ip})
+
+
+@app.route('/sentinel-config', methods=['GET', 'POST'])
+def sentinel_config():
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'agent', 'sentinel_config.json')
+    if request.method == 'GET':
+        try:
+            with open(config_path) as f:
+                return jsonify(json.load(f))
+        except FileNotFoundError:
+            return jsonify({"server": "", "agent_key": "", "machine_id": ""})
+
+    data = request.json
+    new_ip = data.get('ip', '').strip()
+    if not new_ip:
+        return jsonify({"error": "IP required"}), 400
+
+    existing = {}
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            existing = json.load(f)
+    existing['server'] = f"http://{new_ip}:5000"
+
+    with open(config_path, 'w') as f:
+        json.dump(existing, f, indent=2)
+
+    return jsonify({"message": "Sentinel server IP updated", "server": existing['server']})
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True, port=5000)

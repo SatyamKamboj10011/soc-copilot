@@ -1,1 +1,5 @@
-{"server": "http://192.168.68.52:5000"}
+{
+   "server": "http://100.112.233.96:5000",
+  "agent_key": "pick-a-real-secret-here",
+  "machine_id": "satyam-laptop"
+}
