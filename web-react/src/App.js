@@ -6,6 +6,8 @@ import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp, increment } from "firebase/firestore";
 
 import SiraVoice from "./SiraVoice";
+import SiraAvatar from "./SiraAvatar";
+import { HermesModal } from "./HermesModal";
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -941,7 +943,7 @@ function NetworkMap({ alerts, machines }) {
   );
 }
 
-function ThreatSummaryPanel({ alerts, machines }) {
+function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView }) {
   const canvasRef = useRef(null);
   const alertEvents = alerts.filter(a => a.event_type === "alert");
   const total = alertEvents.length;
@@ -986,7 +988,9 @@ function ThreatSummaryPanel({ alerts, machines }) {
   }, [total, JSON.stringify(sevCounts)]); // eslint-disable-line
 
   return (
-    <div style={{ width: 280, flexShrink: 0, borderLeft: "1px solid var(--border)", background: "var(--panel)", overflowY: "auto", padding: 20 }}>
+    <div style={{ width: "100%", height: "100%", background: "var(--panel)", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
+      <SiraAvatar ref={siraAvatarRef} onOpenFullView={onOpenFullView} />
+
       <div className="section-label" style={{ padding: 0, marginBottom: 16 }}>Threat Summary</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 20 }}>
@@ -1043,6 +1047,10 @@ export default function App() {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [unreadCount, setUnreadCount]     = useState(0);
   const [sidebarWidth, setSidebarWidth]   = useState(320);
+  const siraAvatarRef                     = useRef(null);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelWidth, setRightPanelWidth] = useState(280);
+  const isRightResizing = useRef(false);
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
   const [page, setPage]                   = useState("dashboard");
@@ -1066,6 +1074,8 @@ const [sessionId, setSessionId] = useState(() => {
   const [hermesAnswer, setHermesAnswer]   = useState("");
   const [machines, setMachines]           = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
+  const [sentinelIP, setSentinelIP]       = useState("");
+  const [sentinelSaving, setSentinelSaving] = useState(false);
 
   const messagesRef  = useRef(null);
   const toastTimer   = useRef(null);
@@ -1087,6 +1097,18 @@ const [sessionId, setSessionId] = useState(() => {
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
+  const startRightResize = (e) => {
+    isRightResizing.current = true;
+    const startX = e.clientX, startWidth = rightPanelWidth;
+    const onMove = (e) => {
+      if (!isRightResizing.current) return;
+      const delta = startX - e.clientX; // dragging left grows the right panel
+      setRightPanelWidth(Math.min(420, Math.max(200, startWidth + delta)));
+    };
+    const onUp = () => { isRightResizing.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
+
   const showToast    = useCallback((msg) => { setToast(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 2500); }, []);
   const scrollToBottom = useCallback((smooth=true) => { if (messagesRef.current) { messagesRef.current.scrollTo({ top: messagesRef.current.scrollHeight, behavior: smooth?"smooth":"auto" }); setUnreadCount(0); } }, []);
   const handleScroll = useCallback(() => { if (!messagesRef.current) return; const { scrollTop, scrollHeight, clientHeight } = messagesRef.current; const atBottom = scrollHeight - scrollTop - clientHeight < 60; isAtBottom.current = atBottom; setShowScrollBtn(!atBottom); if (atBottom) setUnreadCount(0); }, []);
@@ -1100,6 +1122,15 @@ const [sessionId, setSessionId] = useState(() => {
 
   useEffect(() => { const t = setTimeout(() => { fetch(`${FLASK_URL}/stats`).then(r=>r.json()).then(setStats).catch(()=>{}); }, 500); return () => clearTimeout(t); }, []);
   useEffect(() => { const t = setTimeout(() => { fetch(`${FLASK_URL}/health`).then(r=>r.json()).then(setHealth).catch(()=>{}); }, 1000); return () => clearTimeout(t); }, []);
+
+  useEffect(() => {
+    fetch(`${FLASK_URL}/sentinel-config`).then(r=>r.json()).then(data=>{
+      if (data.server) {
+        const ip = data.server.replace("http://","").split(":")[0];
+        setSentinelIP(ip);
+      }
+    }).catch(()=>{});
+  }, []);
 
   useEffect(() => {
     const loadLastSession = async () => {
@@ -1175,6 +1206,10 @@ try {
   const recentHistory = messages.slice(-6).filter(m=>!m.isWelcome).map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
   const data = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory})}).then(r=>r.json());
   setMessages(prev=>[...prev,{role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
+  const cleanForVoice = (data.answer || "")
+    .replace(/SUMMARY:|THREAT DETAILS:|WHAT THIS MEANS:|RISK ASSESSMENT:|RECOMMENDED ACTIONS:|OVERVIEW:|TOP THREATS:|PATTERNS DETECTED:|PRIORITY ACTIONS:|SITUATION:|IMMEDIATE ACTIONS:|TODAY:|THIS WEEK:/g, "")
+    .replace(/\n+/g, " ").trim().substring(0, 300);
+  siraAvatarRef.current?.speak(cleanForVoice);
   try {
     await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"ai",message:data.answer,model_used:selectedModel,created_at:serverTimestamp()});
     await setDoc(doc(db,"soc_sessions",sessionId),{updated_at:serverTimestamp(),message_count:increment(1)},{merge:true});
@@ -1193,6 +1228,22 @@ setLoading(false);
       else { setUploadStatus("✗ "+(data.error||"Upload failed")); }
     } catch { setUploadStatus("✗ Cannot connect to Flask"); }
     setUploading(false);
+  };
+
+  const saveSentinelIP = async () => {
+    if (!sentinelIP.trim()) return;
+    setSentinelSaving(true);
+    try {
+      const res = await fetch(`${FLASK_URL}/sentinel-config`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ip:sentinelIP.trim()})
+      });
+      const data = await res.json();
+      if (data.message) showToast("Sentinel IP updated");
+      else showToast(data.error||"Save failed");
+    } catch { showToast("Cannot connect to Flask"); }
+    setSentinelSaving(false);
   };
 
   const alertCount  = alerts.filter(a=>a.event_type==="alert").length;
@@ -1319,6 +1370,26 @@ setLoading(false);
                 {m.alert && <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,background:"var(--red-dim)",color:"var(--red)",border:"1px solid rgba(225,85,84,0.3)"}}>⚠ {m.suspicious_count}</span>}
               </div>
             ))}
+
+            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:6}}>SENTINEL SERVER IP</div>
+              <div style={{display:"flex",gap:6}}>
+                <input
+                  value={sentinelIP}
+                  onChange={e=>setSentinelIP(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&saveSentinelIP()}
+                  placeholder="e.g. 10.33.4.176"
+                  style={{flex:1,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"7px 10px",color:"var(--text)",fontFamily:"var(--mono)",fontSize:10,outline:"none"}}
+                />
+                <button
+                  onClick={saveSentinelIP}
+                  disabled={sentinelSaving||!sentinelIP.trim()}
+                  style={{padding:"7px 14px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:8,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:sentinelIP.trim()?"pointer":"not-allowed",opacity:sentinelIP.trim()?1:0.4,textTransform:"uppercase"}}
+                >
+                  {sentinelSaving?"...":"SAVE"}
+                </button>
+              </div>
+            </div>
           </div>
           <div className="panel-divider"/>
           <div className="feed-wrap">
@@ -1362,7 +1433,7 @@ setLoading(false);
           <History/>
         </div>
         <div style={{display:page==="dashboard"?"flex":"none",flexDirection:"column",flex:1,overflow:"hidden"}}>
-        <div style={{display:"flex",flex:1,overflow:"hidden"}}>
+        <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
         <div className="chat-col" style={{flex:1}}>
           <div className="chat-header">
             <div className="agent-avatar">⬡</div>
@@ -1435,7 +1506,18 @@ setLoading(false);
             <div className="input-meta"><span className={`char-counter ${charClass}`}>{charCount>0?`${charCount} / ${MAX_CHARS}${charCount>MAX_CHARS?" — TOO LONG":""}`:`MAX ${MAX_CHARS} CHARS`}</span></div>
           </div>
         </div>
-        <ThreatSummaryPanel alerts={alerts} machines={machines} />
+        <div style={{ position: "relative", width: rightPanelOpen ? rightPanelWidth : 0, flexShrink: 0, transition: isRightResizing.current ? "none" : "width 0.2s", overflow: "hidden", borderLeft: rightPanelOpen ? "1px solid var(--border)" : "none" }}>
+          {rightPanelOpen && (
+            <div onMouseDown={startRightResize} style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, cursor: "col-resize", zIndex: 10 }}
+              onMouseEnter={e=>e.target.style.background="var(--accent)"} onMouseLeave={e=>e.target.style.background="transparent"} />
+          )}
+          <ThreatSummaryPanel alerts={alerts} machines={machines} siraAvatarRef={siraAvatarRef} onOpenFullView={()=>setDidOpen(true)} />
+        </div>
+        <button onClick={()=>setRightPanelOpen(o=>!o)} title={rightPanelOpen ? "Hide panel" : "Show panel"} style={{
+          position: "absolute", right: rightPanelOpen ? rightPanelWidth - 12 : -12, top: "50%", transform: "translateY(-50%)",
+          width: 24, height: 40, borderRadius: "6px 0 0 6px", background: "var(--bg3)", border: "1px solid var(--border2)", borderRight: "none",
+          color: "var(--text-dim)", cursor: "pointer", fontSize: 11, zIndex: 20, transition: "right 0.2s",
+        }}>{rightPanelOpen ? "\u203A" : "\u2039"}</button>
         </div>
         </div>
       </div>
@@ -1523,180 +1605,12 @@ setLoading(false);
 
       <SiraVoice isOpen={didOpen} onClose={()=>setDidOpen(false)}/>
 
-     {hermesOpen && (
-  <div className="modal-overlay" onClick={()=>{if(!hermesLoading)setHermesOpen(false);}}>
-    <div className="modal" onClick={e=>e.stopPropagation()} style={{width:720,maxHeight:"88vh",background:"var(--panel)",border:"1px solid rgba(139,124,255,0.25)"}}>
-      <button className="modal-close" onClick={()=>{if(!hermesLoading)setHermesOpen(false);}}>✕</button>
-
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,paddingBottom:16,borderBottom:"1px solid rgba(139,124,255,0.18)"}}>
-        <div style={{width:42,height:42,borderRadius:12,background:"linear-gradient(135deg,#8B7CFF,#6A54D9)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>⬡</div>
-        <div>
-          <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--purple)",letterSpacing:2.5,marginBottom:2}}>AUTONOMOUS AI AGENT</div>
-          <div style={{fontFamily:"var(--display)",fontSize:16,fontWeight:600,color:"var(--text)"}}>Hermes Investigation Agent</div>
-          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",marginTop:1}}>Multi-step autonomous threat investigation</div>
-        </div>
-        {hermesLoading && (
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:8,height:8,borderRadius:"50%",background:"var(--purple)",animation:"blink 0.6s infinite"}}/>
-            <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--purple)",letterSpacing:1.5}}>INVESTIGATING...</span>
-          </div>
-        )}
-        {hermesAnswer && !hermesLoading && (
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:8,height:8,borderRadius:"50%",background:"var(--green)"}}/>
-            <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--green)",letterSpacing:1.5}}>COMPLETE</span>
-          </div>
-        )}
-      </div>
-
-      {!hermesLoading && !hermesAnswer && (
-        <div>
-          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:8}}>ASSIGN TASK TO HERMES</div>
-          <div style={{display:"flex",gap:8,marginBottom:16}}>
-            <input value={hermesTask} onChange={e=>setHermesTask(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&hermesTask.trim()&&startHermes()}
-              placeholder="e.g. Investigate 185.220.101.45 and give me a full report"
-              style={{flex:1,background:"var(--bg3)",border:"1px solid rgba(139,124,255,0.25)",borderRadius:10,padding:"12px 15px",color:"var(--text)",fontFamily:"var(--mono)",fontSize:11,outline:"none"}}/>
-            <button onClick={startHermes} disabled={!hermesTask.trim()} style={{padding:"12px 24px",background:"linear-gradient(135deg,#8B7CFF,#6A54D9)",border:"none",borderRadius:10,color:"white",fontFamily:"var(--mono)",fontSize:10,fontWeight:700,letterSpacing:1.5,cursor:"pointer",textTransform:"uppercase",opacity:hermesTask.trim()?1:0.4}}>
-              ▶ RUN
-            </button>
-          </div>
-
-          <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:8}}>QUICK TASKS</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
-            {[
-              "Investigate the entire network and identify all threats",
-              "Who is attacking us and what are they doing?",
-              "Give me a complete threat assessment with CVEs",
-              "What is the most dangerous IP and why?",
-              "Summarise all attacks and recommend actions"
-            ].map((task,i)=>(
-              <button key={i} onClick={()=>setHermesTask(task)} style={{fontFamily:"var(--mono)",fontSize:8,letterSpacing:0.5,padding:"7px 14px",borderRadius:20,border:"1px solid rgba(139,124,255,0.25)",background:"var(--purple-dim)",color:"var(--text-mid)",cursor:"pointer",textTransform:"uppercase",transition:"all 0.15s"}}
-                onMouseEnter={e=>{e.target.style.borderColor="rgba(139,124,255,0.6)";e.target.style.color="var(--purple)";}}
-                onMouseLeave={e=>{e.target.style.borderColor="rgba(139,124,255,0.25)";e.target.style.color="var(--text-mid)";}}>
-                {task}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {hermesLoading && (
-        <div>
-          <div style={{background:"var(--purple-dim)",border:"1px solid rgba(139,124,255,0.2)",borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
-            <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--purple)",letterSpacing:1}}>TASK</span>
-            <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text-mid)",flex:1}}>{hermesTask}</span>
-          </div>
-
-          <div style={{marginBottom:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1}}>PROGRESS</span>
-              <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--purple)"}}>{hermesSteps.length} / 6 STEPS</span>
-            </div>
-            <div style={{height:4,background:"var(--bg3)",borderRadius:4,overflow:"hidden"}}>
-              <div style={{height:"100%",background:"linear-gradient(90deg,#8B7CFF,#29D3FF)",borderRadius:4,width:`${(hermesSteps.length/6)*100}%`,transition:"width 0.5s ease"}}/>
-            </div>
-          </div>
-
-          <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:300,overflowY:"auto"}}>
-            {hermesSteps.map((step,i)=>{
-              const toolIcons = {
-                get_stats:"📊", get_top_ips:"🎯", search_logs:"🔍",
-                check_reputation:"🛡", lookup_cve:"⚠", correlate_zeek:"🔗"
-              };
-              const icon = toolIcons[step.tool] || "⬡";
-              return (
-                <div key={i} style={{display:"flex",gap:12,padding:"13px 15px",background:"var(--bg3)",border:"1px solid rgba(139,124,255,0.18)",borderLeft:"3px solid var(--purple)",borderRadius:10,animation:"cardIn 0.3s ease both"}}>
-                  <div style={{width:32,height:32,borderRadius:8,background:"var(--purple-dim)",border:"1px solid rgba(139,124,255,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{icon}</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                      <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--green)",letterSpacing:1}}>✓ STEP {step.step}</span>
-                      <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--purple)",fontWeight:700}}>{step.tool}</span>
-                      {step.input && <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>({step.input})</span>}
-                    </div>
-                    <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-mid)",lineHeight:1.6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{step.result?.substring(0,100)}...</div>
-                  </div>
-                </div>
-              );
-            })}
-
-            <div style={{display:"flex",gap:12,padding:"13px 15px",background:"var(--accent-dim)",border:"1px solid rgba(41,211,255,0.2)",borderLeft:"3px solid var(--accent)",borderRadius:10}}>
-              <div style={{width:32,height:32,borderRadius:8,background:"var(--accent-dim)",border:"1px solid rgba(41,211,255,0.25)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                <div style={{width:12,height:12,border:"2px solid var(--accent)",borderTopColor:"transparent",borderRadius:"50%",animation:"hspin 0.8s linear infinite"}}/>
-              </div>
-              <div style={{flex:1,display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--accent)",letterSpacing:1}}>RUNNING STEP {hermesSteps.length+1}...</span>
-                <div style={{display:"flex",gap:3}}>
-                  {[0,1,2].map(i=><div key={i} style={{width:4,height:4,borderRadius:"50%",background:"var(--accent)",animation:`bounce 1s infinite`,animationDelay:`${i*0.15}s`}}/>)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <style>{`@keyframes hspin{to{transform:rotate(360deg)}}`}</style>
-        </div>
-      )}
-
-      {hermesAnswer && !hermesLoading && (
-        <div>
-          <div style={{background:"var(--green-dim)",border:"1px solid rgba(34,217,122,0.18)",borderRadius:10,padding:"11px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
-            <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--green)",letterSpacing:1}}>✓ TASK COMPLETE</span>
-            <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text-mid)",flex:1}}>{hermesTask}</span>
-          </div>
-
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-            {hermesSteps.map((step,i)=>{
-              const toolIcons = {
-                get_stats:"📊", get_top_ips:"🎯", search_logs:"🔍",
-                check_reputation:"🛡", lookup_cve:"⚠", correlate_zeek:"🔗"
-              };
-              return (
-                <div key={i} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 12px",borderRadius:20,background:"var(--purple-dim)",border:"1px solid rgba(139,124,255,0.25)"}}>
-                  <span style={{fontSize:10}}>{toolIcons[step.tool]||"⬡"}</span>
-                  <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--purple)",letterSpacing:1}}>✓ {step.tool}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{marginBottom:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-              <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1}}>INVESTIGATION COMPLETE</span>
-              <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--green)"}}>{hermesSteps.length} STEPS EXECUTED</span>
-            </div>
-            <div style={{height:4,background:"var(--bg3)",borderRadius:4}}>
-              <div style={{height:"100%",background:"linear-gradient(90deg,#8B7CFF,#22D97A)",borderRadius:4,width:"100%"}}/>
-            </div>
-          </div>
-
-          <div style={{background:"var(--bg3)",border:"1px solid rgba(139,124,255,0.2)",borderLeft:"3px solid var(--purple)",borderRadius:12,padding:16,maxHeight:320,overflowY:"auto"}}>
-            <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--purple)",letterSpacing:2.5,marginBottom:12}}>⬡ HERMES INVESTIGATION REPORT</div>
-            <div style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text-mid)",lineHeight:1.9,whiteSpace:"pre-wrap"}}>
-              {hermesAnswer.split(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g).map((part,i)=>
-                /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(part)
-                  ?<span key={i} style={{color:"var(--red)",fontWeight:700}}>{part}</span>
-                  :part
-              )}
-            </div>
-          </div>
-
-          <div style={{display:"flex",gap:8,marginTop:14}}>
-            <button onClick={()=>{setHermesAnswer("");setHermesSteps([]);setHermesTask("");}} style={{flex:1,padding:"10px",background:"transparent",border:"1px solid var(--border2)",borderRadius:10,color:"var(--text-mid)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>↩ NEW INVESTIGATION</button>
-            <button onClick={()=>{navigator.clipboard.writeText(hermesAnswer);showToast("Report copied");}} style={{flex:1,padding:"10px",background:"var(--purple-dim)",border:"1px solid var(--purple)",borderRadius:10,color:"var(--purple)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>⊕ COPY REPORT</button>
-            <button onClick={()=>{
-              const blob = new Blob([`HERMES INVESTIGATION REPORT\n${"=".repeat(40)}\nTask: ${hermesTask}\nSteps: ${hermesSteps.length}\n\n${hermesAnswer}`],{type:"text/plain"});
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href=url; a.download="hermes-report.txt"; a.click();
-              URL.revokeObjectURL(url);
-              showToast("Report downloaded");
-            }} style={{flex:1,padding:"10px",background:"var(--accent-dim)",border:"1px solid rgba(41,211,255,0.3)",borderRadius:10,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>⬇ DOWNLOAD</button>
-          </div>
-        </div>
-      )}
-    </div>
-  </div>
-)}
+      <HermesModal
+        hermesOpen={hermesOpen} setHermesOpen={setHermesOpen}
+        hermesLoading={hermesLoading} hermesTask={hermesTask} setHermesTask={setHermesTask}
+        startHermes={startHermes} hermesSteps={hermesSteps} hermesAnswer={hermesAnswer}
+        setHermesAnswer={setHermesAnswer} setHermesSteps={setHermesSteps} showToast={showToast}
+      />
     </>
   );
   }

@@ -7,12 +7,14 @@ export default function SiraVoice({ isOpen, onClose }) {
   const [response, setResponse]   = useState("S.I.R.A. online. Standing by.");
   const [loading, setLoading]     = useState(false);
   const [speaking, setSpeaking]   = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [listening, setListening] = useState(false);
 
-  const audioRef     = useRef(null);
   const audioCtxRef   = useRef(null);
   const analyserRef  = useRef(null);
   const sourceRef    = useRef(null);
+  const graphReadyRef = useRef(false);
+  const currentUrlRef = useRef(null);
   const canvasRef    = useRef(null);
   const videoRef     = useRef(null);
   const rafRef       = useRef(null);
@@ -81,41 +83,74 @@ export default function SiraVoice({ isOpen, onClose }) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [isOpen, speaking, listening]);
 
+  useEffect(() => {
+    return () => {
+      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+    };
+  }, []);
+
   if (!isOpen) return null;
 
-  const ensureAudioGraph = (audioEl) => {
-    if (!audioCtxRef.current) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      audioCtxRef.current = new AC();
-    }
+  // Web Audio's createMediaElementSource can only be attached to a given
+  // DOM element ONCE, ever -- so this runs a single time against the video
+  // element itself, not per-speak-call. Swapping the video's src later
+  // (idle loop <-> generated clip) keeps working through the same graph.
+  const ensureAudioGraph = () => {
+    if (graphReadyRef.current || !videoRef.current) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!audioCtxRef.current) audioCtxRef.current = new AC();
     const ctx = audioCtxRef.current;
     if (ctx.state === "suspended") ctx.resume();
-    const source = ctx.createMediaElementSource(audioEl);
+    const source = ctx.createMediaElementSource(videoRef.current);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 128;
     source.connect(analyser);
     analyser.connect(ctx.destination);
     analyserRef.current = analyser;
     sourceRef.current = source;
+    graphReadyRef.current = true;
+  };
+
+  const returnToIdle = () => {
+    const video = videoRef.current;
+    setSpeaking(false);
+    if (!video) return;
+    video.pause();
+    video.removeAttribute("src");
+    video.load(); // clears the video frame so the poster (idle face photo) shows
   };
 
   const speak = async (text) => {
-    setSpeaking(true);
+    setGenerating(true);
     try {
-      const res   = await fetch(`${FLASK_URL}/sira-speak`, {
+      const res = await fetch(`${FLASK_URL}/sira-face-speak`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.substring(0, 500) })
       });
-      const blob  = await res.blob();
-      const url   = URL.createObjectURL(blob);
-      if (audioRef.current) { audioRef.current.pause(); }
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      try { ensureAudioGraph(audio); } catch { /* graph setup best-effort */ }
-      audio.onended = () => { setSpeaking(false); URL.revokeObjectURL(url); };
-      audio.onerror = () => { setSpeaking(false); URL.revokeObjectURL(url); };
-      audio.play();
-    } catch { setSpeaking(false); }
+      if (!res.ok) throw new Error("face-speak request failed");
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+
+      if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);
+      currentUrlRef.current = url;
+
+      const video = videoRef.current;
+      ensureAudioGraph();
+
+      video.muted = false;
+      video.loop = false;
+      video.src = url;
+      video.load();
+      video.onended = returnToIdle;
+      video.onerror = returnToIdle;
+
+      setGenerating(false);
+      setSpeaking(true);
+      await video.play();
+    } catch {
+      setGenerating(false);
+      setSpeaking(false);
+    }
   };
 
   const askSira = async (question) => {
@@ -157,12 +192,11 @@ export default function SiraVoice({ isOpen, onClose }) {
   };
 
   const stopSpeaking = () => {
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    setSpeaking(false);
+    returnToIdle();
   };
 
-  const status = speaking ? "SPEAKING" : listening ? "LISTENING" : loading ? "PROCESSING" : "STANDBY";
-  const statusColor = speaking ? "#29D3FF" : listening ? "#8B7CFF" : loading ? "#F0A857" : "#22D97A";
+  const status = generating ? "GENERATING" : speaking ? "SPEAKING" : listening ? "LISTENING" : loading ? "PROCESSING" : "STANDBY";
+  const statusColor = generating ? "#F0A857" : speaking ? "#29D3FF" : listening ? "#8B7CFF" : loading ? "#F0A857" : "#22D97A";
 
   return (
     <div style={{
@@ -195,12 +229,12 @@ export default function SiraVoice({ isOpen, onClose }) {
         <div style={{ position: "relative", background: "#060A11", height: 280, overflow: "hidden" }}>
           <video
             ref={videoRef}
-            autoPlay muted loop playsInline
-            src="/robot-face.mp4"
+            playsInline
+            poster="/sira_face.jpg"
             style={{
               position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
               width: 180, height: 180, borderRadius: "50%", objectFit: "cover",
-              filter: speaking ? "brightness(1.05) saturate(1.15)" : "brightness(0.9) saturate(0.9)",
+              filter: speaking ? "brightness(1.05) saturate(1.15)" : generating ? "brightness(0.85) saturate(0.7) blur(0.5px)" : "brightness(0.9) saturate(0.9)",
               transition: "filter 0.2s", zIndex: 1
             }}
           />
