@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
+import Soc2Dashboard from "./Soc2Dashboard";
 import NeuralBrain from "./NeuralBrain";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp, increment } from "firebase/firestore";
@@ -31,18 +32,20 @@ const darkCss = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    --bg: #060A11; --bg2: #0A121C; --bg3: #0D1622; --panel: #0A121C;
-    --border: rgba(41,211,255,0.09); --border2: rgba(41,211,255,0.18);
-    --accent: #29D3FF; --accent2: #1FA8CC;
-    --accent-glow: rgba(41,211,255,0.16); --accent-dim: rgba(41,211,255,0.08);
+    --bg: #0A0A0C; --bg2: #111113; --bg3: #17171A; --panel: #141416;
+    --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.12);
+    --accent: #4DD8E8; --accent2: #35B3C2;
+    --accent-glow: rgba(77,216,232,0.16); --accent-dim: rgba(77,216,232,0.08);
     --green: #22D97A; --green-dim: rgba(34,217,122,0.09);
     --red: #E15554; --red-dim: rgba(225,85,84,0.09);
-    --orange: #F0A857; --orange-dim: rgba(240,168,87,0.09);
+    --orange: #E8B84D; --orange-dim: rgba(232,184,77,0.09);
     --purple: #8B7CFF; --purple-dim: rgba(139,124,255,0.09);
-    --text: #F2F6FA; --text-mid: #8FA3B5; --text-dim: #4C6478;
+    --magenta: #C93DE0; --magenta-dim: rgba(201,61,224,0.1);
+    --text: #F2F2F4; --text-mid: #9A9AA2; --text-dim: #5A5A62;
     --mono: 'IBM Plex Mono', monospace; --sans: 'Inter', sans-serif; --display: 'Space Grotesk', sans-serif;
-    --scroll-btn-bg: rgba(41,211,255,0.16); --scroll-btn-border: rgba(41,211,255,0.4); --scroll-btn-color: #29D3FF;
-    --char-ok: #8FA3B5; --char-warn: #F0A857; --char-over: #E15554;
+    --scroll-btn-bg: rgba(77,216,232,0.16); --scroll-btn-border: rgba(77,216,232,0.4); --scroll-btn-color: #4DD8E8;
+    --char-ok: #9A9AA2; --char-warn: #E8B84D; --char-over: #E15554;
+    --radius: 18px; --radius-sm: 12px;
   }
 `;
 
@@ -154,7 +157,7 @@ const sharedCss = `
 
   /* ===== CHAT ===== */
   .chat-col { display: flex; flex-direction: column; overflow: hidden; position: relative;
-    background-image: linear-gradient(180deg, rgba(6,10,17,0.93) 0%, rgba(6,10,17,0.88) 60%, rgba(6,10,17,0.96) 100%),
+    background-image: linear-gradient(180deg, rgba(10,10,12,0.93) 0%, rgba(10,10,12,0.88) 60%, rgba(10,10,12,0.96) 100%),
       url('https://images.unsplash.com/photo-1770249196589-36453bf42a4b?fm=jpg&q=80&w=2000&auto=format&fit=crop');
     background-size: cover; background-position: center 25%; background-attachment: fixed; }
   .chat-header { display: flex; align-items: center; gap: 14px; padding: 0 28px; height: 68px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border); }
@@ -261,6 +264,43 @@ const sharedCss = `
   .top-ip-bar { flex: 1; height: 6px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
   .top-ip-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 4px; }
   .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
+
+  /* ===== SOC 2 COMPLIANCE DASHBOARD (bento grid) ===== */
+  .bento-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden; }
+  .bento-card-title { font-family: var(--sans); font-size: 16px; font-weight: 700; color: var(--text); }
+  .bento-card-sub { font-family: var(--sans); font-size: 12px; color: var(--text-mid); margin-top: 2px; }
+  .bento-eyebrow { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
+  .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 30px; background: linear-gradient(135deg, var(--accent), var(--magenta)); color: #060608; font-family: var(--sans); font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 6px 20px -6px var(--accent-glow); }
+  .bento-pill:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -6px var(--accent-glow); }
+  .bento-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .bento-dot.critical { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .bento-dot.elevated { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+  .bento-dot.informational { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .bento-widget { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; text-align: center; }
+  .bento-widget:hover { border-color: var(--border2); transform: translateY(-2px); }
+  .bento-widget.active { border-color: var(--accent); background: var(--accent-dim); }
+  .bento-widget-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: var(--accent); }
+  .bento-widget-label { font-family: var(--sans); font-size: 12px; color: var(--text-mid); }
+  .bento-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13px; }
+  .bento-table th { text-align: left; padding: 8px 8px; color: var(--text-dim); font-family: var(--mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bento-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-mid); font-size: 12.5px; }
+  .bento-table tr:last-child td { border-bottom: none; }
+  .bento-table tr:hover td { color: var(--text); }
+  .bento-see-all { font-family: var(--sans); font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: none; cursor: pointer; }
+  .bento-heat-row { display: grid; grid-template-columns: 28px repeat(24, 1fr); gap: 2px; align-items: center; }
+  .bento-heat-cell { aspect-ratio: 1; border-radius: 3px; }
+  .bento-heat-label { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
+  .balance-row { display: grid; gap: 0; }
+  .balance-card { padding: 0 18px; border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .balance-card:first-child { padding-left: 0; border-left: none; }
+  .balance-label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); }
+  .balance-value { font-family: var(--display); font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; }
+  .balance-delta { font-family: var(--sans); font-size: 11px; font-weight: 600; }
+  .balance-delta.up { color: var(--green); }
+  .balance-delta.down { color: var(--red); }
+  .lollipop-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
+  .lollipop-stem { width: 3px; border-radius: 2px; background: var(--border2); position: relative; }
+  .lollipop-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: -5px; }
 `;
 function SimpleExplain({ text }) {
   const [open, setOpen]       = useState(false);
@@ -438,171 +478,6 @@ function SiraMessage({ text, modelChip }) {
     </div>
   );
 }
-
-const AnalyticsPage = memo(function AnalyticsPage({ stats }) {
-  const [topIPs, setTopIPs] = useState([]);
-  const [timeline, setTimeline]   = useState([]);
-  const hourChartRef              = useRef(null);
-  const typeChartRef              = useRef(null);
-  const hourChartInstance         = useRef(null);
-  const typeChartInstance         = useRef(null);
-
-  useEffect(() => {
-    fetch(`${FLASK_URL}/top-ips?limit=10`).then(r=>r.json()).then(data=>setTopIPs(Array.isArray(data)?data:[])).catch(()=>{});
-    fetch(`${FLASK_URL}/timeline`).then(r=>r.json()).then(setTimeline).catch(()=>{});
-  }, []);
-
-  useEffect(() => {
-    if (!timeline.length || !hourChartRef.current || !window.Chart) return;
-    if (hourChartInstance.current) hourChartInstance.current.destroy();
-    const hours = Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
-    const counts = hours.map(h => timeline.find(t=>t.hour===h)?.count || 0);
-    const max = Math.max(...counts) || 1;
-    hourChartInstance.current = new window.Chart(hourChartRef.current, {
-      type:'bar',
-      data:{
-        labels: hours.map(h=>h+'h'),
-        datasets:[{
-          data: counts,
-          backgroundColor: counts.map(c => c===max?'#E15554':c>max*0.5?'#F0A857':'#29D3FF'),
-          borderRadius: 4,
-          borderSkipped: false
-        }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{legend:{display:false},tooltip:{
-          backgroundColor:'#0A121C',borderColor:'rgba(41,211,255,0.3)',borderWidth:1,
-          titleColor:'#29D3FF',bodyColor:'#8FA3B5',
-          titleFont:{family:'IBM Plex Mono',size:10},bodyFont:{family:'IBM Plex Mono',size:10},
-          callbacks:{title:i=>`Hour: ${i[0].label}`,body:i=>`Events: ${i[0].raw}`}
-        }},
-        scales:{
-          x:{grid:{color:'rgba(41,211,255,0.05)'},ticks:{color:'#4C6478',font:{family:'IBM Plex Mono',size:9},maxRotation:0},border:{color:'rgba(41,211,255,0.08)'}},
-          y:{grid:{color:'rgba(41,211,255,0.05)'},ticks:{color:'#4C6478',font:{family:'IBM Plex Mono',size:9}},border:{color:'rgba(41,211,255,0.08)'}}
-        }
-      }
-    });
-    return () => { if (hourChartInstance.current) hourChartInstance.current.destroy(); };
-  }, [timeline]);
-
-  useEffect(() => {
-    if (!stats || !typeChartRef.current || !window.Chart) return;
-    if (typeChartInstance.current) typeChartInstance.current.destroy();
-    const breakdown = stats.event_breakdown || {};
-    const labels = Object.keys(breakdown);
-    const data   = Object.values(breakdown);
-    const colors = { alert:'#E15554', dns:'#29D3FF', http:'#22D97A', tls:'#8B7CFF', flow:'#4C6478' };
-    typeChartInstance.current = new window.Chart(typeChartRef.current, {
-      type:'doughnut',
-      data:{
-        labels,
-        datasets:[{
-          data,
-          backgroundColor: labels.map(l=>colors[l]||'#8FA3B5'),
-          borderColor:'#0A121C',
-          borderWidth:3,
-          hoverOffset:6
-        }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false, cutout:'70%',
-        plugins:{legend:{display:false},tooltip:{
-          backgroundColor:'#0A121C',borderColor:'rgba(41,211,255,0.3)',borderWidth:1,
-          titleColor:'#29D3FF',bodyColor:'#8FA3B5',
-          titleFont:{family:'IBM Plex Mono',size:10},bodyFont:{family:'IBM Plex Mono',size:10}
-        }}
-      }
-    });
-    return () => { if (typeChartInstance.current) typeChartInstance.current.destroy(); };
-  }, [stats]);
-
-  const breakdown = stats?.event_breakdown || {};
-  const breakdownTotal = Object.values(breakdown).reduce((a,b)=>a+b,0) || 1;
-  const typeColors = { alert:'#E15554', dns:'#29D3FF', http:'#22D97A', tls:'#8B7CFF', flow:'#4C6478' };
-  const maxCount = topIPs.length > 0 ? topIPs[0].count : 1;
-
-  return (
-    <div className="page">
-      <div className="page-title">Analytics</div>
-      <div className="page-sub">REAL-TIME EVENT ANALYSIS FROM YOUR LOGS</div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:22}}>
-        {[
-          {label:"TOTAL EVENTS", value:stats?.total_events||"--", color:"var(--accent)", sub:"from eve.json"},
-          {label:"ALERTS",       value:stats?.alert_count||"--",  color:"var(--red)",    sub:`${stats?.alert_count&&stats?.total_events?Math.round(stats.alert_count/stats.total_events*100):0}% of total`},
-          {label:"UNIQUE IPs",   value:stats?.unique_ips||"--",   color:"var(--orange)", sub:"threat actors"},
-          {label:"THREAT LEVEL", value:stats?.alert_count>10?"CRITICAL":stats?.alert_count>5?"HIGH":"ELEVATED", color:stats?.alert_count>10?"var(--red)":"var(--orange)", sub:"based on alerts"},
-        ].map((s,i)=>(
-          <div key={i} className="page-card" style={{padding:16}}>
-            <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:`linear-gradient(90deg,transparent,${s.color},transparent)`}}/>
-            <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:9}}>{s.label}</div>
-            <div style={{fontFamily:"var(--display)",fontSize:s.label==="THREAT LEVEL"?15:28,fontWeight:700,color:s.color,lineHeight:1}}>{s.value}</div>
-            <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",marginTop:5}}>{s.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="page-card" style={{marginBottom:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-          <div className="page-card-title" style={{marginBottom:0}}>EVENTS PER HOUR</div>
-          <div style={{display:"flex",gap:14}}>
-            {[["#E15554","Peak"],["#F0A857","High"],["#29D3FF","Normal"]].map(([color,label])=>(
-              <div key={label} style={{display:"flex",alignItems:"center",gap:5}}>
-                <div style={{width:8,height:8,borderRadius:3,background:color}}/>
-                <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)"}}>{label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div style={{position:"relative",height:200}}>
-          <canvas ref={hourChartRef} role="img" aria-label="Events per hour bar chart"/>
-        </div>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-
-        <div className="page-card">
-          <div className="page-card-title">EVENT TYPE BREAKDOWN</div>
-          <div style={{position:"relative",height:180}}>
-            <canvas ref={typeChartRef} role="img" aria-label="Event type donut chart"/>
-          </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:16,paddingTop:14,borderTop:"1px solid var(--border)"}}>
-            {Object.entries(breakdown).map(([type,count])=>(
-              <div key={type} style={{display:"flex",alignItems:"center",gap:5}}>
-                <div style={{width:8,height:8,borderRadius:3,background:typeColors[type]||"#8FA3B5"}}/>
-                <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",textTransform:"uppercase"}}>{type} {Math.round(count/breakdownTotal*100)}%</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="page-card">
-          <div className="page-card-title">TOP 10 ATTACKER IPs</div>
-          <div style={{display:"flex",flexDirection:"column",gap:11}}>
-            {topIPs.map((item,i)=>{
-              const color = i===0?"var(--red)":i<3?"var(--orange)":"var(--accent)";
-              return (
-                <div key={i}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",minWidth:16}}>{i+1}.</span>
-                      <span style={{fontFamily:"var(--mono)",fontSize:10,color}}>{item.ip}</span>
-                    </div>
-                    <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)"}}>{item.count} hits</span>
-                  </div>
-                  <div className="top-ip-bar">
-                    <div className="top-ip-fill" style={{width:`${(item.count/maxCount)*100}%`,background:color,transition:"width 0.5s"}}/>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-});
 
 const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
   const [logs, setLogs]                     = useState([]);
@@ -1424,7 +1299,10 @@ setLoading(false);
         </aside>
 
         <div style={{display:page==="analytics"?"flex":"none",flex:1,overflow:"hidden"}}>
-          <AnalyticsPage stats={stats}/>
+          <Soc2Dashboard
+            onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}
+            onSeeFindings={()=>setPage("investigation")}
+          />
         </div>
         <div style={{display:page==="investigation"?"flex":"none",flex:1,overflow:"hidden"}}>
           <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}/>
