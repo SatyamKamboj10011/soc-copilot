@@ -9,6 +9,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_mistralai import ChatMistralAI
 from collections import Counter
+from datetime import datetime
 import sqlite3
 import json
 import os
@@ -1278,6 +1279,233 @@ def sentinel_config():
         json.dump(existing, f, indent=2)
 
     return jsonify({"message": "Sentinel server IP updated", "server": existing['server']})
+
+
+# ── SOC 2 COMPLIANCE DASHBOARD ────────────────────────────────────────────────
+# Controls are evaluated live against real telemetry (Suricata/Zeek events in
+# eve.json, Sentinel endpoint check-ins, and the LLM/vector-store health check)
+# rather than stored as opinions — there is no separate "compliance" data
+# source, so each control's pass/warn/fail is a heuristic read of the same
+# signals the rest of the app already collects.
+
+TSC_CATEGORIES = {
+    "security":              "Security",
+    "availability":          "Availability",
+    "confidentiality":       "Confidentiality",
+    "processing_integrity":  "Processing Integrity",
+    "privacy":               "Privacy",
+}
+
+def _log_date_hour(ts):
+    """Extract (YYYY-MM-DD, hour:int) from a Suricata ISO timestamp, or (None, None)."""
+    m = re.match(r'(\d{4}-\d{2}-\d{2})T(\d{2}):', ts or '')
+    if not m:
+        return None, None
+    return m.group(1), int(m.group(2))
+
+
+def _compliance_context():
+    logs = load_logs()
+    total_events = len(logs)
+    alert_events = [l for l in logs if l.get('event_type') == 'alert']
+    alert_count = len(alert_events)
+    tls_count = sum(1 for l in logs if l.get('event_type') == 'tls')
+    dns_count = sum(1 for l in logs if l.get('event_type') == 'dns')
+    unique_ips = len(set(l.get('src_ip') for l in logs if l.get('src_ip')))
+    critical_alerts = sum(1 for l in alert_events if l.get('alert', {}).get('severity') == 1)
+
+    try:
+        OllamaLLM(model="sira-model").invoke("ping")
+        ollama_ok = True
+    except Exception:
+        ollama_ok = False
+    try:
+        vectorstore.get(limit=1)
+        chroma_ok = True
+    except Exception:
+        chroma_ok = False
+
+    conn = get_db()
+    machines = conn.execute("SELECT * FROM sentinel_machines").fetchall()
+    user_count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+    conn.close()
+
+    now = datetime.utcnow()
+    stale_machines = 0
+    flagged_machines = 0
+    for m in machines:
+        if m["alert"]:
+            flagged_machines += 1
+        try:
+            last_seen = datetime.fromisoformat((m["last_seen"] or "").replace("Z", ""))
+            if (now - last_seen).total_seconds() > 900:
+                stale_machines += 1
+        except ValueError:
+            stale_machines += 1
+
+    return {
+        "total_events": total_events,
+        "alert_count": alert_count,
+        "alert_ratio": (alert_count / total_events) if total_events else 0,
+        "tls_count": tls_count,
+        "dns_count": dns_count,
+        "dns_ratio": (dns_count / total_events) if total_events else 0,
+        "unique_ips": unique_ips,
+        "critical_alerts": critical_alerts,
+        "ollama_ok": ollama_ok,
+        "chroma_ok": chroma_ok,
+        "machine_count": len(machines),
+        "stale_machines": stale_machines,
+        "flagged_machines": flagged_machines,
+        "user_count": user_count,
+    }
+
+
+def _evaluate_controls(ctx):
+    def status(cond_pass, cond_warn=False):
+        return "pass" if cond_pass else ("warn" if cond_warn else "fail")
+
+    return [
+        {"id": "SEC-01", "category": "security", "name": "Intrusion Detection Coverage",
+         "description": "Suricata/Zeek sensors are actively producing telemetry.",
+         "status": status(ctx["total_events"] > 0)},
+        {"id": "SEC-02", "category": "security", "name": "Alert Triage Rate",
+         "description": "Alert volume stays within an acceptable share of total traffic.",
+         "status": status(ctx["alert_ratio"] < 0.25, ctx["alert_ratio"] < 0.5)},
+        {"id": "SEC-03", "category": "security", "name": "Malicious IP Response",
+         "description": "No Sentinel endpoint currently reports unresolved suspicious activity.",
+         "status": status(ctx["flagged_machines"] == 0, ctx["flagged_machines"] <= 1)},
+        {"id": "SEC-04", "category": "security", "name": "Threat Actor Volume",
+         "description": "Distinct attacking source IPs remain below the risk threshold.",
+         "status": status(ctx["unique_ips"] < 20, ctx["unique_ips"] < 50)},
+        {"id": "AVAIL-01", "category": "availability", "name": "AI Assistant Availability",
+         "description": "SIRA's local LLM and vector store are reachable.",
+         "status": status(ctx["ollama_ok"] and ctx["chroma_ok"], ctx["ollama_ok"] or ctx["chroma_ok"])},
+        {"id": "AVAIL-02", "category": "availability", "name": "Endpoint Heartbeat Coverage",
+         "description": "Registered Sentinel endpoints have checked in within the last 15 minutes.",
+         "status": status(ctx["machine_count"] > 0 and ctx["stale_machines"] == 0,
+                           ctx["machine_count"] > 0 and ctx["stale_machines"] < ctx["machine_count"])},
+        {"id": "CONF-01", "category": "confidentiality", "name": "Encrypted Session Observability",
+         "description": "TLS traffic is being observed and logged, confirming encryption-in-transit visibility.",
+         "status": status(ctx["tls_count"] > 0, ctx["total_events"] == 0)},
+        {"id": "CONF-02", "category": "confidentiality", "name": "DNS Exfiltration Watch",
+         "description": "DNS event volume stays within expected bounds (no tunnelling spike).",
+         "status": status(ctx["dns_ratio"] < 0.4, ctx["dns_ratio"] < 0.7)},
+        {"id": "PI-01", "category": "processing_integrity", "name": "Endpoint Process Integrity",
+         "description": "No Sentinel endpoint currently reports a suspicious process or connection.",
+         "status": status(ctx["flagged_machines"] == 0, ctx["flagged_machines"] <= 1)},
+        {"id": "PI-02", "category": "processing_integrity", "name": "Telemetry Pipeline Integrity",
+         "description": "The log ingestion pipeline (eve.json) is producing parsed events.",
+         "status": status(ctx["total_events"] > 0)},
+        {"id": "PRIV-01", "category": "privacy", "name": "Access Audit Trail",
+         "description": "User authentication activity is captured for accountability.",
+         "status": status(ctx["user_count"] > 0)},
+        {"id": "PRIV-02", "category": "privacy", "name": "Critical Alert Exposure",
+         "description": "No unresolved critical-severity alerts are outstanding.",
+         "status": status(ctx["critical_alerts"] == 0, ctx["critical_alerts"] <= 2)},
+    ]
+
+
+@app.route('/compliance/overview', methods=['GET'])
+def compliance_overview():
+    ctx = _compliance_context()
+    controls = _evaluate_controls(ctx)
+    weight = {"pass": 1, "warn": 0.5, "fail": 0}
+
+    criteria = []
+    for key, label in TSC_CATEGORIES.items():
+        cat_controls = [c for c in controls if c["category"] == key]
+        total = len(cat_controls) or 1
+        score = round(sum(weight[c["status"]] for c in cat_controls) / total * 100)
+        criteria.append({
+            "key": key,
+            "label": label,
+            "score": score,
+            "controls_passing": sum(1 for c in cat_controls if c["status"] == "pass"),
+            "controls_total": len(cat_controls),
+        })
+
+    overall_score = round(sum(c["score"] for c in criteria) / len(criteria)) if criteria else 0
+    return jsonify({
+        "overall_score": overall_score,
+        "criteria": criteria,
+        "controls_passing": sum(1 for c in controls if c["status"] == "pass"),
+        "controls_total": len(controls),
+        "findings_open": ctx["alert_count"],
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    })
+
+
+@app.route('/compliance/controls', methods=['GET'])
+def compliance_controls():
+    ctx = _compliance_context()
+    return jsonify(_evaluate_controls(ctx))
+
+
+@app.route('/compliance/findings', methods=['GET'])
+def compliance_findings():
+    limit = min(int(request.args.get('limit', 10)), 200)
+    logs = load_logs()
+    alerts = [l for l in logs if l.get('event_type') == 'alert']
+    alerts.sort(key=lambda l: l.get('timestamp', ''), reverse=True)
+
+    severity_map = {1: "critical", 2: "elevated", 3: "informational"}
+    findings = []
+    for i, l in enumerate(alerts[:limit]):
+        a = l.get('alert', {})
+        severity = a.get('severity', 3)
+        findings.append({
+            "id": f"FND-{i+1:04d}",
+            "title": a.get('signature', 'Unknown signature'),
+            "category": a.get('category', 'Uncategorized'),
+            "severity": severity_map.get(severity, "informational"),
+            "src_ip": l.get('src_ip'),
+            "dest_ip": l.get('dest_ip'),
+            "detected_at": l.get('timestamp'),
+        })
+    return jsonify(findings)
+
+
+@app.route('/compliance/heatmap', methods=['GET'])
+def compliance_heatmap():
+    logs = load_logs()
+    grid = Counter()
+    for l in logs:
+        if l.get('event_type') != 'alert':
+            continue
+        date_str, hour = _log_date_hour(l.get('timestamp'))
+        if date_str is None:
+            continue
+        try:
+            weekday = datetime.strptime(date_str, "%Y-%m-%d").weekday()
+        except ValueError:
+            continue
+        grid[(weekday, hour)] += 1
+
+    cells = [{"weekday": wd, "hour": hr, "count": c} for (wd, hr), c in grid.items()]
+    return jsonify({"cells": cells, "max": max(grid.values()) if grid else 0})
+
+
+@app.route('/compliance/trend', methods=['GET'])
+def compliance_trend():
+    logs = load_logs()
+    by_day = {}
+    for l in logs:
+        date_str, _ = _log_date_hour(l.get('timestamp'))
+        if date_str is None:
+            continue
+        bucket = by_day.setdefault(date_str, {"total": 0, "alerts": 0})
+        bucket["total"] += 1
+        if l.get('event_type') == 'alert':
+            bucket["alerts"] += 1
+
+    series = []
+    for date_str in sorted(by_day.keys()):
+        b = by_day[date_str]
+        score = round(100 * (1 - (b["alerts"] / b["total"] if b["total"] else 0)))
+        series.append({"date": date_str, "score": max(0, min(100, score)),
+                        "alerts": b["alerts"], "total_events": b["total"]})
+    return jsonify(series)
 
 
 if __name__ == '__main__':
