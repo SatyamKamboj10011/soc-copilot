@@ -1,10 +1,22 @@
 import { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import {
+  motion,
+  useScroll,
+  useTransform,
+  useMotionValue,
+  useMotionTemplate,
+} from "framer-motion";
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 22 },
-  show: (delay = 0) => ({ opacity: 1, y: 0, transition: { duration: 0.6, delay, ease: [0.16, 1, 0.3, 1] } }),
+  hidden: { opacity: 0, y: 26, scale: 0.98, filter: "blur(8px)" },
+  show: (delay = 0) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    filter: "blur(0px)",
+    transition: { duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] },
+  }),
 };
 
 const CAPABILITIES = [
@@ -94,16 +106,60 @@ const flipTransition = { duration: 0.65, ease: [0.65, 0, 0.35, 1] };
 // staggered reveal for grids of cards
 const gridContainer = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.08 } },
+  show: { transition: { staggerChildren: 0.09 } },
 };
 const gridItem = {
-  hidden: { opacity: 0, y: 18 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
+  hidden: { opacity: 0, y: 22, scale: 0.97, filter: "blur(6px)" },
+  show: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    filter: "blur(0px)",
+    transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1] },
+  },
 };
+
+// tracks viewport width so the scroll-scrubbed pipeline only runs on desktop,
+// where there's room to pin it — a tall sticky section on mobile just feels broken
+function useIsDesktop(breakpoint = 900) {
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= breakpoint : true
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${breakpoint}px)`);
+    const onChange = () => setIsDesktop(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [breakpoint]);
+  return isDesktop;
+}
+
+function PipelineStep({ step, index, total, progress }) {
+  const start = index / total;
+  const peak = (index + 0.5) / total;
+  const end = (index + 1) / total;
+  const opacity = useTransform(progress, [start, peak, end], [0.3, 1, 0.3]);
+  const scale = useTransform(progress, [start, peak, end], [0.94, 1, 0.94]);
+  const y = useTransform(progress, [start, peak, end], [16, 0, -16]);
+  const borderColor = useTransform(progress, [start, peak, end], ["#12314A", "#29D3FF", "#12314A"]);
+  const numColor = useTransform(progress, [start, peak, end], ["#4C6478", "#8B7CFF", "#4C6478"]);
+
+  return (
+    <motion.div className="lp-pipe-step corner-frame" style={{ opacity, scale, y, borderColor }}>
+      <motion.div className="lp-pipe-num" style={{ color: numColor }}>
+        STAGE {step.n}
+      </motion.div>
+      <h3>{step.title}</h3>
+      <p>{step.body}</p>
+    </motion.div>
+  );
+}
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const goEnter = () => navigate("/login");
+  const isDesktop = useIsDesktop();
 
   const videoRef = useRef(null);
   const [videoOpacity, setVideoOpacity] = useState(1);
@@ -125,23 +181,66 @@ export default function LandingPage() {
     return () => vid.removeEventListener("timeupdate", onTimeUpdate);
   }, []);
 
+  // whole-page scroll progress, drives the top progress bar + nav chrome
+  const { scrollY, scrollYProgress } = useScroll();
+  const navBg = useTransform(scrollY, [0, 140], ["rgba(6,10,17,0)", "rgba(6,10,17,0.86)"]);
+  const navBlur = useTransform(scrollY, [0, 140], ["blur(0px)", "blur(14px)"]);
+  const navBorder = useTransform(scrollY, [0, 140], ["rgba(18,49,74,0)", "rgba(18,49,74,0.6)"]);
+
+  // hero parallax — video pushes in and darkens, copy drifts up and fades as you leave it
+  const heroRef = useRef(null);
+  const { scrollYProgress: heroProgress } = useScroll({
+    target: heroRef,
+    offset: ["start start", "end start"],
+  });
+  const heroVideoScale = useTransform(heroProgress, [0, 1], [1, 1.16]);
+  const heroContentY = useTransform(heroProgress, [0, 1], [0, 90]);
+  const heroContentOpacity = useTransform(heroProgress, [0, 0.75], [1, 0]);
+  const heroCueOpacity = useTransform(heroProgress, [0, 0.15], [1, 0]);
+
+  // cursor-follow spotlight in the hero
+  const spotX = useMotionValue(50);
+  const spotY = useMotionValue(50);
+  const spotlightBg = useMotionTemplate`radial-gradient(560px circle at ${spotX}% ${spotY}%, rgba(41,211,255,0.10), transparent 65%)`;
+  const handleHeroMouseMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    spotX.set(((e.clientX - rect.left) / rect.width) * 100);
+    spotY.set(((e.clientY - rect.top) / rect.height) * 100);
+  };
+
+  // pipeline scroll-scrub
+  const pipelineWrapRef = useRef(null);
+  const { scrollYProgress: pipelineProgress } = useScroll({
+    target: pipelineWrapRef,
+    offset: ["start start", "end end"],
+  });
+
   return (
     <div className="lp-root">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        .lp-root { position:relative; min-height:100vh; overflow-x:hidden; background:#060A11; color:#E9F1F7;
+        .lp-root { position:relative; min-height:100vh; background:#060A11; color:#E9F1F7;
           font-family:'Inter',sans-serif; display:flex; flex-direction:column; }
 
-        .lp-video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
+        .lp-progress { position:fixed; top:0; left:0; right:0; height:2.5px; z-index:40; transform-origin:0%;
+          background:linear-gradient(90deg,#29D3FF,#8B7CFF); box-shadow:0 0 12px rgba(41,211,255,0.6); }
+
+        .lp-video-wrap { position:fixed; inset:0; width:100%; height:100%; z-index:0; overflow:hidden; }
+        .lp-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+        .lp-scanline { position:absolute; left:0; right:0; height:140px; pointer-events:none;
+          background:linear-gradient(180deg, rgba(41,211,255,0) 0%, rgba(41,211,255,0.06) 50%, rgba(41,211,255,0) 100%);
+          animation:lp-scan 9s linear infinite; }
+        @keyframes lp-scan { 0%{ top:-140px } 100%{ top:100% } }
         .lp-overlay { position:fixed; inset:0; z-index:1;
           background:
             linear-gradient(90deg, rgba(6,10,17,0.92) 0%, rgba(6,10,17,0.6) 42%, rgba(6,10,17,0.18) 68%, rgba(6,10,17,0.05) 100%),
             linear-gradient(180deg, rgba(6,10,17,0.15) 0%, rgba(6,10,17,0.1) 55%, rgba(6,10,17,0.85) 100%);
         }
+        .lp-spotlight { position:absolute; inset:0; z-index:1; pointer-events:none; }
 
-        .lp-nav { position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between;
-          padding:24px clamp(20px, 5vw, 64px); }
+        .lp-nav { position:fixed; top:0; left:0; right:0; z-index:10; display:flex; align-items:center;
+          justify-content:space-between; padding:20px clamp(20px, 5vw, 64px); border-bottom:1px solid transparent; }
         .lp-logo { display:flex; align-items:center; gap:10px; font-family:'Space Grotesk',sans-serif;
           font-weight:700; font-size:16px; letter-spacing:1px; color:#E9F1F7; }
         .lp-logo-mark { width:30px; height:30px; background:rgba(10,18,28,0.6); border:1.5px solid #29D3FF;
@@ -153,7 +252,7 @@ export default function LandingPage() {
         .lp-login-btn:hover { border-color:#29D3FF; background:rgba(41,211,255,0.1); }
 
         .lp-hero { position:relative; z-index:2; flex:1; display:flex; align-items:center;
-          padding:40px clamp(20px, 5vw, 64px) 60px; min-height:100vh; }
+          padding:130px clamp(20px, 5vw, 64px) 60px; min-height:100vh; }
         .lp-hero-inner { max-width:620px; width:100%; }
 
         .lp-eyebrow { font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.2em; color:#22D97A;
@@ -169,14 +268,23 @@ export default function LandingPage() {
         .lp-desc { font-size:16px; color:#B7C4D1; line-height:1.75; max-width:520px; margin:0 0 38px; }
 
         .lp-cta-row { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
-        .lp-enter-btn { font-family:'IBM Plex Mono',monospace; font-size:13px; letter-spacing:.14em; color:#060A11;
-          background:#29D3FF; border:none; border-radius:4px; padding:16px 32px; cursor:pointer;
-          display:inline-flex; align-items:center; gap:10px; transition:all .2s;
+        .lp-enter-btn { position:relative; overflow:hidden; font-family:'IBM Plex Mono',monospace; font-size:13px;
+          letter-spacing:.14em; color:#060A11; background:#29D3FF; border:none; border-radius:4px; padding:16px 32px;
+          cursor:pointer; display:inline-flex; align-items:center; gap:10px; transition:all .2s;
           box-shadow:0 0 30px -6px rgba(41,211,255,0.5); }
         .lp-enter-btn:hover { background:#5CE0FF; }
+        .lp-enter-btn::after { content:''; position:absolute; top:0; bottom:0; left:-60%; width:40%;
+          background:linear-gradient(115deg, transparent, rgba(255,255,255,0.45), transparent);
+          transform:skewX(-20deg); transition:left .5s ease; }
+        .lp-enter-btn:hover::after { left:130%; }
 
         .lp-meta { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#4C6478; letter-spacing:.04em;
           line-height:1.5; max-width:220px; }
+
+        .lp-scroll-cue { position:absolute; left:50%; bottom:36px; transform:translateX(-50%);
+          display:flex; flex-direction:column; align-items:center; gap:8px; z-index:2; }
+        .lp-scroll-cue span { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.2em;
+          color:#4C6478; text-transform:uppercase; }
 
         /* ---------- shared corner-bracket framing (signature element, reused site-wide) ---------- */
         .corner-frame { position:relative; }
@@ -199,14 +307,21 @@ export default function LandingPage() {
           color:#E9F1F7; margin:0 0 10px; }
         .lp-cap-card p { font-size:14px; color:#8FA2B4; line-height:1.65; margin:0; }
 
-        /* ---------- pipeline ---------- */
+        /* ---------- pipeline (scroll-scrubbed on desktop) ---------- */
         .lp-pipeline { display:grid; grid-template-columns:repeat(4, 1fr); gap:22px; }
         .lp-pipe-step { padding:24px 20px; border:1px solid #12314A; border-radius:4px; background:rgba(10,18,28,0.4); }
         .lp-pipe-num { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em; color:#8B7CFF; }
         .lp-pipe-step h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px;
           margin:10px 0 8px; color:#E9F1F7; }
         .lp-pipe-step p { font-size:13px; color:#8FA2B4; line-height:1.6; margin:0; }
-        .lp-pipe-arrow { display:none; }
+
+        .lp-pipeline-outer { position:relative; height:340vh; border-bottom:1px solid rgba(18,49,74,0.35); }
+        .lp-pipeline-sticky { position:sticky; top:0; height:100vh; display:flex; flex-direction:column;
+          justify-content:center; padding:0 clamp(20px, 5vw, 64px); }
+        .lp-pipe-track { position:relative; height:2px; margin-top:40px; border-radius:2px; overflow:hidden;
+          background:rgba(18,49,74,0.5); }
+        .lp-pipe-track-fill { position:absolute; inset:0; transform-origin:0%;
+          background:linear-gradient(90deg,#29D3FF,#8B7CFF); }
 
         /* ---------- hermes spotlight ---------- */
         .lp-hermes-wrap { display:grid; grid-template-columns:1fr 1.3fr; gap:48px; align-items:center; }
@@ -222,8 +337,10 @@ export default function LandingPage() {
 
         /* ---------- stats strip ---------- */
         .lp-stats { display:grid; grid-template-columns:repeat(3, 1fr); }
-        .lp-stat { padding:0 24px; border-left:1px solid rgba(18,49,74,0.6); }
+        .lp-stat { padding:0 24px; border-left:1px solid rgba(18,49,74,0.6); position:relative; }
         .lp-stat:first-child { border-left:none; padding-left:0; }
+        .lp-stat-rail { position:absolute; top:0; left:-1px; width:2px; height:100%;
+          background:linear-gradient(180deg,#29D3FF,#8B7CFF); transform-origin:top; }
         .lp-stat-label { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.12em;
           color:#22D97A; text-transform:uppercase; margin-bottom:8px; }
         .lp-stat-body { font-size:14px; color:#B7C4D1; line-height:1.6; }
@@ -271,8 +388,12 @@ export default function LandingPage() {
           color:#8B7CFF; margin-bottom:10px; }
 
         /* ---------- closing CTA ---------- */
-        .lp-close-cta { text-align:center; padding:100px clamp(20px, 5vw, 64px); border-bottom:none; }
-        .lp-close-title { font-family:'Space Grotesk',sans-serif; font-weight:600;
+        .lp-close-cta { position:relative; text-align:center; padding:100px clamp(20px, 5vw, 64px); border-bottom:none; }
+        .lp-close-glow { position:absolute; left:50%; top:50%; width:520px; height:280px;
+          transform:translate(-50%,-50%); background:radial-gradient(circle, rgba(41,211,255,0.14), transparent 70%);
+          pointer-events:none; animation:lp-glow-pulse 4s ease-in-out infinite; }
+        @keyframes lp-glow-pulse { 0%,100%{ opacity:.6 } 50%{ opacity:1 } }
+        .lp-close-title { position:relative; font-family:'Space Grotesk',sans-serif; font-weight:600;
           font-size:clamp(26px, 4vw, 40px); margin:0 0 32px; letter-spacing:-.01em; }
 
         .lp-footer { position:relative; z-index:2; display:flex; justify-content:space-between; align-items:center;
@@ -285,10 +406,11 @@ export default function LandingPage() {
           .lp-hermes-wrap { grid-template-columns:1fr; gap:32px; }
           .lp-stats { grid-template-columns:1fr; gap:24px; }
           .lp-stat { border-left:none; padding-left:0; padding-top:0; }
+          .lp-stat-rail { display:none; }
           .lp-team-grid { grid-template-columns:1fr; }
         }
         @media (max-width: 640px) {
-          .lp-hero { padding-top:20px; padding-bottom:40px; align-items:flex-start; }
+          .lp-hero { padding-top:96px; padding-bottom:40px; align-items:flex-start; }
           .lp-title { font-size:clamp(28px, 8vw, 38px); }
           .lp-desc { font-size:14.5px; }
           .lp-cta-row { flex-direction:column; align-items:flex-start; gap:14px; }
@@ -296,19 +418,31 @@ export default function LandingPage() {
           .lp-cap-grid { grid-template-columns:1fr; }
           .lp-section { padding:64px 20px; }
           .lp-flip-card { height:240px; }
+          .lp-scroll-cue { display:none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .lp-scanline, .lp-close-glow, .lp-eyebrow::before, .lp-terminal-caret { animation:none; }
         }
       `}</style>
 
-      <video
-        ref={videoRef}
-        className="lp-video"
-        style={{ opacity: videoOpacity, transition: "opacity 0.1s linear" }}
-        autoPlay muted loop playsInline
-        src="/robot-face.mp4"
-      />
+      <motion.div className="lp-progress" style={{ scaleX: scrollYProgress }} />
+
+      <div className="lp-video-wrap">
+        <motion.video
+          ref={videoRef}
+          className="lp-video"
+          style={{ opacity: videoOpacity, scale: heroVideoScale }}
+          autoPlay muted loop playsInline
+          src="/robot-face.mp4"
+        />
+        <div className="lp-scanline" />
+      </div>
       <div className="lp-overlay" />
 
-      <nav className="lp-nav">
+      <motion.nav
+        className="lp-nav"
+        style={{ background: navBg, backdropFilter: navBlur, WebkitBackdropFilter: navBlur, borderBottomColor: navBorder }}
+      >
         <motion.div initial="hidden" animate="show" custom={0} variants={fadeUp} className="lp-logo">
           <div className="lp-logo-mark"><span style={{ color: "#29D3FF", fontSize: 15 }}>⬡</span></div>
           SIRA
@@ -332,10 +466,11 @@ export default function LandingPage() {
             LOGIN
           </button>
         </motion.div>
-      </nav>
+      </motion.nav>
 
-      <div className="lp-hero">
-        <div className="lp-hero-inner">
+      <div className="lp-hero" ref={heroRef} onMouseMove={handleHeroMouseMove}>
+        <motion.div className="lp-spotlight" style={{ background: spotlightBg }} />
+        <motion.div className="lp-hero-inner" style={{ y: heroContentY, opacity: heroContentOpacity }}>
           <motion.div initial="hidden" animate="show" custom={0.15} variants={fadeUp} className="lp-eyebrow">
             AI SOC Copilot
           </motion.div>
@@ -361,7 +496,18 @@ export default function LandingPage() {
             </motion.button>
             <span className="lp-meta">No account? You'll be able to request access next.</span>
           </motion.div>
-        </div>
+        </motion.div>
+
+        <motion.div className="lp-scroll-cue" style={{ opacity: heroCueOpacity }}>
+          <span>Scroll</span>
+          <motion.svg
+            width="14" height="20" viewBox="0 0 14 20" fill="none"
+            animate={{ y: [0, 8, 0] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <path d="M1 1L7 19L13 1" stroke="#29D3FF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </motion.svg>
+        </motion.div>
       </div>
 
       <div className="lp-below">
@@ -390,7 +536,7 @@ export default function LandingPage() {
                 className="lp-cap-card"
                 key={c.title}
                 variants={gridItem}
-                whileHover={{ y: -6, backgroundColor: "rgba(41,211,255,0.04)" }}
+                whileHover={{ y: -6, scale: 1.015, backgroundColor: "rgba(41,211,255,0.04)" }}
                 transition={{ duration: 0.25 }}
               >
                 <h3>{c.title}</h3>
@@ -400,40 +546,59 @@ export default function LandingPage() {
           </motion.div>
         </motion.section>
 
-        {/* ---------- pipeline ---------- */}
-        <motion.section
-          className="lp-section"
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="lp-section-head">
-            <div className="lp-eyebrow">Pipeline</div>
-            <h2 className="lp-section-title">From packet to verdict.</h2>
-          </div>
-          <motion.div
-            className="lp-pipeline"
-            variants={gridContainer}
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true, margin: "-60px" }}
+        {/* ---------- pipeline: pinned scroll-scrub on desktop, static stagger on mobile ---------- */}
+        {isDesktop ? (
+          <section className="lp-pipeline-outer" ref={pipelineWrapRef}>
+            <div className="lp-pipeline-sticky">
+              <div className="lp-section-head">
+                <div className="lp-eyebrow">Pipeline</div>
+                <h2 className="lp-section-title">From packet to verdict.</h2>
+              </div>
+              <div className="lp-pipeline">
+                {PIPELINE.map((s, i) => (
+                  <PipelineStep key={s.n} step={s} index={i} total={PIPELINE.length} progress={pipelineProgress} />
+                ))}
+              </div>
+              <div className="lp-pipe-track">
+                <motion.div className="lp-pipe-track-fill" style={{ scaleX: pipelineProgress }} />
+              </div>
+            </div>
+          </section>
+        ) : (
+          <motion.section
+            className="lp-section"
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-80px" }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            {PIPELINE.map((s) => (
-              <motion.div
-                className="lp-pipe-step corner-frame"
-                key={s.n}
-                variants={gridItem}
-                whileHover={{ y: -6, borderColor: "#29D3FF" }}
-                transition={{ duration: 0.25 }}
-              >
-                <div className="lp-pipe-num">STAGE {s.n}</div>
-                <h3>{s.title}</h3>
-                <p>{s.body}</p>
-              </motion.div>
-            ))}
-          </motion.div>
-        </motion.section>
+            <div className="lp-section-head">
+              <div className="lp-eyebrow">Pipeline</div>
+              <h2 className="lp-section-title">From packet to verdict.</h2>
+            </div>
+            <motion.div
+              className="lp-pipeline"
+              variants={gridContainer}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-60px" }}
+            >
+              {PIPELINE.map((s) => (
+                <motion.div
+                  className="lp-pipe-step corner-frame"
+                  key={s.n}
+                  variants={gridItem}
+                  whileHover={{ y: -6, borderColor: "#29D3FF" }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <div className="lp-pipe-num">STAGE {s.n}</div>
+                  <h3>{s.title}</h3>
+                  <p>{s.body}</p>
+                </motion.div>
+              ))}
+            </motion.div>
+          </motion.section>
+        )}
 
         {/* ---------- hermes spotlight ---------- */}
         <motion.section
@@ -455,19 +620,33 @@ export default function LandingPage() {
                 landed on a verdict — so you can trust it, or overrule it.
               </p>
             </div>
-            <div className="lp-terminal corner-frame">
+            <motion.div
+              className="lp-terminal corner-frame"
+              initial={{ opacity: 0, scale: 0.96 }}
+              whileInView={{ opacity: 1, scale: 1 }}
+              viewport={{ once: true, margin: "-60px" }}
+              transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            >
               <div className="lp-terminal-head">
                 <span className="lp-terminal-dot" />
                 <span className="lp-terminal-dot" />
                 <span className="lp-terminal-dot" />
               </div>
               {HERMES_LOG.map((l, i) => (
-                <div className="lp-terminal-line" key={i} style={{ color: l.c }}>
+                <motion.div
+                  className="lp-terminal-line"
+                  key={i}
+                  style={{ color: l.c }}
+                  initial={{ opacity: 0, x: -8 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true, margin: "-60px" }}
+                  transition={{ duration: 0.35, delay: 0.15 + i * 0.12 }}
+                >
                   {i === 0 ? "> " : "  "}{l.t}
                   {i === HERMES_LOG.length - 1 && <span className="lp-terminal-caret" />}
-                </div>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </motion.section>
 
@@ -480,18 +659,32 @@ export default function LandingPage() {
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="lp-stats">
-            <div className="lp-stat">
-              <div className="lp-stat-label">Real Traffic</div>
-              <div className="lp-stat-body">Runs on live Suricata and Zeek output, not canned demo data.</div>
-            </div>
-            <div className="lp-stat">
-              <div className="lp-stat-label">Full Reasoning Trace</div>
-              <div className="lp-stat-body">Every Hermes verdict comes with the steps that led to it.</div>
-            </div>
-            <div className="lp-stat">
-              <div className="lp-stat-label">Studio 6 Build</div>
-              <div className="lp-stat-body">Built and iterated in the open for Otago Polytechnic, Block 3 2026.</div>
-            </div>
+            {[
+              { label: "Real Traffic", body: "Runs on live Suricata and Zeek output, not canned demo data." },
+              { label: "Full Reasoning Trace", body: "Every Hermes verdict comes with the steps that led to it." },
+              { label: "Studio 6 Build", body: "Built and iterated in the open for Otago Polytechnic, Block 3 2026." },
+            ].map((s, i) => (
+              <motion.div
+                className="lp-stat"
+                key={s.label}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ duration: 0.5, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+              >
+                {i > 0 && (
+                  <motion.div
+                    className="lp-stat-rail"
+                    initial={{ scaleY: 0 }}
+                    whileInView={{ scaleY: 1 }}
+                    viewport={{ once: true, margin: "-60px" }}
+                    transition={{ duration: 0.6, delay: 0.15 + i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+                  />
+                )}
+                <div className="lp-stat-label">{s.label}</div>
+                <div className="lp-stat-body">{s.body}</div>
+              </motion.div>
+            ))}
           </div>
         </motion.section>
 
@@ -579,6 +772,7 @@ export default function LandingPage() {
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
+          <div className="lp-close-glow" />
           <h2 className="lp-close-title">Ready to see it triage something?</h2>
           <motion.button
             whileHover={{ scale: 1.03, y: -2 }}

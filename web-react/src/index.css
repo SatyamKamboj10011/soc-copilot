@@ -1,3 +1,11 @@
+html {
+  /* clips stray horizontal overflow (e.g. scaled/parallaxed elements) without
+     making html/body an overflow:auto box — that would break position:sticky
+     for any descendant, since it'd become the nearest scroll container instead
+     of the real viewport. */
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
