@@ -266,39 +266,38 @@ const sharedCss = `
   .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
 
   /* ===== SOC 2 COMPLIANCE DASHBOARD (bento grid) ===== */
-  .bento-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden; }
-  .bento-card-title { font-family: var(--sans); font-size: 16px; font-weight: 700; color: var(--text); }
-  .bento-card-sub { font-family: var(--sans); font-size: 12px; color: var(--text-mid); margin-top: 2px; }
-  .bento-eyebrow { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
+  /* One typeface for the whole dashboard (Inter). Mono is reserved for genuine
+     tabular data — IPs, timestamps — never for ordinary labels. */
+  .bento-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 1px 8px rgba(0,0,0,0.18); }
+  .bento-card-title { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--text); letter-spacing: -0.1px; }
+  .bento-card-sub { font-family: var(--sans); font-size: 12.5px; color: var(--text-mid); margin-top: 3px; line-height: 1.5; }
   .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 8px; background: var(--accent); color: #06141B; font-family: var(--sans); font-size: 12.5px; font-weight: 600; border: none; cursor: pointer; transition: background 0.15s, transform 0.1s; }
   .bento-pill:hover { background: var(--accent2); }
   .bento-pill:active { transform: translateY(1px); }
-  .bento-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-  .bento-dot.critical { background: var(--red); }
-  .bento-dot.elevated { background: var(--orange); }
-  .bento-dot.informational { background: var(--green); }
+  .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 20px; font-family: var(--sans); font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+  .status-badge.critical { background: var(--red-dim); color: var(--red); }
+  .status-badge.elevated { background: var(--orange-dim); color: var(--orange); }
+  .status-badge.informational { background: var(--green-dim); color: var(--green); }
+  .bento-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; display: inline-block; }
   .bento-widget { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; text-align: center; }
   .bento-widget:hover { border-color: var(--border2); transform: translateY(-2px); }
   .bento-widget.active { border-color: var(--accent); background: var(--accent-dim); }
   .bento-widget-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: var(--accent); }
-  .bento-widget-label { font-family: var(--sans); font-size: 12px; color: var(--text-mid); }
+  .bento-widget-label { font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--text-mid); }
   .bento-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13px; }
-  .bento-table th { text-align: left; padding: 8px 8px; color: var(--text-dim); font-family: var(--mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bento-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-mid); font-size: 12.5px; }
+  .bento-table th { text-align: left; padding: 8px 8px; color: var(--text-dim); font-family: var(--sans); font-size: 11px; font-weight: 500; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bento-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); color: var(--text-mid); font-size: 13px; }
   .bento-table tr:last-child td { border-bottom: none; }
   .bento-table tr:hover td { color: var(--text); }
-  .bento-see-all { font-family: var(--sans); font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: none; cursor: pointer; }
+  .bento-see-all { font-family: var(--sans); font-size: 12px; font-weight: 500; color: var(--accent); background: none; border: none; cursor: pointer; }
   .bento-heat-row { display: grid; grid-template-columns: 28px repeat(24, 1fr); gap: 2px; align-items: center; }
   .bento-heat-cell { aspect-ratio: 1; border-radius: 3px; }
-  .bento-heat-label { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
+  .bento-heat-label { font-family: var(--sans); font-size: 10px; color: var(--text-dim); }
   .balance-row { display: grid; gap: 0; }
   .balance-card { padding: 0 18px; border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
   .balance-card:first-child { padding-left: 0; border-left: none; }
-  .balance-label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); }
-  .balance-value { font-family: var(--display); font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; }
-  .balance-delta { font-family: var(--sans); font-size: 11px; font-weight: 600; }
-  .balance-delta.up { color: var(--green); }
-  .balance-delta.down { color: var(--red); }
+  .balance-label { font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--text-mid); }
+  .balance-delta { font-family: var(--sans); font-size: 11.5px; color: var(--text-dim); }
   .lollipop-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
   .lollipop-stem { width: 3px; border-radius: 2px; background: var(--border2); position: relative; }
   .lollipop-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: -5px; }
@@ -306,16 +305,16 @@ const sharedCss = `
   /* ===== DASHBOARD: quiet status + stat primitives ===== */
   .hud-card:hover { border-color: var(--border2); }
 
-  .hud-live { display: inline-flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 11px; font-weight: 500; color: var(--text-mid); }
+  .hud-live { display: inline-flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 12px; font-weight: 500; color: var(--text-mid); }
   .hud-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: blink 2s infinite; }
 
   .hud-stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .hud-stat-chip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .hud-stat-chip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 1px 8px rgba(0,0,0,0.18); }
   .hud-stat-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg3); color: var(--text-mid); }
-  .hud-stat-label { font-family: var(--sans); font-size: 11.5px; color: var(--text-dim); margin-bottom: 3px; }
-  .hud-stat-value { font-family: var(--sans); font-size: 21px; font-weight: 650; color: var(--text); line-height: 1; letter-spacing: -0.2px; }
+  .hud-stat-label { font-family: var(--sans); font-size: 12px; color: var(--text-dim); margin-bottom: 3px; }
+  .hud-stat-value { font-family: var(--sans); font-size: 21px; font-weight: 650; color: var(--text); line-height: 1; letter-spacing: -0.3px; }
 
-  .radial-gauge-label { font-family: var(--sans); font-weight: 650; }
+  .radial-gauge-label { font-family: var(--sans); font-weight: 650; letter-spacing: -0.2px; }
 `;
 function SimpleExplain({ text }) {
   const [open, setOpen]       = useState(false);

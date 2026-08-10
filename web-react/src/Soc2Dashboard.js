@@ -327,8 +327,8 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
                     <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.title}>{f.title}</td>
                     <td style={{ fontFamily: "var(--mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.src_ip || "--"}</td>
                     <td style={{ overflow: "hidden" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
-                        <span className={`bento-dot ${f.severity}`} />
+                      <span className={`status-badge ${f.severity}`}>
+                        <span className="bento-dot" />
                         {SEVERITY_LABEL[f.severity] || f.severity}
                       </span>
                     </td>
@@ -402,7 +402,7 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
           </div>
           <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
             {TSC_ORDER.map(key => (
-              <div key={key} style={{ flex: 1, textAlign: "center", fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 0.5 }}>
+              <div key={key} style={{ flex: 1, textAlign: "center", fontFamily: "var(--sans)", fontSize: 11, color: "var(--text-dim)" }}>
                 {(overview ? (criteria.find(x => x.key === key)?.score ?? 0) : "--")}%
               </div>
             ))}
