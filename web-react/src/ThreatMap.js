@@ -47,7 +47,7 @@ export default function ThreatMap() {
         <div style={{
           position: "absolute", inset: 0, zIndex: 1000,
           display: "flex", alignItems: "center", justifyContent: "center",
-          background: "rgba(8,12,18,0.8)", fontFamily: "var(--mono)",
+          background: "rgba(10,10,12,0.85)", fontFamily: "var(--mono)",
           fontSize: 11, color: "var(--accent)", letterSpacing: 2
         }}>
           ◈ LOADING THREAT MAP...
@@ -57,7 +57,7 @@ export default function ThreatMap() {
       <MapContainer
         center={[20, 0]}
         zoom={2}
-        style={{ width: "100%", height: "100%", background: "#080c12" }}
+        style={{ width: "100%", height: "100%", background: "#0A0A0C" }}
         zoomControl={false}
         attributionControl={false}
       >
@@ -70,10 +70,10 @@ export default function ThreatMap() {
         <CircleMarker
           center={NZ_COORDS}
           radius={10}
-          pathOptions={{ color: "#00e5ff", fillColor: "#00e5ff", fillOpacity: 0.8, weight: 2 }}
+          pathOptions={{ color: "#4DD8E8", fillColor: "#4DD8E8", fillOpacity: 0.8, weight: 2 }}
         >
           <Popup>
-            <div style={{ fontFamily: "monospace", fontSize: 11, color: "#00e5ff", background: "#080c12", padding: 8, borderRadius: 4 }}>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: "#4DD8E8", background: "#0A0A0C", padding: 8, borderRadius: 4 }}>
               <strong>SIRA SERVER</strong><br/>
               Auckland, New Zealand<br/>
               SOC Copilot v4
@@ -85,7 +85,7 @@ export default function ThreatMap() {
         {attackers.map((a, i) => {
           const size      = 4 + (a.count / maxCount) * 14;
           const opacity   = 0.5 + (a.count / maxCount) * 0.5;
-          const color     = a.count > maxCount * 0.7 ? "#ff3d5a" : a.count > maxCount * 0.3 ? "#ffaa00" : "#b47cff";
+          const color     = a.count > maxCount * 0.7 ? "#E15554" : a.count > maxCount * 0.3 ? "#E8B84D" : "#C93DE0";
 
           return (
             <div key={i}>
@@ -115,15 +115,15 @@ export default function ThreatMap() {
       {/* Legend */}
       <div style={{
         position: "absolute", bottom: 16, left: 16, zIndex: 1000,
-        background: "rgba(8,12,18,0.9)", border: "1px solid rgba(0,229,255,0.2)",
+        background: "rgba(10,10,12,0.92)", border: "1px solid rgba(77,216,232,0.2)",
         borderRadius: 6, padding: "10px 14px", fontFamily: "var(--mono)", fontSize: 9
       }}>
         <div style={{ color: "var(--accent)", letterSpacing: 2, marginBottom: 8 }}>THREAT ORIGINS</div>
         {[
-          { color: "#ff3d5a", label: "HIGH ACTIVITY" },
-          { color: "#ffaa00", label: "MEDIUM ACTIVITY" },
-          { color: "#b47cff", label: "LOW ACTIVITY" },
-          { color: "#00e5ff", label: "SIRA SERVER (NZ)" },
+          { color: "#E15554", label: "HIGH ACTIVITY" },
+          { color: "#E8B84D", label: "MEDIUM ACTIVITY" },
+          { color: "#C93DE0", label: "LOW ACTIVITY" },
+          { color: "#4DD8E8", label: "SIRA SERVER (NZ)" },
         ].map((item, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, boxShadow: `0 0 6px ${item.color}` }} />
@@ -136,11 +136,11 @@ export default function ThreatMap() {
       {/* Attack count */}
       <div style={{
         position: "absolute", top: 16, right: 16, zIndex: 1000,
-        background: "rgba(8,12,18,0.9)", border: "1px solid rgba(255,61,90,0.3)",
+        background: "rgba(10,10,12,0.92)", border: "1px solid rgba(225,85,84,0.3)",
         borderRadius: 6, padding: "10px 14px", fontFamily: "var(--mono)", textAlign: "right"
       }}>
         <div style={{ fontSize: 7, color: "var(--text-dim)", letterSpacing: 2, marginBottom: 4 }}>ACTIVE THREATS</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: "#ff3d5a" }}>{attackers.length}</div>
+        <div style={{ fontSize: 24, fontWeight: 700, color: "#E15554" }}>{attackers.length}</div>
         <div style={{ fontSize: 7, color: "var(--text-dim)", letterSpacing: 1 }}>UNIQUE ORIGINS</div>
       </div>
     </div>
