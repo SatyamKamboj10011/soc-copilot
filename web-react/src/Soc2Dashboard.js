@@ -1,33 +1,31 @@
 import { useState, useEffect, useRef, useMemo, memo } from "react";
 import { motion, animate } from "framer-motion";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { MeshDistortMaterial, Sphere, Torus } from "@react-three/drei";
 import ThreatMap from "./ThreatMap";
 
 const FLASK_URL = "http://localhost:5000";
 
 const TSC_ORDER = ["security", "availability", "confidentiality", "processing_integrity", "privacy"];
-const TSC_COLORS = {
-  security: "#4DD8E8",
-  availability: "#22D97A",
-  confidentiality: "#8B7CFF",
-  processing_integrity: "#E8B84D",
-  privacy: "#C93DE0",
-};
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const SEVERITY_LABEL = { critical: "Critical", elevated: "Elevated", informational: "Informational" };
 
-/* ── motion primitives ── */
+/* Color communicates status only — never decoration. Same 3-state scale everywhere. */
+function statusColor(score) {
+  if (score >= 80) return "#22D97A";
+  if (score > 0) return "#E8B84D";
+  return "#E15554";
+}
+
+/* ── motion primitives (small, reused everywhere; kept subtle) ── */
 const fadeUp = {
-  hidden: { opacity: 0, y: 14 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: "easeOut" } },
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" } },
 };
-const staggerContainer = (stagger = 0.07, delay = 0) => ({
+const staggerContainer = (stagger = 0.06, delay = 0) => ({
   hidden: {},
   show: { transition: { staggerChildren: stagger, delayChildren: delay } },
 });
 
-function useCountUp(target, duration = 1.1) {
+function useCountUp(target, duration = 0.9) {
   const [display, setDisplay] = useState(0);
   useEffect(() => {
     const t = typeof target === "number" && !isNaN(target) ? target : 0;
@@ -40,28 +38,28 @@ function useCountUp(target, duration = 1.1) {
 /* ── icons (inline SVG — no emoji, matches the app's existing glyph convention) ── */
 function IconTrend() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="3 17 9 11 13 15 21 6" /><polyline points="14 6 21 6 21 13" />
     </svg>
   );
 }
 function IconCoverage() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z" />
     </svg>
   );
 }
 function IconTable() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="16" rx="2" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="9" y1="10" x2="9" y2="20" />
     </svg>
   );
 }
 function IconGrid() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
     </svg>
   );
@@ -75,102 +73,78 @@ function IconSparkle() {
 }
 function IconActivity() {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
     </svg>
   );
 }
 function IconAlertTriangle() {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   );
 }
 function IconGlobe() {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
     </svg>
   );
 }
 function IconShieldCheck() {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z" /><path d="M9 12l2 2 4-4" />
     </svg>
   );
 }
+function IconBot() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="8" width="16" height="12" rx="2" /><path d="M12 8V4" /><circle cx="12" cy="3" r="1" /><line x1="9" y1="13" x2="9" y2="15" /><line x1="15" y1="13" x2="15" y2="15" />
+    </svg>
+  );
+}
 
-/* ── radial gauge (SVG ring, animated draw-on) ── */
-function RadialGauge({ value, size = 92, stroke = 7, color = "#4DD8E8", label }) {
+/* ── radial gauge (SVG ring, animated draw-on; color = status, not decoration) ── */
+function RadialGauge({ value, size = 84, stroke = 6, color }) {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const displayValue = useCountUp(value ?? 0);
+  const ringColor = color || statusColor(value ?? 0);
   const offset = circumference - (Math.max(0, Math.min(100, value ?? 0)) / 100) * circumference;
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
         <circle cx={size / 2} cy={size / 2} r={radius} stroke="var(--border2)" strokeWidth={stroke} fill="none" />
         <motion.circle
-          cx={size / 2} cy={size / 2} r={radius} stroke={color} strokeWidth={stroke} fill="none"
+          cx={size / 2} cy={size / 2} r={radius} stroke={ringColor} strokeWidth={stroke} fill="none"
           strokeLinecap="round" strokeDasharray={circumference}
           initial={{ strokeDashoffset: circumference }}
           animate={{ strokeDashoffset: offset }}
-          transition={{ duration: 1.2, ease: "easeOut" }}
-          style={{ filter: `drop-shadow(0 0 5px ${color}88)` }}
+          transition={{ duration: 0.9, ease: "easeOut" }}
         />
       </svg>
-      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <span className="radial-gauge-label" style={{ fontSize: size * 0.24, color: "var(--text)" }}>{displayValue}%</span>
-        {label && <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 1, marginTop: 2 }}>{label}</span>}
       </div>
     </div>
   );
 }
 
-/* ── HUD stat chip with animated count ── */
-function HudStat({ icon, label, value, suffix = "", color = "#4DD8E8" }) {
+/* ── stat chip with animated count ── */
+function HudStat({ icon, label, value, suffix = "", tone = "neutral" }) {
   const displayValue = useCountUp(value ?? 0);
+  const toneColor = { neutral: "var(--accent)", good: "#22D97A", bad: "#E15554" }[tone];
   return (
-    <motion.div className="bento-card hud-card hud-stat-chip" variants={fadeUp} style={{ "--hud-accent": color }}>
-      <div className="hud-card-topline" />
-      <div className="hud-stat-icon" style={{ background: `${color}1f`, color }}>{icon}</div>
+    <motion.div className="bento-card hud-stat-chip" variants={fadeUp}>
+      <div className="hud-stat-icon">{icon}</div>
       <div>
         <div className="hud-stat-label">{label}</div>
-        <div className="hud-stat-value" style={{ color }}>{displayValue}{suffix}</div>
+        <div className="hud-stat-value" style={{ color: toneColor }}>{displayValue}{suffix}</div>
       </div>
     </motion.div>
-  );
-}
-
-/* ── 3D hero visual: rotating network core + counter-rotating scan ring ── */
-function NetworkCore() {
-  const coreRef = useRef();
-  const ringRef = useRef();
-  useFrame((_, delta) => {
-    if (coreRef.current) coreRef.current.rotation.y += delta * 0.3;
-    if (ringRef.current) { ringRef.current.rotation.z -= delta * 0.5; ringRef.current.rotation.x = 1.2; }
-  });
-  return (
-    <>
-      <Sphere ref={coreRef} args={[0.95, 96, 96]}>
-        <MeshDistortMaterial color="#0F3B42" attach="material" distort={0.28} speed={1.4} roughness={0.25} metalness={0.85} emissive="#4DD8E8" emissiveIntensity={0.35} />
-      </Sphere>
-      <Torus ref={ringRef} args={[1.55, 0.015, 16, 100]}>
-        <meshBasicMaterial color="#4DD8E8" transparent opacity={0.55} />
-      </Torus>
-    </>
-  );
-}
-function HeroVisual() {
-  return (
-    <Canvas camera={{ position: [0, 0, 3.4] }} gl={{ antialias: true, alpha: true }}>
-      <ambientLight intensity={0.5} />
-      <pointLight position={[3, 3, 3]} intensity={50} color="#4DD8E8" />
-      <pointLight position={[-3, -2, 2]} intensity={30} color="#C93DE0" />
-      <NetworkCore />
-    </Canvas>
   );
 }
 
@@ -208,15 +182,15 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
           {
             label: "Compliance score",
             data: trend.map(t => t.score),
-            borderColor: "#4DD8E8", backgroundColor: "rgba(77,216,232,0.12)",
-            tension: 0.4, fill: true, pointRadius: 3, pointBackgroundColor: "#4DD8E8",
+            borderColor: "#4DD8E8", backgroundColor: "rgba(77,216,232,0.10)",
+            borderWidth: 2, tension: 0.35, fill: true, pointRadius: 2.5, pointBackgroundColor: "#4DD8E8",
             yAxisID: "y",
           },
           {
             label: "Alert volume",
             data: trend.map(t => t.alerts),
-            borderColor: "#C93DE0", backgroundColor: "transparent",
-            tension: 0.4, fill: false, pointRadius: 3, pointBackgroundColor: "#C93DE0",
+            borderColor: "#5A5A62", backgroundColor: "transparent",
+            borderWidth: 1.5, borderDash: [3, 3], tension: 0.35, fill: false, pointRadius: 2, pointBackgroundColor: "#5A5A62",
             yAxisID: "y1",
           },
         ],
@@ -227,15 +201,15 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
         plugins: {
           legend: { display: false },
           tooltip: {
-            backgroundColor: "#141416", borderColor: "rgba(77,216,232,0.3)", borderWidth: 1,
-            titleColor: "#4DD8E8", bodyColor: "#9A9AA2",
-            titleFont: { family: "Inter", size: 11 }, bodyFont: { family: "IBM Plex Mono", size: 10 },
+            backgroundColor: "#14161B", borderColor: "var(--border2)", borderWidth: 1,
+            titleColor: "#EDEDEF", bodyColor: "#9A9AA2",
+            titleFont: { family: "Inter", size: 11 }, bodyFont: { family: "Inter", size: 11 },
           },
         },
         scales: {
-          x: { grid: { color: "rgba(255,255,255,0.04)", borderDash: [3, 4] }, ticks: { color: "#5A5A62", font: { family: "IBM Plex Mono", size: 9 } } },
-          y: { position: "left", grid: { color: "rgba(255,255,255,0.04)", borderDash: [3, 4] }, ticks: { color: "#5A5A62", font: { family: "IBM Plex Mono", size: 9 } }, min: 0, max: 100 },
-          y1: { position: "right", grid: { display: false }, ticks: { color: "#5A5A62", font: { family: "IBM Plex Mono", size: 9 } } },
+          x: { grid: { color: "rgba(255,255,255,0.04)", borderDash: [3, 4] }, ticks: { color: "#5A5A62", font: { family: "Inter", size: 9 } } },
+          y: { position: "left", grid: { color: "rgba(255,255,255,0.04)", borderDash: [3, 4] }, ticks: { color: "#5A5A62", font: { family: "Inter", size: 9 } }, min: 0, max: 100 },
+          y1: { position: "right", grid: { display: false }, ticks: { color: "#5A5A62", font: { family: "Inter", size: 9 } } },
         },
       },
     });
@@ -261,7 +235,7 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
   const findingsOpen = overview?.findings_open ?? 0;
 
   return (
-    <div className="page hud-page" style={{ padding: 20 }}>
+    <div className="page" style={{ padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
         <div>
           <div className="page-title">SOC 2 Compliance Dashboard</div>
@@ -270,41 +244,40 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
         <span className="hud-live"><span className="hud-live-dot" />Live telemetry</span>
       </div>
 
-      {/* ── HUD STATUS STRIP ── */}
-      <motion.div className="hud-stat-strip" style={{ marginBottom: 14 }} variants={staggerContainer(0.08)} initial="hidden" animate="show">
-        <HudStat icon={<IconShieldCheck />} label="Compliance Score" value={overview?.overall_score} suffix="%" color="#4DD8E8" />
-        <HudStat icon={<IconAlertTriangle />} label="Open Findings" value={findingsOpen} color={findingsOpen > 0 ? "#E15554" : "#22D97A"} />
-        <HudStat icon={<IconGlobe />} label="Threat Origins" value={threatOrigins} color="#C93DE0" />
-        <HudStat icon={<IconActivity />} label="Controls Passing" value={overview?.controls_passing} suffix={` / ${overview?.controls_total ?? "--"}`} color="#22D97A" />
+      {/* ── STATUS STRIP ── */}
+      <motion.div className="hud-stat-strip" style={{ marginBottom: 14 }} variants={staggerContainer()} initial="hidden" animate="show">
+        <HudStat icon={<IconShieldCheck />} label="Compliance score" value={overview?.overall_score} suffix="%" tone="neutral" />
+        <HudStat icon={<IconAlertTriangle />} label="Open findings" value={findingsOpen} tone={findingsOpen > 0 ? "bad" : "good"} />
+        <HudStat icon={<IconGlobe />} label="Threat origins" value={threatOrigins} tone="neutral" />
+        <HudStat icon={<IconActivity />} label="Controls passing" value={overview?.controls_passing} suffix={` / ${overview?.controls_total ?? "--"}`} tone="good" />
       </motion.div>
 
-      {/* ── TOP ROW: hero + trend + widget switcher ── */}
-      <motion.div style={{ display: "grid", gridTemplateColumns: "260px 1fr 220px", gap: 14, marginBottom: 14 }} variants={staggerContainer(0.1)} initial="hidden" animate="show">
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": "#8B7CFF", padding: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-          <div className="hud-card-topline" />
-          <div style={{ width: "100%", height: 150, borderRadius: 14, overflow: "hidden", background: "radial-gradient(circle at 50% 40%, rgba(77,216,232,0.14), transparent 70%)" }}>
-            <HeroVisual />
+      {/* ── TOP ROW: AI card + trend + widget switcher ── */}
+      <motion.div style={{ display: "grid", gridTemplateColumns: "260px 1fr 220px", gap: 14, marginBottom: 14 }} variants={staggerContainer(0.08)} initial="hidden" animate="show">
+        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ padding: 20, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14 }}>
+          <div>
+            <div className="hud-stat-icon" style={{ marginBottom: 12 }}><IconBot /></div>
+            <div className="bento-card-title" style={{ fontSize: 15 }}>Ask SIRA</div>
+            <div className="bento-card-sub" style={{ marginTop: 4 }}>Get a plain-language summary of your current compliance posture and open findings.</div>
           </div>
           <motion.button
             className="bento-pill" onClick={() => onAskSira && onAskSira("Give me a summary of our current SOC 2 compliance posture and any open findings.")}
-            animate={{ scale: [1, 1.04, 1] }} transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
-            whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.96 }}
+            whileHover={{ opacity: 0.92 }} whileTap={{ scale: 0.98 }} style={{ justifyContent: "center" }}
           >
-            <IconSparkle /> AI analytics
+            <IconSparkle /> Run AI analysis
           </motion.button>
         </motion.div>
 
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": "#4DD8E8" }} ref={trendSectionRef}>
-          <div className="hud-card-topline" />
+        <motion.div className="bento-card hud-card" variants={fadeUp} ref={trendSectionRef}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <div className="bento-card-title">Compliance Score Trend</div>
+              <div className="bento-card-title">Compliance score trend</div>
               <div className="bento-card-sub">Daily score vs. alert volume, derived from live telemetry</div>
             </div>
             <div style={{ display: "flex", gap: 14 }}>
-              {[["#4DD8E8", "Score"], ["#C93DE0", "Alerts"]].map(([color, label]) => (
+              {[["#4DD8E8", "Score"], ["#5A5A62", "Alerts"]].map(([color, label]) => (
                 <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />
                   <span style={{ fontFamily: "var(--sans)", fontSize: 11, color: "var(--text-mid)" }}>{label}</span>
                 </div>
               ))}
@@ -323,11 +296,10 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
             { key: "heatmap",  icon: <IconGrid />,      label: "Alert Heatmap", ref: heatmapSectionRef },
           ].map(w => (
             <motion.div
-              key={w.key} variants={fadeUp} whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}
+              key={w.key} variants={fadeUp} whileTap={{ scale: 0.97 }}
               className={`bento-card hud-card bento-widget${activeWidget === w.key ? " active" : ""}`}
-              style={{ "--hud-accent": "#4DD8E8" }} onClick={() => jumpTo(w.key, w.ref)}
+              onClick={() => jumpTo(w.key, w.ref)}
             >
-              <div className="hud-card-topline" />
               <div className="bento-widget-icon">{w.icon}</div>
               <div className="bento-widget-label">{w.label}</div>
             </motion.div>
@@ -336,11 +308,10 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
       </motion.div>
 
       {/* ── MIDDLE ROW: findings / heatmap / map ── */}
-      <motion.div style={{ display: "grid", gridTemplateColumns: "0.9fr 0.9fr 1.2fr", gap: 14, marginBottom: 14 }} variants={staggerContainer(0.12)} initial="hidden" animate="show">
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": findingsOpen > 0 ? "#E15554" : "#22D97A" }} ref={findingsSectionRef}>
-          <div className="hud-card-topline" />
+      <motion.div style={{ display: "grid", gridTemplateColumns: "0.9fr 0.9fr 1.2fr", gap: 14, marginBottom: 14 }} variants={staggerContainer(0.1)} initial="hidden" animate="show">
+        <motion.div className="bento-card hud-card" variants={fadeUp} ref={findingsSectionRef}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <div className="bento-card-title">Audit Findings</div>
+            <div className="bento-card-title">Audit findings</div>
             <button className="bento-see-all" onClick={() => onSeeFindings && onSeeFindings()}>See all</button>
           </div>
           <div style={{ overflowX: "auto" }}>
@@ -352,7 +323,7 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
                   <tr><td colSpan={4} style={{ color: "var(--text-dim)" }}>No open findings</td></tr>
                 )}
                 {findings.map((f, i) => (
-                  <motion.tr key={f.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3, delay: i * 0.05 }}>
+                  <motion.tr key={f.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25, delay: Math.min(i, 8) * 0.04 }}>
                     <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.title}>{f.title}</td>
                     <td style={{ fontFamily: "var(--mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.src_ip || "--"}</td>
                     <td style={{ overflow: "hidden" }}>
@@ -369,10 +340,9 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
           </div>
         </motion.div>
 
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": "#E8B84D" }} ref={heatmapSectionRef}>
-          <div className="hud-card-topline" />
-          <div className="bento-card-title" style={{ marginBottom: 14 }}>Alert Heatmap</div>
-          <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <motion.div className="bento-card hud-card" variants={fadeUp} ref={heatmapSectionRef}>
+          <div className="bento-card-title" style={{ marginBottom: 14 }}>Alert heatmap</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {WEEKDAYS.map((day, wd) => (
               <div key={day} className="bento-heat-row">
                 <span className="bento-heat-label">{day}</span>
@@ -384,24 +354,21 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
                       key={hr}
                       className="bento-heat-cell"
                       title={`${day} ${hr}:00 — ${count} alerts`}
-                      style={{ background: count === 0 ? "var(--bg3)" : `rgba(232,184,77,${0.15 + intensity * 0.8})` }}
+                      style={{ background: count === 0 ? "var(--bg3)" : `rgba(77,216,232,${0.15 + intensity * 0.75})` }}
                     />
                   );
                 })}
               </div>
             ))}
-          </motion.div>
+          </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
             <span className="bento-heat-label">00h</span><span className="bento-heat-label">12h</span><span className="bento-heat-label">23h</span>
           </div>
         </motion.div>
 
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": "#C93DE0", padding: 0, overflow: "hidden" }}>
-          <div className="hud-card-topline" />
-          <div className="hud-scan-overlay" />
-          <div style={{ position: "absolute", top: 16, left: 20, zIndex: 500, display: "flex", alignItems: "center", gap: 10 }}>
-            <div className="bento-card-title" style={{ fontSize: 14 }}>Incident Origins</div>
-            <span className="hud-live"><span className="hud-live-dot" style={{ background: "var(--magenta)", boxShadow: "0 0 6px var(--magenta)" }} />Scanning</span>
+        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 16, left: 20, zIndex: 500 }}>
+            <div className="bento-card-title" style={{ fontSize: 14 }}>Incident origins</div>
           </div>
           <div style={{ height: 320 }}>
             <ThreatMap />
@@ -409,26 +376,25 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
         </motion.div>
       </motion.div>
 
-      {/* ── BOTTOM ROW: control coverage lollipop + TSC balances ── */}
-      <motion.div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 14 }} variants={staggerContainer(0.12)} initial="hidden" animate="show">
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": "#4DD8E8" }} ref={coverageSectionRef}>
-          <div className="hud-card-topline" />
-          <div className="bento-card-title" style={{ marginBottom: 4 }}>Control Coverage by Criteria</div>
+      {/* ── BOTTOM ROW: control coverage + TSC balances ── */}
+      <motion.div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 14 }} variants={staggerContainer(0.1)} initial="hidden" animate="show">
+        <motion.div className="bento-card hud-card" variants={fadeUp} ref={coverageSectionRef}>
+          <div className="bento-card-title" style={{ marginBottom: 4 }}>Control coverage by criteria</div>
           <div className="bento-card-sub" style={{ marginBottom: 18 }}>{overview?.controls_passing ?? "--"} / {overview?.controls_total ?? "--"} controls passing</div>
           <div style={{ display: "flex", alignItems: "flex-end", height: 150, gap: 4 }}>
             {TSC_ORDER.map((key, i) => {
               const c = criteria.find(x => x.key === key);
               const score = c?.score ?? 0;
-              const color = TSC_COLORS[key];
+              const color = statusColor(score);
               return (
                 <div key={key} className="lollipop-col">
                   <motion.div
                     className="lollipop-stem"
-                    style={{ background: `linear-gradient(180deg, transparent, ${color}66)` }}
+                    style={{ background: `linear-gradient(180deg, transparent, ${color}55)` }}
                     initial={{ height: 0 }} animate={{ height: `${Math.max(score, 4)}%` }}
-                    transition={{ duration: 0.9, delay: i * 0.08, ease: "easeOut" }}
+                    transition={{ duration: 0.7, delay: i * 0.06, ease: "easeOut" }}
                   >
-                    <div className="lollipop-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+                    <div className="lollipop-dot" style={{ background: color }} />
                   </motion.div>
                 </div>
               );
@@ -443,16 +409,15 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
           </div>
         </motion.div>
 
-        <motion.div className="bento-card hud-card" variants={fadeUp} style={{ "--hud-accent": "#22D97A" }}>
-          <div className="hud-card-topline" />
-          <div className="bento-card-title" style={{ marginBottom: 16 }}>Trust Service Criteria Balances</div>
+        <motion.div className="bento-card hud-card" variants={fadeUp}>
+          <div className="bento-card-title" style={{ marginBottom: 16 }}>Trust Service Criteria balances</div>
           <div className="balance-row" style={{ gridTemplateColumns: `repeat(${TSC_ORDER.length}, 1fr)` }}>
             {TSC_ORDER.map(key => {
               const c = criteria.find(x => x.key === key);
               const score = c?.score ?? 0;
               return (
                 <div key={key} className="balance-card" style={{ alignItems: "center", textAlign: "center" }}>
-                  <RadialGauge value={overview ? score : 0} size={78} stroke={6} color={TSC_COLORS[key]} />
+                  <RadialGauge value={overview ? score : 0} />
                   <div className="balance-label" style={{ marginTop: 4 }}>{c?.label || key}</div>
                   <div className="balance-delta" style={{ color: "var(--text-dim)", fontWeight: 400 }}>
                     {c ? `${c.controls_passing}/${c.controls_total} controls` : ""}

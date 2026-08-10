@@ -270,12 +270,13 @@ const sharedCss = `
   .bento-card-title { font-family: var(--sans); font-size: 16px; font-weight: 700; color: var(--text); }
   .bento-card-sub { font-family: var(--sans); font-size: 12px; color: var(--text-mid); margin-top: 2px; }
   .bento-eyebrow { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
-  .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 30px; background: linear-gradient(135deg, var(--accent), var(--magenta)); color: #060608; font-family: var(--sans); font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 6px 20px -6px var(--accent-glow); }
-  .bento-pill:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -6px var(--accent-glow); }
-  .bento-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-  .bento-dot.critical { background: var(--red); box-shadow: 0 0 6px var(--red); }
-  .bento-dot.elevated { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
-  .bento-dot.informational { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 8px; background: var(--accent); color: #06141B; font-family: var(--sans); font-size: 12.5px; font-weight: 600; border: none; cursor: pointer; transition: background 0.15s, transform 0.1s; }
+  .bento-pill:hover { background: var(--accent2); }
+  .bento-pill:active { transform: translateY(1px); }
+  .bento-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .bento-dot.critical { background: var(--red); }
+  .bento-dot.elevated { background: var(--orange); }
+  .bento-dot.informational { background: var(--green); }
   .bento-widget { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; text-align: center; }
   .bento-widget:hover { border-color: var(--border2); transform: translateY(-2px); }
   .bento-widget.active { border-color: var(--accent); background: var(--accent-dim); }
@@ -302,44 +303,19 @@ const sharedCss = `
   .lollipop-stem { width: 3px; border-radius: 2px; background: var(--border2); position: relative; }
   .lollipop-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: -5px; }
 
-  /* ===== HUD / CYBER-OPS THEME ===== */
-  .hud-page { position: relative; }
-  .hud-page::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
-    background-image:
-      linear-gradient(rgba(77,216,232,0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(77,216,232,0.035) 1px, transparent 1px);
-    background-size: 34px 34px;
-    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 75%);
-            mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent 75%);
-  }
-  .hud-page > * { position: relative; z-index: 1; }
+  /* ===== DASHBOARD: quiet status + stat primitives ===== */
+  .hud-card:hover { border-color: var(--border2); }
 
-  .hud-card { --hud-accent: var(--accent); }
-  .hud-card::before, .hud-card::after { content: ''; position: absolute; width: 11px; height: 11px; border-color: var(--hud-accent); opacity: 0.6; pointer-events: none; z-index: 2; transition: opacity 0.2s; }
-  .hud-card::before { top: -1px; left: -1px; border-top: 1.5px solid; border-left: 1.5px solid; border-radius: 8px 0 0 0; }
-  .hud-card::after  { bottom: -1px; right: -1px; border-bottom: 1.5px solid; border-right: 1.5px solid; border-radius: 0 0 8px 0; }
-  .hud-card:hover::before, .hud-card:hover::after { opacity: 1; }
-  .hud-card-topline { position: absolute; top: 0; left: 16px; right: 16px; height: 1px; background: linear-gradient(90deg, transparent, var(--hud-accent), transparent); opacity: 0.5; }
-
-  .hud-live { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 8px; letter-spacing: 1.5px; color: var(--green); text-transform: uppercase; }
-  .hud-live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: blink 2s infinite; }
+  .hud-live { display: inline-flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 11px; font-weight: 500; color: var(--text-mid); }
+  .hud-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: blink 2s infinite; }
 
   .hud-stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .hud-stat-chip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; }
-  .hud-stat-icon { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .hud-stat-label { font-family: var(--mono); font-size: 8.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 3px; }
-  .hud-stat-value { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
+  .hud-stat-chip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .hud-stat-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg3); color: var(--text-mid); }
+  .hud-stat-label { font-family: var(--sans); font-size: 11.5px; color: var(--text-dim); margin-bottom: 3px; }
+  .hud-stat-value { font-family: var(--sans); font-size: 21px; font-weight: 650; color: var(--text); line-height: 1; letter-spacing: -0.2px; }
 
-  .hud-scan-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 5; }
-  .hud-scan-overlay::after {
-    content: ''; position: absolute; left: 0; right: 0; height: 90px; top: -90px;
-    background: linear-gradient(180deg, transparent, rgba(77,216,232,0.12), transparent);
-    animation: hud-scan 5s linear infinite;
-  }
-  @keyframes hud-scan { 0% { top: -90px; } 100% { top: 100%; } }
-
-  .radial-gauge-label { font-family: var(--display); font-weight: 700; }
+  .radial-gauge-label { font-family: var(--sans); font-weight: 650; }
 `;
 function SimpleExplain({ text }) {
   const [open, setOpen]       = useState(false);

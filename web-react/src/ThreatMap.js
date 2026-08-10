@@ -85,7 +85,7 @@ export default function ThreatMap() {
         {attackers.map((a, i) => {
           const size      = 4 + (a.count / maxCount) * 14;
           const opacity   = 0.5 + (a.count / maxCount) * 0.5;
-          const color     = a.count > maxCount * 0.7 ? "#E15554" : a.count > maxCount * 0.3 ? "#E8B84D" : "#C93DE0";
+          const color     = a.count > maxCount * 0.7 ? "#E15554" : a.count > maxCount * 0.3 ? "#E8B84D" : "#6B7280";
 
           return (
             <div key={i}>
@@ -122,11 +122,11 @@ export default function ThreatMap() {
         {[
           { color: "#E15554", label: "HIGH ACTIVITY" },
           { color: "#E8B84D", label: "MEDIUM ACTIVITY" },
-          { color: "#C93DE0", label: "LOW ACTIVITY" },
+          { color: "#6B7280", label: "LOW ACTIVITY" },
           { color: "#4DD8E8", label: "SIRA SERVER (NZ)" },
         ].map((item, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, boxShadow: `0 0 6px ${item.color}` }} />
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: item.color }} />
             <span style={{ color: "var(--text-dim)", letterSpacing: 1 }}>{item.label}</span>
           </div>
         ))}
