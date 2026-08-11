@@ -1,12 +1,26 @@
+import os
+
+# Set BEFORE any langchain_ollama/ollama imports -- if any part of that import
+# chain reads OLLAMA_HOST at import time rather than fresh on every call, an
+# override placed after the import (as this used to be) arrives too late and
+# whatever the system/Ollama desktop app had already set (observed: a
+# different random port on every run) wins instead.
+os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
+
 import datetime
 import json
 import shutil
-import os
 import argparse
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
-os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
+from ollama_embeddings import DirectOllamaEmbeddings
+
+# The single source of truth for where Ollama actually lives. Passed
+# explicitly to OllamaEmbeddings below (not just left to the env var) so the
+# connection can't be silently hijacked by anything else on the system that
+# also sets OLLAMA_HOST -- explicit constructor args are evaluated fresh at
+# call time, not cached at import time.
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 USEFUL_TYPES = {"alert", "dns", "http", "tls", "flow"}
@@ -170,8 +184,8 @@ print("\nSample chunk:")
 print(docs[0].page_content)
 print()
 
-print("Building ChromaDB...")
-embeddings  = OllamaEmbeddings(model="nomic-embed-text")
+print(f"Building ChromaDB (Ollama at {OLLAMA_BASE_URL})...")
+embeddings  = DirectOllamaEmbeddings(model="nomic-embed-text", host=OLLAMA_BASE_URL)
 vectorstore = Chroma.from_documents(
     docs,
     embeddings,

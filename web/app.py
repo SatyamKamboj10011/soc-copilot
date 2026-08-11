@@ -5,11 +5,10 @@ from flask_bcrypt import Bcrypt
 from langchain_ollama import OllamaLLM
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_mistralai import ChatMistralAI
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 import sqlite3
 import json
 import os
@@ -101,7 +100,13 @@ def init_db():
 init_db()
 # ─────────────────────────────────────────────────────────────────────────────
 
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
+# langchain_ollama.OllamaEmbeddings was not honoring an explicit base_url on
+# this machine -- it kept targeting a stray non-standard local port instead
+# of 127.0.0.1:11434 regardless of what was passed in. DirectOllamaEmbeddings
+# bypasses it and talks to the ollama package directly (confirmed working).
+from ai.ollama_embeddings import DirectOllamaEmbeddings
+
+embeddings = DirectOllamaEmbeddings(model="nomic-embed-text", host="http://127.0.0.1:11434")
 
 vectorstore = Chroma(
     persist_directory="../ai/chroma_db",
@@ -474,8 +479,7 @@ Answer naturally. Pick the format that fits. Do not force sections that do not a
 @app.route('/logs', methods=['GET'])
 def get_logs():
     logs = load_logs()
-    limit = min(int(request.args.get('limit', 50)), 1000)
-    return jsonify(logs[:limit])
+    return jsonify(logs[:50])
 
 
 @app.route('/models', methods=['GET'])
@@ -560,8 +564,6 @@ def health():
 def search():
     query  = request.args.get('q', '').strip()
     event_type = request.args.get('type', None)
-    offset = int(request.args.get('offset', 0))
-    limit  = min(int(request.args.get('limit', 100)), 500)
     logs  = load_logs()
 
     if query:
@@ -572,12 +574,7 @@ def search():
     if event_type:
         logs = [l for l in logs if l.get('event_type') == event_type]
 
-    return jsonify({
-        "results": logs[offset:offset+limit],
-        "total": len(logs),
-        "offset": offset,
-        "limit": limit,
-    })
+    return jsonify(logs[:100])  # return top 100 matches
 
 
 @app.route('/timeline', methods=['GET'])
@@ -596,8 +593,6 @@ def timeline():
 @app.route('/top-ips', methods=['GET'])
 def top_ips():
     logs = load_logs()
-    hours = request.args.get('hours', type=int)
-    logs = _filter_by_hours(logs, hours)
     limit = int(request.args.get('limit', 10))
     ip_counts = Counter(l.get('src_ip') for l in logs if l.get('src_ip'))
     result = [{"ip": ip, "count": count} for ip, count in ip_counts.most_common(limit)]
@@ -1314,25 +1309,8 @@ def _log_date_hour(ts):
     return m.group(1), int(m.group(2))
 
 
-def _parse_full_ts(ts):
-    """Parse a Suricata ISO timestamp into a naive UTC datetime, or None."""
-    try:
-        return datetime.strptime((ts or "")[:19], "%Y-%m-%dT%H:%M:%S")
-    except ValueError:
-        return None
-
-
-def _filter_by_hours(logs, hours):
-    """Keep only logs within the last `hours` hours. hours=None/0 = no filtering (all time)."""
-    if not hours:
-        return logs
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
-    return [l for l in logs if (dt := _parse_full_ts(l.get('timestamp'))) and dt >= cutoff]
-
-
-def _compliance_context(hours=None):
+def _compliance_context():
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     total_events = len(logs)
     alert_events = [l for l in logs if l.get('event_type') == 'alert']
     alert_count = len(alert_events)
@@ -1435,8 +1413,7 @@ def _evaluate_controls(ctx):
 
 @app.route('/compliance/overview', methods=['GET'])
 def compliance_overview():
-    hours = request.args.get('hours', type=int)
-    ctx = _compliance_context(hours)
+    ctx = _compliance_context()
     controls = _evaluate_controls(ctx)
     weight = {"pass": 1, "warn": 0.5, "fail": 0}
 
@@ -1466,17 +1443,14 @@ def compliance_overview():
 
 @app.route('/compliance/controls', methods=['GET'])
 def compliance_controls():
-    hours = request.args.get('hours', type=int)
-    ctx = _compliance_context(hours)
+    ctx = _compliance_context()
     return jsonify(_evaluate_controls(ctx))
 
 
 @app.route('/compliance/findings', methods=['GET'])
 def compliance_findings():
     limit = min(int(request.args.get('limit', 10)), 200)
-    hours = request.args.get('hours', type=int)
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     alerts = [l for l in logs if l.get('event_type') == 'alert']
     alerts.sort(key=lambda l: l.get('timestamp', ''), reverse=True)
 
@@ -1499,9 +1473,7 @@ def compliance_findings():
 
 @app.route('/compliance/heatmap', methods=['GET'])
 def compliance_heatmap():
-    hours = request.args.get('hours', type=int)
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     grid = Counter()
     for l in logs:
         if l.get('event_type') != 'alert':
@@ -1521,9 +1493,7 @@ def compliance_heatmap():
 
 @app.route('/compliance/trend', methods=['GET'])
 def compliance_trend():
-    hours = request.args.get('hours', type=int)
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     by_day = {}
     for l in logs:
         date_str, _ = _log_date_hour(l.get('timestamp'))
@@ -1544,4 +1514,30 @@ def compliance_trend():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5000)
+    # Pull Suricata/Zeek logs from the public honeypot VM automatically,
+    # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
+    # only set in the child process the debug reloader actually forks to
+    # serve requests -- checking it here (rather than starting unconditionally)
+    # stops the sync thread from being started twice (once in the reloader's
+    # parent watcher process, once in the child) when debug=True.
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        from ai.honeypot_log_sync import start_background_sync
+        start_background_sync()
+
+    # NOTE: debug=True's reloader watches every .py file under the project
+    # tree recursively, including web/Wav2Lip/. When /sira-face-speak runs
+    # inference (which touches files inside face_detection/detection/sfd/),
+    # the reloader saw that as "code changed" and killed + restarted the
+    # whole Flask process mid-request -> browser saw it as a CORS failure
+    # (connection reset, no headers ever sent), not a real error.
+    # exclude_patterns keeps the reloader watching your actual app code
+    # while ignoring the Wav2Lip subdirectory entirely.
+    app.run(
+        host='0.0.0.0',
+        debug=True,
+        port=5000,
+        exclude_patterns=[
+            "*/Wav2Lip/*",
+            "*\\Wav2Lip\\*",
+        ],
+    )
