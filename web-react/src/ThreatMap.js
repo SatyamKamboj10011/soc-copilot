@@ -76,7 +76,7 @@ export default function ThreatMap() {
             <div style={{ fontFamily: "monospace", fontSize: 11, color: "#4DD8E8", background: "#0A0A0C", padding: 8, borderRadius: 4 }}>
               <strong>SIRA SERVER</strong><br/>
               Auckland, New Zealand<br/>
-              SOC Copilot v4
+              SOC Copilot
             </div>
           </Popup>
         </CircleMarker>

@@ -1,0 +1,214 @@
+- generic [active] [ref=f4e1]:
+  - generic [ref=f4e3]:
+    - navigation [ref=f4e7]:
+      - generic [ref=f4e8]:
+        - generic [ref=f4e9]: ⬡
+        - text: SIRA
+      - generic [ref=f4e11]:
+        - generic [ref=f4e12] [cursor=pointer]: FAQ
+        - button "LOGIN" [ref=f4e13] [cursor=pointer]
+    - generic [ref=f4e15]:
+      - generic [ref=f4e16]: AI SOC Copilot
+      - heading "SIRA watches your network so you don't have to watch alone." [level=1] [ref=f4e17]
+      - paragraph [ref=f4e18]: SIRA analyses real Suricata and Zeek traffic, triages alerts autonomously, and investigates every incident with Hermes — an AI agent that shows its reasoning instead of hiding it. Built for Studio 6 at Otago Polytechnic.
+      - generic [ref=f4e19]:
+        - button "ENTER THE LAB →" [ref=f4e20] [cursor=pointer]
+        - generic [ref=f4e21]: No account? You'll be able to request access next.
+    - generic [ref=f4e22]:
+      - generic [ref=f4e26]:
+        - generic [ref=f4e27]: SIRAWATCHESTHEWIRE
+        - generic [ref=f4e29]: An AI SOC copilot that shows its reasoning — from packet to verdict.
+      - generic [ref=f4e35]:
+        - generic: "SUBJECT: SIRA-CORESTATUS: ACTIVELATENCY: 14ms"
+        - generic [ref=f4e37]:
+          - generic [ref=f4e38]: File 00 · Subject
+          - generic [ref=f4e39]: Meet SIRA
+      - generic [ref=f4e42]:
+        - generic [ref=f4e43]:
+          - generic [ref=f4e44]: File 01 · Capability
+          - generic [ref=f4e45]: What SIRA Does
+          - heading "One analyst's view of everything on the wire." [level=2] [ref=f4e46]
+        - generic [ref=f4e47]:
+          - generic [ref=f4e48]:
+            - heading "Live Traffic Analysis" [level=3] [ref=f4e49]
+            - paragraph [ref=f4e50]: Ingests real Suricata and Zeek output, not sample data, so every alert traces back to an actual packet.
+          - generic [ref=f4e51]:
+            - heading "Autonomous Triage" [level=3] [ref=f4e52]
+            - paragraph [ref=f4e53]: Alerts are scored and sorted before an analyst even opens the queue.
+          - generic [ref=f4e54]:
+            - heading "Hermes Investigation" [level=3] [ref=f4e55]
+            - paragraph [ref=f4e56]: An AI agent walks through each incident step by step, and shows the reasoning behind every conclusion.
+          - generic [ref=f4e57]:
+            - heading "Case Management" [level=3] [ref=f4e58]
+            - paragraph [ref=f4e59]: Every investigation becomes a case file — alerts, evidence, and Hermes's findings in one place.
+          - generic [ref=f4e60]:
+            - heading "Network Map" [level=3] [ref=f4e61]
+            - paragraph [ref=f4e62]: See where an alert sits in your topology at a glance, not just its IP address.
+          - generic [ref=f4e63]:
+            - heading "Threat Summary" [level=3] [ref=f4e64]
+            - paragraph [ref=f4e65]: A live rollup of what's active right now, ranked by what actually needs eyes on it.
+      - generic [ref=f4e67]:
+        - generic [ref=f4e68]:
+          - generic [ref=f4e69]: Real Traffic
+          - generic [ref=f4e70]: Runs on live Suricata and Zeek output, not canned demo data.
+        - generic [ref=f4e71]:
+          - generic [ref=f4e72]: Full Reasoning Trace
+          - generic [ref=f4e73]: Every Hermes verdict comes with the steps that led to it.
+        - generic [ref=f4e74]:
+          - generic [ref=f4e75]: Studio 6 Build
+          - generic [ref=f4e76]: Built and iterated in the open for Otago Polytechnic, Block 3 2026.
+      - generic [ref=f4e77]:
+        - generic [ref=f4e78]:
+          - generic [ref=f4e79]: File 02 · Pipeline
+          - generic [ref=f4e80]: How It Works
+          - heading "From packet to verdict." [level=2] [ref=f4e81]
+        - generic [ref=f4e82]:
+          - generic [ref=f4e83]:
+            - generic [ref=f4e84]: STAGE 01
+            - heading "Capture" [level=3] [ref=f4e85]
+            - paragraph [ref=f4e86]: Suricata and Zeek watch the wire and log everything that looks worth a second glance.
+          - generic [ref=f4e87]:
+            - generic [ref=f4e88]: STAGE 02
+            - heading "Index" [level=3] [ref=f4e89]
+            - paragraph [ref=f4e90]: Alerts and context are embedded into a local vector store so Hermes can reason over real history.
+          - generic [ref=f4e91]:
+            - generic [ref=f4e92]: STAGE 03
+            - heading "Investigate" [level=3] [ref=f4e93]
+            - paragraph [ref=f4e94]: Hermes pulls related evidence, cross-references it, and builds a case — reasoning shown at every step.
+          - generic [ref=f4e95]:
+            - generic [ref=f4e96]: STAGE 04
+            - heading "Review" [level=3] [ref=f4e97]
+            - paragraph [ref=f4e98]: The analyst gets a finished case file, not a black box, and can override the verdict any time.
+      - generic [ref=f4e100]:
+        - generic [ref=f4e101]:
+          - generic [ref=f4e102]: File 03 · Investigation
+          - generic [ref=f4e103]: Meet Hermes
+          - heading "It doesn't just flag it, it explains it." [level=2] [ref=f4e104]
+          - paragraph [ref=f4e105]: Every Hermes investigation is a visible chain of reasoning, not a single score. You see exactly what it checked, what it ruled out, and why it landed on a verdict — so you can trust it, or overrule it.
+        - generic [ref=f4e106]:
+          - generic [ref=f4e111]: "> analyzing alert #4471 — suspicious outbound TLS"
+          - generic [ref=f4e112]: checking source host history... 3 prior alerts, none critical
+          - generic [ref=f4e113]: cross-referencing destination IP against known indicators... no match
+          - generic [ref=f4e114]: reviewing connection timing... matches beaconing pattern (14s interval)
+          - generic [ref=f4e115]: "verdict: ESCALATE — beaconing behavior outweighs clean IP reputation"
+      - generic [ref=f4e117]:
+        - generic [ref=f4e118]: Built With
+        - generic [ref=f4e120]:
+          - generic [ref=f4e121]: Suricata
+          - generic [ref=f4e122]: Zeek
+          - generic [ref=f4e123]: ChromaDB
+          - generic [ref=f4e124]: Groq
+          - generic [ref=f4e125]: Gemini
+          - generic [ref=f4e126]: Ollama
+          - generic [ref=f4e127]: React
+          - generic [ref=f4e128]: Flask
+          - generic [ref=f4e129]: Suricata
+          - generic [ref=f4e130]: Zeek
+          - generic [ref=f4e131]: ChromaDB
+          - generic [ref=f4e132]: Groq
+          - generic [ref=f4e133]: Gemini
+          - generic [ref=f4e134]: Ollama
+          - generic [ref=f4e135]: React
+          - generic [ref=f4e136]: Flask
+          - generic [ref=f4e137]: Suricata
+          - generic [ref=f4e138]: Zeek
+          - generic [ref=f4e139]: ChromaDB
+          - generic [ref=f4e140]: Groq
+          - generic [ref=f4e141]: Gemini
+          - generic [ref=f4e142]: Ollama
+          - generic [ref=f4e143]: React
+          - generic [ref=f4e144]: Flask
+      - generic [ref=f4e145]:
+        - generic [ref=f4e146]:
+          - generic [ref=f4e147]: File 04 · Personnel
+          - generic [ref=f4e148]: The Team
+          - heading "Two people, one lab." [level=2] [ref=f4e149]
+        - generic [ref=f4e150]:
+          - generic [ref=f4e152] [cursor=pointer]:
+            - generic [ref=f4e153]:
+              - generic [ref=f4e154]: SK
+              - heading "Satyam Kamboj" [level=3] [ref=f4e155]
+              - generic [ref=f4e156]: BACKEND, AI & DEPLOYMENT
+              - paragraph [ref=f4e157]: Builds the ingestion pipeline, the RAG/Hermes reasoning layer, and ships it.
+              - generic [ref=f4e158]: HOVER TO VIEW →
+            - generic [ref=f4e159]:
+              - img "Satyam Kamboj" [ref=f4e160]
+              - generic [ref=f4e161]:
+                - heading "Satyam Kamboj" [level=3] [ref=f4e162]
+                - generic [ref=f4e163]: BACKEND, AI & DEPLOYMENT
+          - generic [ref=f4e165] [cursor=pointer]:
+            - generic [ref=f4e166]:
+              - generic [ref=f4e167]: P
+              - heading "Pratham" [level=3] [ref=f4e168]
+              - generic [ref=f4e169]: FRONTEND, UX & DOCUMENTATION
+              - paragraph [ref=f4e170]: Designs and builds the dashboard, case views, and keeps the docs honest.
+              - generic [ref=f4e171]: HOVER TO VIEW →
+            - generic [ref=f4e172]:
+              - img "Pratham" [ref=f4e173]
+              - generic [ref=f4e174]:
+                - heading "Pratham" [level=3] [ref=f4e175]
+                - generic [ref=f4e176]: FRONTEND, UX & DOCUMENTATION
+      - generic [ref=f4e177]:
+        - heading "Ready to see it triage something?" [level=2] [ref=f4e178]
+        - button "ENTER THE LAB →" [ref=f4e179] [cursor=pointer]
+      - contentinfo [ref=f4e180]:
+        - generic [ref=f4e181]: SIRA v4 · AI SOC Copilot
+        - generic [ref=f4e182]: Satyam Kamboj & Pratham · Otago Polytechnic 2026
+  - application "AI Agent Video Chat" [ref=f4e184]:
+    - region "Chat call":
+      - log:
+        - generic:
+          - article
+    - generic [ref=f4e185]:
+      - generic: Loading...
+      - generic [ref=f4e186]:
+        - generic "Agent idle video" [ref=f4e187]
+        - generic "Agent video stream" [ref=f4e188]
+      - toolbar "Control header"
+      - generic: AI
+      - dialog "Welcome message" [ref=f4e189]:
+        - button "Start call" [ref=f4e191] [cursor=pointer]
+  - iframe [ref=f4e194]:
+    - generic [ref=f5e2]:
+      - generic [ref=f5e3]: "Uncaught runtime errors:"
+      - button "Dismiss" [ref=f5e4] [cursor=pointer]: ×
+      - generic [ref=f5e5]:
+        - generic [ref=f5e6]:
+          - generic [ref=f5e7]: ERROR
+          - generic [ref=f5e8]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e9]:
+          - generic [ref=f5e10]: ERROR
+          - generic [ref=f5e11]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e12]:
+          - generic [ref=f5e13]: ERROR
+          - generic [ref=f5e14]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e15]:
+          - generic [ref=f5e16]: ERROR
+          - generic [ref=f5e17]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e18]:
+          - generic [ref=f5e19]: ERROR
+          - generic [ref=f5e20]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e21]:
+          - generic [ref=f5e22]: ERROR
+          - generic [ref=f5e23]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e24]:
+          - generic [ref=f5e25]: ERROR
+          - generic [ref=f5e26]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e27]:
+          - generic [ref=f5e28]: ERROR
+          - generic [ref=f5e29]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e30]:
+          - generic [ref=f5e31]: ERROR
+          - generic [ref=f5e32]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e33]:
+          - generic [ref=f5e34]: ERROR
+          - generic [ref=f5e35]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e36]:
+          - generic [ref=f5e37]: ERROR
+          - generic [ref=f5e38]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e39]:
+          - generic [ref=f5e40]: ERROR
+          - generic [ref=f5e41]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"
+        - generic [ref=f5e42]:
+          - generic [ref=f5e43]: ERROR
+          - generic [ref=f5e44]: "Cannot read properties of undefined (reading 'replace') TypeError: Cannot read properties of undefined (reading 'replace') at resolveIncludes (http://localhost:3000/static/js/bundle.js:214766:17) at new WebGLProgram (http://localhost:3000/static/js/bundle.js:214934:18) at Object.acquireProgram (http://localhost:3000/static/js/bundle.js:215551:17) at getProgram (http://localhost:3000/static/js/bundle.js:221757:32) at setProgram (http://localhost:3000/static/js/bundle.js:221921:19) at WebGLRenderer.renderBufferDirect (http://localhost:3000/static/js/bundle.js:221117:23) at renderObject (http://localhost:3000/static/js/bundle.js:221718:15) at renderObjects (http://localhost:3000/static/js/bundle.js:221700:11) at renderScene (http://localhost:3000/static/js/bundle.js:221587:37) at WebGLRenderer.render (http://localhost:3000/static/js/bundle.js:221482:9)"

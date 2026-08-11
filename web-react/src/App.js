@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { createPortal } from "react-dom";
+import { motion } from "framer-motion";
 import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
@@ -65,20 +67,38 @@ const lightCss = `
     --mono: 'IBM Plex Mono', monospace; --sans: 'Inter', sans-serif; --display: 'Space Grotesk', sans-serif;
     --scroll-btn-bg: rgba(14,165,214,0.12); --scroll-btn-border: rgba(14,165,214,0.4); --scroll-btn-color: #0EA5D6;
     --char-ok: #64748B; --char-warn: #D97706; --char-over: #DC2626;
+    --radius: 18px; --radius-sm: 12px;
   }
 `;
 
 const sharedCss = `
   html, body, #root { height: 100%; }
-  body { font-family: var(--sans); background: var(--bg); color: var(--text); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  body { font-family: var(--sans); background: var(--bg); color: var(--text); overflow: hidden; -webkit-font-smoothing: antialiased; position: relative; }
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(650px circle at 8% 8%, var(--accent-glow), transparent 60%),
+      radial-gradient(550px circle at 92% 12%, var(--purple-dim), transparent 60%),
+      radial-gradient(650px circle at 82% 92%, var(--red-dim), transparent 60%),
+      radial-gradient(550px circle at 8% 92%, var(--green-dim), transparent 60%);
+    filter: blur(20px);
+  }
   ::-webkit-scrollbar { width: 3px; height: 3px; }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
-  .app { position: relative; z-index: 1; display: grid; grid-template-rows: 66px 1fr; grid-template-columns: var(--sidebar-width, 320px) 1fr; height: 100vh; width: 100vw; }
+  .app { position: relative; z-index: 1; display: grid; grid-template-rows: 64px minmax(0, 1fr); grid-template-columns: var(--sidebar-width, 320px) 1fr; height: 100vh; width: 100vw; padding: 10px; gap: 10px; box-sizing: border-box; }
 
-  /* ===== TOP NAV ===== */
-  .topnav { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--border); position: relative; z-index: 10; gap: 10px; overflow-x: auto; }
-  .topnav::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0.35; }
+  /* ===== TOP NAV — floating macOS titlebar ===== */
+  .topnav {
+    grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.018));
+    backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--border2); border-radius: var(--radius);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 10px 26px -16px rgba(0,0,0,0.5);
+    position: relative; z-index: 10; gap: 10px; overflow-x: auto;
+  }
+  .traffic-lights { display: flex; gap: 7px; flex-shrink: 0; margin-right: 6px; }
+  .traffic-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; opacity: 0.9; }
   .nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .brand-icon { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--purple)); display: flex; align-items: center; justify-content: center; font-size: 15px; box-shadow: 0 0 22px var(--accent-glow); animation: pulse-icon 3s ease-in-out infinite; flex-shrink: 0; }
   @keyframes pulse-icon { 0%,100%{box-shadow:0 0 18px var(--accent-glow)} 50%{box-shadow:0 0 30px var(--accent-glow)} }
@@ -104,8 +124,21 @@ const sharedCss = `
   .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: white; transition: transform 0.2s; }
   .toggle-thumb.on { transform: translateX(13px); }
 
+  /* ===== MAC-STYLE SEGMENTED PAGE TABS ===== */
+  .mac-tabs { display: inline-flex; gap: 2px; background: rgba(255,255,255,0.04); border: 1px solid var(--border2); border-radius: 14px; padding: 3px; }
+  .mac-tab { position: relative; padding: 7px 16px; background: transparent; border: none; border-radius: var(--radius-sm); font-family: var(--mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); cursor: pointer; }
+  .mac-tab.active { color: var(--bg); font-weight: 700; }
+  .mac-tab-pill { position: absolute; inset: 0; background: var(--accent); border-radius: var(--radius-sm); z-index: 0; }
+  .mac-hermes-btn { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; padding: 8px 15px; border-radius: 20px; cursor: pointer; background: linear-gradient(135deg, rgba(139,124,255,0.2), rgba(41,211,255,0.1)); color: var(--purple); border: 1px solid var(--purple); text-transform: uppercase; font-weight: 700; }
+
   /* ===== LEFT SIDEBAR ===== */
-  .left-panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+  .left-panel {
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
+    backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid var(--border2); border-radius: var(--radius);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 28px -18px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; min-height: 0;
+  }
   .section-label { font-family: var(--mono); font-size: 9px; font-weight: 600; color: var(--text-dim); letter-spacing: 2.5px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; padding: 20px 20px 0; }
   .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
   .model-select-wrap { padding: 12px 20px 0; }
@@ -118,16 +151,8 @@ const sharedCss = `
   .panel-divider { height: 1px; background: var(--border); margin: 18px 0; }
 
   .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 20px; }
-  .stat { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 14px; position: relative; overflow: hidden; transition: transform 0.2s, border-color 0.2s; }
-  .stat:hover { border-color: var(--border2); transform: translateY(-2px); }
-  .stat::before, .stat::after { content: ''; position: absolute; width: 7px; height: 7px; border-color: var(--accent); opacity: 0.55; pointer-events: none; }
-  .stat::before { top: -1px; left: -1px; border-top: 1.5px solid; border-left: 1.5px solid; border-radius: 4px 0 0 0; }
-  .stat::after  { bottom: -1px; right: -1px; border-bottom: 1.5px solid; border-right: 1.5px solid; border-radius: 0 0 4px 0; }
-  .stat-glow { position: absolute; top: 0; left: 0; right: 0; height: 1px; }
-  .stat-glow.c { background: linear-gradient(90deg, transparent, var(--accent), transparent); }
-  .stat-glow.r { background: linear-gradient(90deg, transparent, var(--red), transparent); }
-  .stat-glow.o { background: linear-gradient(90deg, transparent, var(--orange), transparent); }
-  .stat-glow.g { background: linear-gradient(90deg, transparent, var(--green), transparent); }
+  .stat { background: rgba(255,255,255,0.035); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 14px; position: relative; overflow: hidden; transition: transform 0.2s, border-color 0.2s; }
+  .stat:hover { border-color: var(--accent); transform: translateY(-2px); }
   .stat-label { font-family: var(--mono); font-size: 8px; color: var(--text-dim); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 7px; }
   .stat-value { font-family: var(--display); font-size: 24px; font-weight: 700; line-height: 1; }
   .stat-value.c { color: var(--accent); }
@@ -137,14 +162,14 @@ const sharedCss = `
 
   .feed-wrap { display: flex; flex-direction: column; }
   .feed { flex: 1; overflow-y: auto; padding: 0 20px 20px; display: flex; flex-direction: column; gap: 5px; }
-  .feed-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; border-radius: 8px; border: 1px solid transparent; background: var(--bg3); cursor: default; transition: all 0.15s; position: relative; overflow: hidden; flex-shrink: 0; }
+  .feed-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; border-radius: var(--radius-sm); border: 1px solid transparent; background: rgba(255,255,255,0.03); cursor: default; transition: all 0.15s; position: relative; overflow: hidden; flex-shrink: 0; }
   .feed-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2.5px; }
   .feed-item.alert::before { background: var(--red); }
   .feed-item.dns::before   { background: var(--accent); }
   .feed-item.http::before  { background: var(--green); }
   .feed-item.tls::before   { background: var(--purple); }
   .feed-item.flow::before  { background: var(--text-dim); }
-  .feed-item:hover { border-color: var(--border2); background: var(--bg2); transform: translateX(2px); }
+  .feed-item:hover { border-color: var(--border2); background: rgba(255,255,255,0.06); transform: translateX(2px); }
   .feed-type { font-family: var(--mono); font-size: 8px; font-weight: 700; min-width: 30px; text-transform: uppercase; }
   .feed-type.alert { color: var(--red); }
   .feed-type.dns   { color: var(--accent); }
@@ -156,11 +181,14 @@ const sharedCss = `
   .feed-time { font-family: var(--mono); font-size: 7px; color: var(--text-dim); flex-shrink: 0; }
 
   /* ===== CHAT ===== */
-  .chat-col { display: flex; flex-direction: column; overflow: hidden; position: relative;
-    background-image: linear-gradient(180deg, rgba(10,10,12,0.93) 0%, rgba(10,10,12,0.88) 60%, rgba(10,10,12,0.96) 100%),
-      url('https://images.unsplash.com/photo-1770249196589-36453bf42a4b?fm=jpg&q=80&w=2000&auto=format&fit=crop');
-    background-size: cover; background-position: center 25%; background-attachment: fixed; }
-  .chat-header { display: flex; align-items: center; gap: 14px; padding: 0 28px; height: 68px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .chat-col {
+    display: flex; flex-direction: column; overflow: hidden; position: relative; min-height: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
+    backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid var(--border2); border-radius: var(--radius);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 28px -18px rgba(0,0,0,0.5);
+  }
+  .chat-header { display: flex; align-items: center; gap: 14px; padding: 0 28px; height: 68px; flex-shrink: 0; background: transparent; border-bottom: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0; }
   .agent-avatar { width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--purple)); display: flex; align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 0 18px var(--accent-glow); }
   .agent-name { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--text); }
   .agent-sub { font-family: var(--mono); font-size: 9px; color: var(--text-mid); }
@@ -169,7 +197,7 @@ const sharedCss = `
   .clear-btn { background: transparent; border: 1px solid var(--border2); color: var(--text-dim); padding: 6px 14px; border-radius: 20px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; cursor: pointer; transition: all 0.15s; text-transform: uppercase; }
   .clear-btn:hover { border-color: var(--red); color: var(--red); }
 
-  .messages-wrap { flex: 1; position: relative; overflow: hidden; }
+  .messages-wrap { flex: 1; position: relative; overflow: hidden; min-height: 0; }
   .messages { height: 100%; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 20px; }
   .msg { display: flex; }
   .msg.user { justify-content: flex-end; }
@@ -196,7 +224,7 @@ const sharedCss = `
   .scroll-btn.visible { opacity: 1; pointer-events: all; }
   .unread-badge { position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%; background: var(--red); color: white; font-family: var(--mono); font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 
-  .input-area { padding: 16px 28px 22px; background: var(--panel); border-top: 1px solid var(--border); }
+  .input-area { padding: 16px 28px 22px; background: transparent; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); }
   .quick-btns { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
   .qbtn { font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase; padding: 7px 14px; border-radius: 20px; border: 1px solid var(--border2); background: var(--bg3); color: var(--text-mid); cursor: pointer; transition: all 0.15s; }
   .qbtn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); transform: translateY(-1px); }
@@ -216,7 +244,7 @@ const sharedCss = `
   .toast { position: fixed; bottom: 90px; right: 24px; background: var(--panel); border: 1px solid var(--accent); color: var(--accent); font-family: var(--mono); font-size: 10px; padding: 10px 18px; border-radius: 10px; letter-spacing: 0.5px; z-index: 9999; box-shadow: 0 4px 24px -6px var(--accent-glow); animation: fadeIn 0.2s ease; }
   @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
-  .welcome-card { background: var(--panel); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: 14px; padding: 22px; }
+  .welcome-card { background: rgba(255,255,255,0.04); backdrop-filter: blur(10px); border: 1px solid var(--border2); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 22px; }
   .welcome-title { font-family: var(--display); font-size: 19px; font-weight: 600; letter-spacing: 0; margin-bottom: 7px; color: var(--text); }
   .welcome-title span { color: var(--accent); }
   .welcome-body { font-family: var(--mono); font-size: 11px; color: var(--text-mid); line-height: 1.8; }
@@ -224,17 +252,19 @@ const sharedCss = `
   .wtag { font-family: var(--mono); font-size: 8px; letter-spacing: 0.5px; padding: 4px 11px; border-radius: 20px; border: 1px solid var(--border2); color: var(--text-dim); }
 
   /* ===== SUB-PAGES (Analytics, Investigation) ===== */
-  .page { flex: 1; overflow-y: auto; padding: 28px; background: var(--bg); }
+  .page { flex: 1; overflow-y: auto; padding: 28px; background: transparent; }
   .page-title { font-family: var(--display); font-size: 21px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
   .page-sub { font-family: var(--mono); font-size: 10px; color: var(--text-mid); letter-spacing: 2px; margin-bottom: 26px; }
   .page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-  .page-card { background: var(--panel); border: 1px solid var(--border2); border-radius: 14px; padding: 22px; position: relative; }
-  .page-card::before, .page-card::after { content: ''; position: absolute; width: 9px; height: 9px; border-color: var(--accent); opacity: 0.45; pointer-events: none; }
-  .page-card::before { top: -1px; left: -1px; border-top: 1.5px solid; border-left: 1.5px solid; border-radius: 6px 0 0 0; }
-  .page-card::after  { bottom: -1px; right: -1px; border-bottom: 1.5px solid; border-right: 1.5px solid; border-radius: 0 0 6px 0; }
+  .page-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
+    backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid var(--border2); border-radius: var(--radius); padding: 22px; position: relative;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 28px -18px rgba(0,0,0,0.5);
+  }
   .page-card-title { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--accent); letter-spacing: 2.5px; text-transform: uppercase; margin-bottom: 18px; }
 
-  .inv-search { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 10px; padding: 12px 18px; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; margin-bottom: 18px; }
+  .inv-search { width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 12px 18px; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; margin-bottom: 18px; }
   .inv-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
   .inv-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
   .inv-table th { text-align: left; padding: 9px 14px; color: var(--text-dim); font-size: 9px; letter-spacing: 1.5px; border-bottom: 1px solid var(--border2); }
@@ -248,9 +278,30 @@ const sharedCss = `
   .inv-type-flow  { background: var(--bg3); color: var(--text-dim); }
 
   /* ===== MODALS ===== */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(4,6,10,0.75); backdrop-filter: blur(3px); z-index: 100; display: flex; align-items: center; justify-content: center; }
-  .modal { background: var(--panel); border: 1px solid var(--border2); border-radius: 16px; padding: 26px; width: 600px; max-width: 90vw; max-height: 82vh; overflow-y: auto; position: relative; box-shadow: 0 30px 70px -20px rgba(0,0,0,0.6); }
-  .modal-close { position: absolute; top: 18px; right: 18px; background: var(--bg3); border: 1px solid var(--border2); border-radius: 8px; width: 28px; height: 28px; color: var(--text-dim); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(4,6,10,0.6); backdrop-filter: blur(6px); z-index: 100; display: flex; align-items: center; justify-content: center; }
+  .modal {
+    background: linear-gradient(180deg, rgba(30,30,34,0.85), rgba(20,20,24,0.85));
+    backdrop-filter: blur(28px) saturate(160%); -webkit-backdrop-filter: blur(28px) saturate(160%);
+    border: 1px solid var(--border2); border-radius: var(--radius); padding: 26px; width: 600px; max-width: 90vw; max-height: 82vh;
+    overflow-y: auto; position: relative; box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 30px 70px -20px rgba(0,0,0,0.6);
+  }
+  .modal-close { position: absolute; top: 18px; right: 18px; background: rgba(255,255,255,0.06); border: 1px solid var(--border2); border-radius: 8px; width: 28px; height: 28px; color: var(--text-dim); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; }
+
+  /* ===== FLOATING PANELS — non-blocking, draggable, no backdrop.
+     Used for things you want to consult *alongside* the rest of the app
+     (machine inspector, Hermes agent) rather than a decision you must
+     make before continuing (those stay as real .modal dialogs). ===== */
+  .float-panel {
+    position: fixed; z-index: 150; width: 420px; max-width: calc(100vw - 40px); max-height: 78vh; overflow-y: auto;
+    background: linear-gradient(180deg, rgba(30,30,34,0.88), rgba(20,20,24,0.9));
+    backdrop-filter: blur(28px) saturate(160%); -webkit-backdrop-filter: blur(28px) saturate(160%);
+    border: 1px solid var(--border2); border-radius: var(--radius);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 24px 60px -20px rgba(0,0,0,0.6);
+  }
+  .float-panel-handle { display: flex; align-items: center; justify-content: center; padding: 8px 0 2px; user-select: none; pointer-events: none; }
+  .float-panel-grip { width: 34px; height: 4px; border-radius: 3px; background: var(--border2); cursor: grab; pointer-events: auto; }
+  .float-panel-grip:active { cursor: grabbing; }
+  .float-panel-body { padding: 8px 22px 22px; position: relative; }
   .modal-close:hover { color: var(--red); border-color: var(--red); }
   .modal-title { font-family: var(--display); font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
   .modal-sub { font-family: var(--mono); font-size: 9px; color: var(--text-mid); margin-bottom: 22px; letter-spacing: 0.5px; }
@@ -264,43 +315,6 @@ const sharedCss = `
   .top-ip-bar { flex: 1; height: 6px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
   .top-ip-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--purple)); border-radius: 4px; }
   .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
-
-  /* ===== SOC 2 COMPLIANCE DASHBOARD (bento grid) ===== */
-  .bento-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden; }
-  .bento-card-title { font-family: var(--sans); font-size: 16px; font-weight: 700; color: var(--text); }
-  .bento-card-sub { font-family: var(--sans); font-size: 12px; color: var(--text-mid); margin-top: 2px; }
-  .bento-eyebrow { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
-  .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 30px; background: linear-gradient(135deg, var(--accent), var(--magenta)); color: #060608; font-family: var(--sans); font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 6px 20px -6px var(--accent-glow); }
-  .bento-pill:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -6px var(--accent-glow); }
-  .bento-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-  .bento-dot.critical { background: var(--red); box-shadow: 0 0 6px var(--red); }
-  .bento-dot.elevated { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
-  .bento-dot.informational { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .bento-widget { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; text-align: center; }
-  .bento-widget:hover { border-color: var(--border2); transform: translateY(-2px); }
-  .bento-widget.active { border-color: var(--accent); background: var(--accent-dim); }
-  .bento-widget-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: var(--accent); }
-  .bento-widget-label { font-family: var(--sans); font-size: 12px; color: var(--text-mid); }
-  .bento-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13px; }
-  .bento-table th { text-align: left; padding: 8px 8px; color: var(--text-dim); font-family: var(--mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bento-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-mid); font-size: 12.5px; }
-  .bento-table tr:last-child td { border-bottom: none; }
-  .bento-table tr:hover td { color: var(--text); }
-  .bento-see-all { font-family: var(--sans); font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: none; cursor: pointer; }
-  .bento-heat-row { display: grid; grid-template-columns: 28px repeat(24, 1fr); gap: 2px; align-items: center; }
-  .bento-heat-cell { aspect-ratio: 1; border-radius: 3px; }
-  .bento-heat-label { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
-  .balance-row { display: grid; gap: 0; }
-  .balance-card { padding: 0 18px; border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
-  .balance-card:first-child { padding-left: 0; border-left: none; }
-  .balance-label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); }
-  .balance-value { font-family: var(--display); font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; }
-  .balance-delta { font-family: var(--sans); font-size: 11px; font-weight: 600; }
-  .balance-delta.up { color: var(--green); }
-  .balance-delta.down { color: var(--red); }
-  .lollipop-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
-  .lollipop-stem { width: 3px; border-radius: 2px; background: var(--border2); position: relative; }
-  .lollipop-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: -5px; }
 `;
 function SimpleExplain({ text }) {
   const [open, setOpen]       = useState(false);
@@ -429,7 +443,7 @@ function SiraMessage({ text, modelChip }) {
   while (actions.length < 3) actions.push(null);
   const hasStructure = Object.keys(sections).length > 0;
   return (
-    <div style={{background:"var(--panel)",borderRadius:14,overflow:"hidden",border:"1px solid var(--border2)",boxShadow:"0 4px 24px -8px rgba(0,0,0,0.3)",animation:"cardIn 0.3s ease both"}}>
+    <div style={{background:"linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",backdropFilter:"blur(16px) saturate(150%)",WebkitBackdropFilter:"blur(16px) saturate(150%)",borderRadius:16,overflow:"hidden",border:"1px solid var(--border2)",boxShadow:"0 1px 0 rgba(255,255,255,0.06) inset, 0 4px 24px -8px rgba(0,0,0,0.3)",animation:"cardIn 0.3s ease both"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
         <div style={{width:6,height:6,borderRadius:"50%",background:hasStructure?riskColor:"var(--accent)",flexShrink:0}}/>
         <span style={{fontSize:10,fontFamily:"var(--mono)",letterSpacing:2,color:hasStructure?riskColor:"var(--accent)"}}>{hasStructure?`${riskLabel} RISK`:"SIRA ANALYSIS"}</span>
@@ -770,7 +784,7 @@ function ThreatLevelCard({ alertCount }) {
   }, [color, alertCount]);
 
   return (
-    <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)" }}>
+    <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border2)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 16 }}>🛡️</span>
@@ -779,108 +793,6 @@ function ThreatLevelCard({ alertCount }) {
         <span style={{ fontFamily: "var(--display)", fontSize: 15, fontWeight: 700, color }}>{level}</span>
       </div>
       <canvas ref={canvasRef} width={280} height={36} style={{ width: "100%", height: 36, display: "block" }} />
-    </div>
-  );
-}
-
-function NetworkMap({ alerts, machines }) {
-  const canvasRef = useRef(null);
-  const rafRef = useRef(null);
-
-  const ipCounts = {};
-  alerts.filter(a => a.event_type === "alert" && a.src_ip).forEach(a => {
-    ipCounts[a.src_ip] = (ipCounts[a.src_ip] || 0) + 1;
-  });
-  const topIPs = Object.entries(ipCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([ip]) => ip);
-  const machineIds = machines.slice(0, 4).map(m => m.id);
-  const nodes = [
-    ...topIPs.map(ip => ({ label: ip, type: "threat" })),
-    ...machineIds.map(id => ({ label: id, type: "machine" })),
-  ];
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const W = 240, H = 160, cx = W / 2, cy = H / 2;
-    let angle = 0;
-
-    const positions = nodes.map((n, i) => {
-      const a = (i / Math.max(nodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
-      const r = 62;
-      return { ...n, x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
-    });
-
-    const draw = () => {
-      angle += 0.012;
-      ctx.clearRect(0, 0, W, H);
-
-      ctx.strokeStyle = "rgba(41,211,255,0.06)";
-      ctx.lineWidth = 1;
-      for (let gx = 0; gx < W; gx += 20) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
-      for (let gy = 0; gy < H; gy += 20) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
-
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(angle);
-      const grad = ctx.createLinearGradient(0, 0, 70, 0);
-      grad.addColorStop(0, "rgba(41,211,255,0.35)");
-      grad.addColorStop(1, "rgba(41,211,255,0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, 70, -0.35, 0.35);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      ctx.strokeStyle = "rgba(41,211,255,0.15)";
-      [30, 50, 70].forEach(r => { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); });
-
-      positions.forEach(n => {
-        const color = n.type === "threat" ? "#E15554" : "#22D97A";
-        ctx.strokeStyle = n.type === "threat" ? "rgba(225,85,84,0.35)" : "rgba(34,217,122,0.35)";
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(n.x, n.y);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, n.type === "threat" ? 3.5 : 3, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-      });
-
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.fillStyle = "#29D3FF";
-      ctx.shadowColor = "#29D3FF";
-      ctx.shadowBlur = 8;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      rafRef.current = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [JSON.stringify(nodes)]); // eslint-disable-line
-
-  return (
-    <div style={{ marginTop: 20 }}>
-      <div className="section-label" style={{ padding: 0, marginBottom: 10 }}>Network Map</div>
-      <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", background: "var(--bg3)" }}>
-        <canvas ref={canvasRef} width={240} height={160} style={{ width: "100%", height: 160, display: "block" }} />
-      </div>
-      <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#E15554" }} />
-          <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)" }}>Top attackers</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22D97A" }} />
-          <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)" }}>Your agents</span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -930,7 +842,7 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
   }, [total, JSON.stringify(sevCounts)]); // eslint-disable-line
 
   return (
-    <div style={{ width: "100%", height: "100%", background: "var(--panel)", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
+    <div style={{ width: "100%", height: "100%", background: "transparent", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
       <SiraAvatar ref={siraAvatarRef} onOpenFullView={onOpenFullView} />
 
       <div className="section-label" style={{ padding: 0, marginBottom: 16 }}>Threat Summary</div>
@@ -969,8 +881,6 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
           </div>
         ))}
       </div>
-
-      <NetworkMap alerts={alerts} machines={machines} />
     </div>
   );
 }
@@ -993,6 +903,7 @@ export default function App() {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const isRightResizing = useRef(false);
+  const [machinePanelPos, setMachinePanelPos] = useState(null); // null = default corner position; {x,y} once dragged
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
@@ -1049,6 +960,25 @@ const [sessionId, setSessionId] = useState(() => {
       setRightPanelWidth(Math.min(420, Math.max(200, startWidth + delta)));
     };
     const onUp = () => { isRightResizing.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
+
+  // Drags a .float-panel by its handle. Reads the panel's current on-screen
+  // position at drag start (whether it's still sitting at its default
+  // corner or was already moved) so the first frame never jumps.
+  const startPanelDrag = (setPos) => (e) => {
+    const panelEl = e.currentTarget.closest(".float-panel");
+    const rect = panelEl.getBoundingClientRect();
+    const startX = e.clientX, startY = e.clientY;
+    const startLeft = rect.left, startTop = rect.top;
+    let dragging = true;
+    const onMove = (e) => {
+      if (!dragging) return;
+      const nextLeft = Math.min(window.innerWidth - 60, Math.max(0, startLeft + (e.clientX - startX)));
+      const nextTop  = Math.min(window.innerHeight - 40, Math.max(0, startTop + (e.clientY - startY)));
+      setPos({ x: nextLeft, y: nextTop });
+    };
+    const onUp = () => { dragging = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
@@ -1247,17 +1177,29 @@ setLoading(false);
         </div>
       )}
 
-      <div className="app" style={{gridTemplateColumns:`${leftPanelOpen ? sidebarWidth : 0}px 1fr`, transition: isResizing.current ? "none" : "grid-template-columns 0.2s"}}>
+      <div className="app" style={{gridTemplateColumns:`${leftPanelOpen ? sidebarWidth : 28}px 1fr`, transition: isResizing.current ? "none" : "grid-template-columns 0.2s"}}>
         <nav className="topnav">
-          <div className="nav-brand">
-            <div className="brand-icon">⬡</div>
-            <div><div className="brand-name">SOC Copilot</div><div className="brand-sub">SIRA v4 — Threat Intelligence</div></div>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div className="traffic-lights">
+              <span className="traffic-dot" style={{ background: "#FF5F57" }} />
+              <span className="traffic-dot" style={{ background: "#FEBC2E" }} />
+              <span className="traffic-dot" style={{ background: "#28C840" }} />
+            </div>
+            <div className="nav-brand">
+              <div className="brand-icon">⬡</div>
+              <div><div className="brand-name">SOC Copilot</div><div className="brand-sub">SIRA v4 — Threat Intelligence</div></div>
+            </div>
           </div>
-          <div style={{display:"flex",gap:4}}>
-            {["dashboard","analytics","investigation","history"].map(p=>(
-              <button key={p} onClick={()=>setPage(p)} style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,textTransform:"uppercase",padding:"6px 15px",borderRadius:20,cursor:"pointer",transition:"all 0.15s",background:page===p?"var(--accent)":"transparent",color:page===p?"var(--bg)":"var(--text-dim)",border:page===p?"1px solid var(--accent)":"1px solid var(--border2)"}}>{p}</button>
-            ))}
-            <button onClick={()=>setHermesOpen(true)} style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,padding:"6px 15px",borderRadius:20,cursor:"pointer",background:"linear-gradient(135deg,rgba(139,124,255,0.2),rgba(41,211,255,0.1))",color:"var(--purple)",border:"1px solid var(--purple)",textTransform:"uppercase",fontWeight:700}}>⬡ HERMES AGENT</button>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div className="mac-tabs">
+              {["dashboard","analytics","investigation","history"].map(p=>(
+                <button key={p} className={`mac-tab${page===p?" active":""}`} onClick={()=>setPage(p)}>
+                  {page===p && <motion.div layoutId="mac-tab-pill" className="mac-tab-pill" transition={{type:"spring",stiffness:500,damping:36}} />}
+                  <span style={{position:"relative",zIndex:1}}>{p}</span>
+                </button>
+              ))}
+            </div>
+            <button className="mac-hermes-btn" onClick={()=>setHermesOpen(true)}>⬡ HERMES AGENT</button>
           </div>
           <div className="nav-right">
             <div className="nav-status">
@@ -1276,118 +1218,120 @@ setLoading(false);
           </div>
         </nav>
 
-        <aside className="left-panel" style={{position:"relative", overflow: leftPanelOpen ? undefined : "hidden"}}>
-          {leftPanelOpen && (
-            <div onMouseDown={startResize} style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",zIndex:10,background:"transparent"}} onMouseEnter={e=>e.target.style.background="var(--accent)"} onMouseLeave={e=>e.target.style.background="transparent"}/>
-          )}
-          <div className="section-label">AI Engine</div>
-          <div className="model-select-wrap">
-            <select className="model-select" value={selectedModel} onChange={handleModelChange}>
-              {MODEL_OPTIONS.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-          <div className={`model-badge ${modelObj.cloud?"badge-cloud":"badge-local"}`}>⬡ {modelObj.tag}</div>
-          <div className="panel-divider"/>
-          <div className="section-label" style={{justifyContent:"space-between"}}>
-            Overview
-            <button onClick={()=>fetch(`${FLASK_URL}/stats`).then(r=>r.json()).then(setStats).catch(()=>{})} style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--accent)",background:"none",border:"none",cursor:"pointer",letterSpacing:1}}>↻ REFRESH</button>
-          </div>
-          <div className="stats-grid" style={{marginTop:10, marginBottom:14}}>
-            <div className="stat"><div className="stat-glow c"/><div className="stat-label">Total Events</div><div className="stat-value c">{stats?.total_events||alerts.length||"--"}</div></div>
-            <div className="stat"><div className="stat-glow r"/><div className="stat-label">Alerts</div><div className="stat-value r">{String(stats?.alert_count??alertCount).padStart(2,"0")}</div></div>
-            <div className="stat"><div className="stat-glow o"/><div className="stat-label">Unique IPs</div><div className="stat-value o">{stats?.unique_ips||uniqueIPs||"--"}</div></div>
-            <div className="stat"><div className="stat-glow g"/><div className="stat-label">Status</div><div className="stat-value g">ONLINE</div></div>
-          </div>
-          <ThreatLevelCard alertCount={stats?.alert_count ?? alertCount} />
-          <div className="panel-divider"/>
-          <div className="section-label">Connected Machines</div>
-          <div style={{padding:"8px 20px"}}>
-            {machines.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO AGENTS CONNECTED</div>}
-            {machines.map((m,i)=>(
-  <div key={i} onClick={()=>setSelectedMachine(m)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)",cursor:"pointer",transition:"all 0.15s"}}
-  onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
-  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:m.alert?"var(--red)":"var(--green)",boxShadow:m.alert?"0 0 6px var(--red)":"0 0 6px var(--green)",animation:"blink 2s infinite"}}/>
-                <div style={{flex:1}}>
-                  <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700}}>{m.id}</div>
-                  <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)"}}>{m.local_ip} — {m.platform}</div>
-                </div>
-                {m.alert && <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,background:"var(--red-dim)",color:"var(--red)",border:"1px solid rgba(225,85,84,0.3)"}}>⚠ {m.suspicious_count}</span>}
-              </div>
-            ))}
-
-            <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
-              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:6}}>SENTINEL SERVER IP</div>
-              <div style={{display:"flex",gap:6}}>
-                <input
-                  value={sentinelIP}
-                  onChange={e=>setSentinelIP(e.target.value)}
-                  onKeyDown={e=>e.key==="Enter"&&saveSentinelIP()}
-                  placeholder="e.g. 10.33.4.176"
-                  style={{flex:1,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"7px 10px",color:"var(--text)",fontFamily:"var(--mono)",fontSize:10,outline:"none"}}
-                />
-                <button
-                  onClick={saveSentinelIP}
-                  disabled={sentinelSaving||!sentinelIP.trim()}
-                  style={{padding:"7px 14px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:8,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:sentinelIP.trim()?"pointer":"not-allowed",opacity:sentinelIP.trim()?1:0.4,textTransform:"uppercase"}}
-                >
-                  {sentinelSaving?"...":"SAVE"}
-                </button>
-              </div>
+        <div style={{ position: "relative", height: "100%", minHeight: 0 }}>
+          <aside className="left-panel" style={{position:"relative", height:"100%", width: leftPanelOpen ? "100%" : 0, overflow: leftPanelOpen ? undefined : "hidden", transition: isResizing.current ? "none" : "width 0.2s"}}>
+            {leftPanelOpen && (
+              <div onMouseDown={startResize} style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",zIndex:10,background:"transparent"}} onMouseEnter={e=>e.target.style.background="var(--accent)"} onMouseLeave={e=>e.target.style.background="transparent"}/>
+            )}
+            <div className="section-label">AI Engine</div>
+            <div className="model-select-wrap">
+              <select className="model-select" value={selectedModel} onChange={handleModelChange}>
+                {MODEL_OPTIONS.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
             </div>
-          </div>
-          <div className="panel-divider"/>
-          <div className="feed-wrap">
-            <div style={{padding:"0 20px 10px"}}>
-              <button onClick={()=>setShowUpload(true)} style={{width:"100%",padding:"9px",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,textTransform:"uppercase",cursor:"pointer"}} onMouseEnter={e=>e.target.style.borderColor="var(--accent)"} onMouseLeave={e=>e.target.style.borderColor="var(--border2)"}>⬆ Upload Logs</button>
+            <div className={`model-badge ${modelObj.cloud?"badge-cloud":"badge-local"}`}>⬡ {modelObj.tag}</div>
+            <div className="panel-divider"/>
+            <div className="section-label" style={{justifyContent:"space-between"}}>
+              Overview
+              <button onClick={()=>fetch(`${FLASK_URL}/stats`).then(r=>r.json()).then(setStats).catch(()=>{})} style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--accent)",background:"none",border:"none",cursor:"pointer",letterSpacing:1}}>↻ REFRESH</button>
             </div>
-            <div className="section-label">Live Feed</div>
-            <div style={{display:"flex",gap:5,padding:"9px 20px 7px",flexWrap:"wrap"}}>
-              {["all","alert","dns","http","tls","flow"].map(f=>(
-                <button key={f} onClick={()=>setSeverityFilter(f)} style={{fontFamily:"var(--mono)",fontSize:8,letterSpacing:1,textTransform:"uppercase",padding:"4px 10px",borderRadius:20,cursor:"pointer",background:severityFilter===f?"var(--accent)":"var(--bg3)",color:severityFilter===f?"var(--bg)":"var(--text-dim)",border:severityFilter===f?"1px solid var(--accent)":"1px solid var(--border2)"}}>{f}</button>
-              ))}
+            <div className="stats-grid" style={{marginTop:10, marginBottom:14}}>
+              <div className="stat"><div className="stat-label">Total Events</div><div className="stat-value c">{stats?.total_events||alerts.length||"--"}</div></div>
+              <div className="stat"><div className="stat-label">Alerts</div><div className="stat-value r">{String(stats?.alert_count??alertCount).padStart(2,"0")}</div></div>
+              <div className="stat"><div className="stat-label">Unique IPs</div><div className="stat-value o">{stats?.unique_ips||uniqueIPs||"--"}</div></div>
+              <div className="stat"><div className="stat-label">Status</div><div className="stat-value g">ONLINE</div></div>
             </div>
-            <div className="feed">
-              {alerts.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",padding:"8px 0",letterSpacing:1}}>WAITING FOR FLASK...</div>}
-              {alerts.filter(a=>severityFilter==="all"||a.event_type===severityFilter).slice(0,8).map((a,i)=>(
-                <div key={i} className={`feed-item ${a.event_type}`}>
-                  <span className={`feed-type ${a.event_type}`}>{a.event_type?.substring(0,4).toUpperCase()}</span>
-                  <span className="feed-ips">
-                    <span className="feed-src">{a.src_ip}</span>
-                    {reputations[a.src_ip] && (
-                      <span style={{marginLeft:4,fontFamily:"var(--mono)",fontSize:7,padding:"2px 6px",borderRadius:20,fontWeight:700,background:reputations[a.src_ip].malicious?"var(--red-dim)":"var(--green-dim)",color:reputations[a.src_ip].malicious?"var(--red)":"var(--green)",border:reputations[a.src_ip].malicious?"1px solid rgba(225,85,84,0.3)":"1px solid rgba(34,217,122,0.3)"}}>
-                        {reputations[a.src_ip].malicious?`⚠ ${reputations[a.src_ip].score}%`:"✓ CLEAN"}
-                      </span>
-                    )}
-                    → {a.dest_ip}
-                  </span>
-                  <span className="feed-time">{a.timestamp?.substring(11,19)}</span>
+            <ThreatLevelCard alertCount={stats?.alert_count ?? alertCount} />
+            <div className="panel-divider"/>
+            <div className="section-label">Connected Machines</div>
+            <div style={{padding:"8px 20px"}}>
+              {machines.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO AGENTS CONNECTED</div>}
+              {machines.map((m,i)=>(
+    <div key={i} onClick={()=>setSelectedMachine(m)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)",cursor:"pointer",transition:"all 0.15s"}}
+    onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
+    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:m.alert?"var(--red)":"var(--green)",boxShadow:m.alert?"0 0 6px var(--red)":"0 0 6px var(--green)",animation:"blink 2s infinite"}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700}}>{m.id}</div>
+                    <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)"}}>{m.local_ip} — {m.platform}</div>
+                  </div>
+                  {m.alert && <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,background:"var(--red-dim)",color:"var(--red)",border:"1px solid rgba(225,85,84,0.3)"}}>⚠ {m.suspicious_count}</span>}
                 </div>
               ))}
+
+              <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:6}}>SENTINEL SERVER IP</div>
+                <div style={{display:"flex",gap:6}}>
+                  <input
+                    value={sentinelIP}
+                    onChange={e=>setSentinelIP(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&saveSentinelIP()}
+                    placeholder="e.g. 10.33.4.176"
+                    style={{flex:1,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"7px 10px",color:"var(--text)",fontFamily:"var(--mono)",fontSize:10,outline:"none"}}
+                  />
+                  <button
+                    onClick={saveSentinelIP}
+                    disabled={sentinelSaving||!sentinelIP.trim()}
+                    style={{padding:"7px 14px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:8,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:sentinelIP.trim()?"pointer":"not-allowed",opacity:sentinelIP.trim()?1:0.4,textTransform:"uppercase"}}
+                  >
+                    {sentinelSaving?"...":"SAVE"}
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </aside>
+            <div className="panel-divider"/>
+            <div className="feed-wrap">
+              <div style={{padding:"0 20px 10px"}}>
+                <button onClick={()=>setShowUpload(true)} style={{width:"100%",padding:"9px",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,textTransform:"uppercase",cursor:"pointer"}} onMouseEnter={e=>e.target.style.borderColor="var(--accent)"} onMouseLeave={e=>e.target.style.borderColor="var(--border2)"}>⬆ Upload Logs</button>
+              </div>
+              <div className="section-label">Live Feed</div>
+              <div style={{display:"flex",gap:5,padding:"9px 20px 7px",flexWrap:"wrap"}}>
+                {["all","alert","dns","http","tls","flow"].map(f=>(
+                  <button key={f} onClick={()=>setSeverityFilter(f)} style={{fontFamily:"var(--mono)",fontSize:8,letterSpacing:1,textTransform:"uppercase",padding:"4px 10px",borderRadius:20,cursor:"pointer",background:severityFilter===f?"var(--accent)":"var(--bg3)",color:severityFilter===f?"var(--bg)":"var(--text-dim)",border:severityFilter===f?"1px solid var(--accent)":"1px solid var(--border2)"}}>{f}</button>
+                ))}
+              </div>
+              <div className="feed">
+                {alerts.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",padding:"8px 0",letterSpacing:1}}>WAITING FOR FLASK...</div>}
+                {alerts.filter(a=>severityFilter==="all"||a.event_type===severityFilter).slice(0,8).map((a,i)=>(
+                  <div key={i} className={`feed-item ${a.event_type}`}>
+                    <span className={`feed-type ${a.event_type}`}>{a.event_type?.substring(0,4).toUpperCase()}</span>
+                    <span className="feed-ips">
+                      <span className="feed-src">{a.src_ip}</span>
+                      {reputations[a.src_ip] && (
+                        <span style={{marginLeft:4,fontFamily:"var(--mono)",fontSize:7,padding:"2px 6px",borderRadius:20,fontWeight:700,background:reputations[a.src_ip].malicious?"var(--red-dim)":"var(--green-dim)",color:reputations[a.src_ip].malicious?"var(--red)":"var(--green)",border:reputations[a.src_ip].malicious?"1px solid rgba(225,85,84,0.3)":"1px solid rgba(34,217,122,0.3)"}}>
+                          {reputations[a.src_ip].malicious?`⚠ ${reputations[a.src_ip].score}%`:"✓ CLEAN"}
+                        </span>
+                      )}
+                      → {a.dest_ip}
+                    </span>
+                    <span className="feed-time">{a.timestamp?.substring(11,19)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
 
-        <button onClick={()=>setLeftPanelOpen(o=>!o)} title={leftPanelOpen ? "Hide panel" : "Show panel"} style={{
-          position: "absolute", left: leftPanelOpen ? sidebarWidth - 12 : 0, top: "50%", transform: "translateY(-50%)",
-          width: 24, height: 40, borderRadius: "0 6px 6px 0", background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "none",
-          color: "var(--text-dim)", cursor: "pointer", fontSize: 11, zIndex: 20, transition: "left 0.2s",
-        }}>{leftPanelOpen ? "\u2039" : "\u203A"}</button>
+          <button onClick={()=>setLeftPanelOpen(o=>!o)} title={leftPanelOpen ? "Hide panel" : "Show panel"} style={{
+            position: "absolute", left: leftPanelOpen ? sidebarWidth - 12 : 2, top: "50%", transform: "translateY(-50%)",
+            width: 24, height: 40, borderRadius: "0 6px 6px 0", background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "none",
+            color: "var(--text-dim)", cursor: "pointer", fontSize: 11, zIndex: 20, transition: "left 0.2s",
+          }}>{leftPanelOpen ? "\u2039" : "\u203A"}</button>
+        </div>
 
-        <div style={{display:page==="analytics"?"flex":"none",flex:1,overflow:"hidden"}}>
+        <div style={{display:page==="analytics"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <Soc2Dashboard
             onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}
             onSeeFindings={()=>setPage("investigation")}
           />
         </div>
-        <div style={{display:page==="investigation"?"flex":"none",flex:1,overflow:"hidden"}}>
+        <div style={{display:page==="investigation"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}/>
         </div>
-        <div style={{display:page==="history"?"flex":"none",flex:1,overflow:"hidden"}}>
+        <div style={{display:page==="history"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <History/>
         </div>
-        <div style={{display:page==="dashboard"?"flex":"none",flexDirection:"column",flex:1,overflow:"hidden"}}>
-        <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative"}}>
+        <div style={{display:page==="dashboard"?"flex":"none",flexDirection:"column",flex:1,overflow:"hidden",minHeight:0}}>
+        <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative",gap:10,minHeight:0}}>
         <div className="chat-col" style={{flex:1}}>
           <div className="chat-header">
             <div className="agent-avatar">⬡</div>
@@ -1460,12 +1404,21 @@ setLoading(false);
             <div className="input-meta"><span className={`char-counter ${charClass}`}>{charCount>0?`${charCount} / ${MAX_CHARS}${charCount>MAX_CHARS?" — TOO LONG":""}`:`MAX ${MAX_CHARS} CHARS`}</span></div>
           </div>
         </div>
-        <div style={{ position: "relative", width: rightPanelOpen ? rightPanelWidth : 0, flexShrink: 0, transition: isRightResizing.current ? "none" : "width 0.2s", overflow: "hidden", borderLeft: rightPanelOpen ? "1px solid var(--border)" : "none" }}>
+        <div style={{ position: "relative", width: rightPanelOpen ? rightPanelWidth : 0, flexShrink: 0, transition: isRightResizing.current ? "none" : "width 0.2s", overflow: "hidden" }}>
           {rightPanelOpen && (
-            <div onMouseDown={startRightResize} style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, cursor: "col-resize", zIndex: 10 }}
+            <div onMouseDown={startRightResize} style={{ position: "absolute", left: -6, top: 0, bottom: 0, width: 4, cursor: "col-resize", zIndex: 10 }}
               onMouseEnter={e=>e.target.style.background="var(--accent)"} onMouseLeave={e=>e.target.style.background="transparent"} />
           )}
-          <ThreatSummaryPanel alerts={alerts} machines={machines} siraAvatarRef={siraAvatarRef} onOpenFullView={()=>setDidOpen(true)} />
+          <div style={{
+            width: "100%", height: "100%",
+            background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015))",
+            backdropFilter: "blur(20px) saturate(150%)", WebkitBackdropFilter: "blur(20px) saturate(150%)",
+            border: "1px solid var(--border2)", borderRadius: "var(--radius)",
+            boxShadow: "0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 28px -18px rgba(0,0,0,0.5)",
+            overflow: "hidden", boxSizing: "border-box",
+          }}>
+            <ThreatSummaryPanel alerts={alerts} machines={machines} siraAvatarRef={siraAvatarRef} onOpenFullView={()=>setDidOpen(true)} />
+          </div>
         </div>
         <button onClick={()=>setRightPanelOpen(o=>!o)} title={rightPanelOpen ? "Hide panel" : "Show panel"} style={{
           position: "absolute", right: rightPanelOpen ? rightPanelWidth - 12 : -12, top: "50%", transform: "translateY(-50%)",
@@ -1477,12 +1430,20 @@ setLoading(false);
       </div>
 
 
-      {selectedMachine && (
-  <div className="modal-overlay" onClick={()=>setSelectedMachine(null)}>
-    <div className="modal" onClick={e=>e.stopPropagation()} style={{width:580}}>
-      <button className="modal-close" onClick={()=>setSelectedMachine(null)}>✕</button>
+      {selectedMachine && createPortal(
+  <div
+    className="float-panel"
+    style={machinePanelPos
+      ? { left: machinePanelPos.x, top: machinePanelPos.y, right: "auto", bottom: "auto" }
+      : { right: 20, bottom: 20 }}
+  >
+    <div className="float-panel-handle">
+      <div className="float-panel-grip" onMouseDown={startPanelDrag(setMachinePanelPos)} />
+    </div>
+    <button className="modal-close" onClick={()=>setSelectedMachine(null)} style={{top:14,right:14,zIndex:5}}>✕</button>
+    <div className="float-panel-body">
 
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,padding:16,background:"var(--bg3)",borderRadius:12,border:`1px solid ${selectedMachine.alert?"var(--red)":"var(--green)"}`,borderLeft:`3px solid ${selectedMachine.alert?"var(--red)":"var(--green)"}`}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,padding:16,background:"rgba(255,255,255,0.04)",borderRadius:"var(--radius-sm)",border:`1px solid ${selectedMachine.alert?"var(--red)":"var(--green)"}`,borderLeft:`3px solid ${selectedMachine.alert?"var(--red)":"var(--green)"}`}}>
         <div style={{width:10,height:10,borderRadius:"50%",background:selectedMachine.alert?"var(--red)":"var(--green)",boxShadow:`0 0 8px ${selectedMachine.alert?"var(--red)":"var(--green)"}`,animation:"blink 2s infinite"}}/>
         <div style={{flex:1}}>
           <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:700,color:"var(--text)"}}>{selectedMachine.id}</div>
@@ -1527,7 +1488,7 @@ setLoading(false);
         <div style={{marginBottom:16}}>
           <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:2,marginBottom:8}}>SUSPICIOUS CONNECTIONS</div>
           {selectedMachine.suspicious.map((c,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--bg3)",border:"1px solid rgba(225,85,84,0.18)",borderLeft:"2px solid var(--red)",borderRadius:8,marginBottom:5}}>
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(225,85,84,0.18)",borderLeft:"2px solid var(--red)",borderRadius:8,marginBottom:5}}>
               <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--red)"}}>{c.remote}</span>
               <button onClick={async()=>{
                 const ip = c.remote?.split(":")[0];
@@ -1545,7 +1506,7 @@ setLoading(false);
         <div>
           <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:2,marginBottom:8}}>TOP PROCESSES</div>
           {selectedMachine.processes.map((p,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 12px",background:"var(--bg3)",borderRadius:8,marginBottom:4,border:"1px solid var(--border)"}}>
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 12px",background:"rgba(255,255,255,0.03)",borderRadius:8,marginBottom:4,border:"1px solid var(--border)"}}>
               <span style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text-mid)"}}>{p.name}</span>
               <span style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)"}}>{p.cpu_percent}% CPU</span>
             </div>
@@ -1554,7 +1515,8 @@ setLoading(false);
       )}
 
     </div>
-  </div>
+  </div>,
+  document.body
 )}
 
       <SiraVoice isOpen={didOpen} onClose={()=>setDidOpen(false)}/>
