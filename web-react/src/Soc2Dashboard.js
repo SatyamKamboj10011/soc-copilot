@@ -8,6 +8,12 @@ const TSC_ORDER = ["security", "availability", "confidentiality", "processing_in
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const SEVERITY_LABEL = { critical: "Critical", elevated: "Elevated", informational: "Informational" };
 
+const RANGE_OPTIONS = [
+  { key: "24h", label: "Last 24h", hours: 24 },
+  { key: "7d",  label: "Last 7d",  hours: 168 },
+  { key: "all", label: "All time", hours: null },
+];
+
 /* Color communicates status only — never decoration. Same 3-state scale everywhere. */
 function statusColor(score) {
   if (score >= 80) return "#22D97A";
@@ -155,6 +161,8 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
   const [trend, setTrend]         = useState([]);
   const [threatOrigins, setThreatOrigins] = useState(0);
   const [activeWidget, setActiveWidget] = useState("trend");
+  const [range, setRange] = useState("all");
+  const activeHours = RANGE_OPTIONS.find(r => r.key === range)?.hours;
 
   const trendChartRef      = useRef(null);
   const trendChartInstance = useRef(null);
@@ -164,12 +172,14 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
   const heatmapSectionRef  = useRef(null);
 
   useEffect(() => {
-    fetch(`${FLASK_URL}/compliance/overview`).then(r => r.json()).then(setOverview).catch(() => {});
-    fetch(`${FLASK_URL}/compliance/findings?limit=8`).then(r => r.json()).then(d => setFindings(Array.isArray(d) ? d : [])).catch(() => {});
-    fetch(`${FLASK_URL}/compliance/heatmap`).then(r => r.json()).then(d => setHeatmap(d || { cells: [], max: 0 })).catch(() => {});
-    fetch(`${FLASK_URL}/compliance/trend`).then(r => r.json()).then(d => setTrend(Array.isArray(d) ? d : [])).catch(() => {});
-    fetch(`${FLASK_URL}/top-ips?limit=15`).then(r => r.json()).then(d => setThreatOrigins(Array.isArray(d) ? d.length : 0)).catch(() => {});
-  }, []);
+    const hp = activeHours ? `hours=${activeHours}` : "";
+    const q = (extra) => [hp, extra].filter(Boolean).join("&");
+    fetch(`${FLASK_URL}/compliance/overview?${q()}`).then(r => r.json()).then(setOverview).catch(() => {});
+    fetch(`${FLASK_URL}/compliance/findings?${q("limit=8")}`).then(r => r.json()).then(d => setFindings(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(`${FLASK_URL}/compliance/heatmap?${q()}`).then(r => r.json()).then(d => setHeatmap(d || { cells: [], max: 0 })).catch(() => {});
+    fetch(`${FLASK_URL}/compliance/trend?${q()}`).then(r => r.json()).then(d => setTrend(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(`${FLASK_URL}/top-ips?${q("limit=15")}`).then(r => r.json()).then(d => setThreatOrigins(Array.isArray(d) ? d.length : 0)).catch(() => {});
+  }, [activeHours]);
 
   useEffect(() => {
     if (!trend.length || !trendChartRef.current || !window.Chart) return;
@@ -242,6 +252,25 @@ const Soc2Dashboard = memo(function Soc2Dashboard({ onAskSira, onSeeFindings }) 
           <div className="page-sub" style={{ marginBottom: 0 }}>TRUST SERVICE CRITERIA — LIVE FROM SURICATA, ZEEK &amp; SENTINEL TELEMETRY</div>
         </div>
         <span className="hud-live"><span className="hud-live-dot" />Live telemetry</span>
+      </div>
+
+      {/* ── TIME-RANGE FILTER — above the charts, controls every fetch on this page ── */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
+        {RANGE_OPTIONS.map(r => (
+          <button
+            key={r.key}
+            onClick={() => setRange(r.key)}
+            style={{
+              fontFamily: "var(--mono)", fontSize: 10, letterSpacing: 1, textTransform: "uppercase",
+              padding: "6px 15px", borderRadius: 20, cursor: "pointer", transition: "all 0.15s",
+              background: range === r.key ? "var(--accent)" : "var(--bg3)",
+              color: range === r.key ? "var(--bg)" : "var(--text-dim)",
+              border: range === r.key ? "1px solid var(--accent)" : "1px solid var(--border2)",
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
       </div>
 
       {/* ── STATUS STRIP ── */}
