@@ -1,6 +1,8 @@
 import { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, useScroll, useSpring, useTransform } from "framer-motion";
+import FAQ from "./Faq";
+import { SplineScene } from "./components/ui/splite";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 22 },
@@ -101,9 +103,77 @@ const gridItem = {
   show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
 };
 
+// a button that leans toward the cursor — used on the two primary CTAs
+function MagneticButton({ children, className, onClick }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+
+  const onMouseMove = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    setPos({ x: (e.clientX - r.left - r.width / 2) * 0.28, y: (e.clientY - r.top - r.height / 2) * 0.35 });
+  };
+  const onMouseLeave = () => setPos({ x: 0, y: 0 });
+
+  return (
+    <motion.button
+      ref={ref}
+      className={className}
+      onClick={onClick}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      animate={{ x: pos.x, y: pos.y }}
+      whileTap={{ scale: 0.97 }}
+      transition={{ type: "spring", stiffness: 220, damping: 18, mass: 0.4 }}
+    >
+      {children}
+    </motion.button>
+  );
+}
+
+// small live-looking telemetry row under the robot face — packets/sec and
+// latency tick on an interval so the panel reads as "live", not decorative
+function LiveTelemetry() {
+  const [pps, setPps] = useState(1240);
+  const [latency, setLatency] = useState(14);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setPps((v) => Math.max(900, Math.min(1800, v + Math.round((Math.random() - 0.5) * 260))));
+      setLatency((v) => Math.max(8, Math.min(28, v + Math.round((Math.random() - 0.5) * 6))));
+    }, 1400);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="lp-telemetry-row">
+      <div className="lp-telemetry-item">
+        <span className="lp-telemetry-dot" />STATUS <b>ACTIVE</b>
+      </div>
+      <div className="lp-telemetry-item">{pps.toLocaleString()} pkt/s</div>
+      <div className="lp-telemetry-item">{latency}ms latency</div>
+    </div>
+  );
+}
+
+// terminal lines type on, one at a time, as the panel scrolls into view
+const terminalContainer = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.45, delayChildren: 0.2 } },
+};
+const terminalLine = {
+  hidden: { opacity: 0, x: -6 },
+  show: { opacity: 1, x: 0, transition: { duration: 0.3, ease: "easeOut" } },
+};
+
 export default function LandingPage() {
   const navigate = useNavigate();
   const goEnter = () => navigate("/login");
+
+  const { scrollYProgress } = useScroll();
+  const progressWidth = useSpring(scrollYProgress, { stiffness: 120, damping: 24, mass: 0.2 });
+  const heroScroll = useTransform(scrollYProgress, [0, 0.25], [0, 1]);
+  const videoY = useTransform(heroScroll, [0, 1], ["0%", "12%"]);
+  const videoScale = useTransform(heroScroll, [0, 1], [1, 1.08]);
 
   const videoRef = useRef(null);
   const [videoOpacity, setVideoOpacity] = useState(1);
@@ -133,7 +203,8 @@ export default function LandingPage() {
         .lp-root { position:relative; min-height:100vh; overflow-x:hidden; background:#060A11; color:#E9F1F7;
           font-family:'Inter',sans-serif; display:flex; flex-direction:column; }
 
-        .lp-video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
+        .lp-video { position:fixed; inset:0; width:100%; height:100%; object-fit:cover;
+          object-position:68% center; z-index:0; }
         .lp-overlay { position:fixed; inset:0; z-index:1;
           background:
             linear-gradient(90deg, rgba(6,10,17,0.92) 0%, rgba(6,10,17,0.6) 42%, rgba(6,10,17,0.18) 68%, rgba(6,10,17,0.05) 100%),
@@ -148,7 +219,8 @@ export default function LandingPage() {
           clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
           display:flex; align-items:center; justify-content:center; flex-shrink:0; }
         .lp-login-btn { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em; color:#29D3FF;
-          border:1px solid #12314A; border-radius:4px; padding:10px 22px; background:rgba(6,10,17,0.4);
+          border:1px solid rgba(41,211,255,0.2); border-radius:20px; padding:10px 22px;
+          background:rgba(255,255,255,0.03); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
           cursor:pointer; transition:all .2s; }
         .lp-login-btn:hover { border-color:#29D3FF; background:rgba(41,211,255,0.1); }
 
@@ -170,7 +242,7 @@ export default function LandingPage() {
 
         .lp-cta-row { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
         .lp-enter-btn { font-family:'IBM Plex Mono',monospace; font-size:13px; letter-spacing:.14em; color:#060A11;
-          background:#29D3FF; border:none; border-radius:4px; padding:16px 32px; cursor:pointer;
+          background:#29D3FF; border:none; border-radius:12px; padding:16px 32px; cursor:pointer;
           display:inline-flex; align-items:center; gap:10px; transition:all .2s;
           box-shadow:0 0 30px -6px rgba(41,211,255,0.5); }
         .lp-enter-btn:hover { background:#5CE0FF; }
@@ -178,12 +250,10 @@ export default function LandingPage() {
         .lp-meta { font-family:'IBM Plex Mono',monospace; font-size:11px; color:#4C6478; letter-spacing:.04em;
           line-height:1.5; max-width:220px; }
 
-        /* ---------- shared corner-bracket framing (signature element, reused site-wide) ---------- */
+        /* ---------- corner-frame: kept as a class name so JSX usages don't need touching,
+           but repurposed for the mac-bento look -- the sharp HUD brackets are gone,
+           this now just guarantees a stacking context for elements that need one. ---------- */
         .corner-frame { position:relative; }
-        .corner-frame::before, .corner-frame::after { content:''; position:absolute; width:14px; height:14px;
-          border-color:#29D3FF; border-style:solid; opacity:.75; pointer-events:none; }
-        .corner-frame::before { top:-1px; left:-1px; border-width:1.5px 0 0 1.5px; }
-        .corner-frame::after { bottom:-1px; right:-1px; border-width:0 1.5px 1.5px 0; }
 
         /* ---------- below-the-fold wrapper: solid bg so scrolled content sits above the fixed video ---------- */
         .lp-below { position:relative; z-index:2; background:#060A11; border-top:1px solid rgba(18,49,74,0.5); }
@@ -193,15 +263,28 @@ export default function LandingPage() {
           font-size:clamp(24px, 3.4vw, 34px); line-height:1.2; margin:14px 0 0; letter-spacing:-.01em; }
 
         /* ---------- capabilities grid ---------- */
-        .lp-cap-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:1px; background:rgba(18,49,74,0.5); }
-        .lp-cap-card { background:#060A11; padding:30px 26px; }
+        .lp-cap-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+        .lp-cap-card {
+          background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+          backdrop-filter:blur(16px) saturate(150%); -webkit-backdrop-filter:blur(16px) saturate(150%);
+          border:1px solid rgba(41,211,255,0.14); border-radius:16px;
+          box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 26px -18px rgba(0,0,0,0.6);
+          padding:30px 26px;
+        }
         .lp-cap-card h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px;
           color:#E9F1F7; margin:0 0 10px; }
         .lp-cap-card p { font-size:14px; color:#8FA2B4; line-height:1.65; margin:0; }
 
         /* ---------- pipeline ---------- */
-        .lp-pipeline { display:grid; grid-template-columns:repeat(4, 1fr); gap:22px; }
-        .lp-pipe-step { padding:24px 20px; border:1px solid #12314A; border-radius:4px; background:rgba(10,18,28,0.4); }
+        .lp-pipeline { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
+        .lp-pipe-step {
+          padding:24px 20px; border-radius:16px;
+          background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+          backdrop-filter:blur(16px) saturate(150%); -webkit-backdrop-filter:blur(16px) saturate(150%);
+          border:1px solid rgba(41,211,255,0.14);
+          box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 12px 26px -18px rgba(0,0,0,0.6);
+          transition:border-color .2s;
+        }
         .lp-pipe-num { font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.1em; color:#8B7CFF; }
         .lp-pipe-step h3 { font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px;
           margin:10px 0 8px; color:#E9F1F7; }
@@ -211,7 +294,10 @@ export default function LandingPage() {
         /* ---------- hermes spotlight ---------- */
         .lp-hermes-wrap { display:grid; grid-template-columns:1fr 1.3fr; gap:48px; align-items:center; }
         .lp-hermes-copy p { font-size:15px; color:#B7C4D1; line-height:1.75; margin:0 0 0; max-width:420px; }
-        .lp-terminal { border:1px solid #12314A; border-radius:6px; background:rgba(8,14,22,0.85);
+        .lp-terminal { border:1px solid rgba(41,211,255,0.16); border-radius:18px;
+          background:linear-gradient(180deg, rgba(255,255,255,0.045), rgba(8,14,22,0.85));
+          backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+          box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 16px 32px -20px rgba(0,0,0,0.6);
           padding:22px 22px 22px 20px; border-left:2px solid #29D3FF; overflow:hidden; }
         .lp-terminal-head { display:flex; gap:6px; margin-bottom:16px; }
         .lp-terminal-dot { width:8px; height:8px; border-radius:50%; background:#22314A; }
@@ -235,11 +321,14 @@ export default function LandingPage() {
         .lp-stack-item:last-child { border-right:none; }
 
         /* ---------- team: 3D flip cards (front = name, back = photo) ---------- */
-        .lp-team-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:24px; }
-        .lp-flip-card { position:relative; height:280px; border-radius:6px; cursor:pointer; }
+        .lp-team-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:14px; }
+        .lp-flip-card { position:relative; height:280px; border-radius:20px; cursor:pointer; }
         .lp-flip-inner { position:relative; width:100%; height:100%; transform-style:preserve-3d; }
         .lp-flip-face { position:absolute; inset:0; padding:28px; display:flex; flex-direction:column;
-          border:1px solid #12314A; border-radius:6px; background:rgba(10,18,28,0.4);
+          border:1px solid rgba(41,211,255,0.14); border-radius:20px;
+          background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+          backdrop-filter:blur(18px) saturate(150%); -webkit-backdrop-filter:blur(18px) saturate(150%);
+          box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 16px 32px -20px rgba(0,0,0,0.6);
           backface-visibility:hidden; -webkit-backface-visibility:hidden; overflow:hidden; }
 
         .lp-flip-face-name { justify-content:center; }
@@ -287,7 +376,70 @@ export default function LandingPage() {
           .lp-stat { border-left:none; padding-left:0; padding-top:0; }
           .lp-team-grid { grid-template-columns:1fr; }
         }
+        /* ---------- scroll progress ---------- */
+        .lp-progress-track { position:fixed; top:0; left:0; right:0; height:2px; z-index:50;
+          background:transparent; transform-origin:0%; }
+        .lp-progress-bar { height:100%; background:linear-gradient(90deg,#22D97A,#29D3FF); transform-origin:0%; }
+
+        /* ---------- file tag (case-file numbering thread, mirrors "every investigation becomes a case file") ---------- */
+        .lp-file-tag { font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.14em; color:#4C6478;
+          text-transform:uppercase; margin-bottom:10px; }
+
+        /* ---------- webgpu depth hero ---------- */
+        /* ---------- interactive 3D panel ---------- */
+        .lp-interactive { border:1px solid rgba(41,211,255,0.16); border-radius:26px;
+          background:
+            linear-gradient(rgba(41,211,255,0.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(41,211,255,0.05) 1px, transparent 1px),
+            radial-gradient(120% 140% at 50% 0%, rgba(41,211,255,0.12), rgba(6,10,17,0.98) 60%);
+          background-size:36px 36px, 36px 36px, 100% 100%;
+          backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+          box-shadow:0 1px 0 rgba(255,255,255,0.06) inset, 0 30px 60px -24px rgba(0,0,0,0.65); }
+        .lp-hud-scan { position:absolute; left:0; right:0; height:1px;
+          background:linear-gradient(90deg, transparent, rgba(41,211,255,0.55), transparent);
+          animation:lp-hud-scan 5s ease-in-out infinite; pointer-events:none; z-index:2; }
+        @keyframes lp-hud-scan { 0%,100% { top:8%; opacity:0; } 10% { opacity:1; } 50% { top:92%; opacity:1; } 60% { opacity:0; } }
+
+        .lp-face-viewport { width:208px; height:208px; border-radius:50%; overflow:hidden; position:relative;
+          border:1.5px solid rgba(41,211,255,0.5); background:#04070C; flex-shrink:0;
+          box-shadow:0 0 0 8px rgba(41,211,255,0.05), 0 0 44px -6px rgba(41,211,255,0.4);
+          animation:lp-face-glow 3.2s ease-in-out infinite; }
+        @keyframes lp-face-glow {
+          0%,100% { box-shadow:0 0 0 8px rgba(41,211,255,0.05), 0 0 44px -6px rgba(41,211,255,0.4); }
+          50% { box-shadow:0 0 0 12px rgba(41,211,255,0.08), 0 0 56px -4px rgba(41,211,255,0.55); }
+        }
+        .lp-face-scene { position:absolute !important; width:190% !important; height:190% !important;
+          top:-50% !important; left:-45% !important; pointer-events:none; }
+        .lp-telemetry-row { display:flex; align-items:center; gap:14px; margin-top:22px; flex-wrap:wrap;
+          justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#8FA2B4;
+          letter-spacing:.04em; }
+        .lp-telemetry-item { display:flex; align-items:center; gap:6px; }
+        .lp-telemetry-item b { color:#22D97A; }
+        .lp-telemetry-dot { width:5px; height:5px; border-radius:50%; background:#22D97A;
+          box-shadow:0 0 6px #22D97A; animation:lp-pulse 2s infinite; flex-shrink:0; }
+        .lp-chip-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:28px; }
+        .lp-chip { font-family:'IBM Plex Mono',monospace; font-size:10.5px; letter-spacing:.06em; color:#B7C4D1;
+          border:1px solid #12314A; border-radius:20px; padding:7px 14px; display:flex; align-items:center; gap:7px;
+          background:rgba(10,18,28,0.5); }
+        .lp-chip-dot { width:5px; height:5px; border-radius:50%; background:#22D97A; box-shadow:0 0 6px #22D97A; flex-shrink:0; }
+
+        /* ---------- tech stack marquee (full-bleed, edge to edge) ---------- */
+        .lp-marquee-section { padding-left:0; padding-right:0; }
+        .lp-marquee { overflow:hidden; width:100vw; margin-left:calc(50% - 50vw); margin-right:calc(50% - 50vw);
+          -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent); }
+        .lp-marquee-track { display:flex; width:max-content; animation:lp-scroll 26s linear infinite; }
+        .lp-marquee:hover .lp-marquee-track { animation-play-state:paused; }
+        @keyframes lp-scroll { from { transform:translateX(0); } to { transform:translateX(-33.3333%); } }
+
+        @media (prefers-reduced-motion: reduce) {
+          .lp-marquee-track { animation:none; }
+          .lp-eyebrow::before { animation:none; }
+          .lp-face-viewport { animation:none; }
+        }
+
         @media (max-width: 640px) {
+          .lp-video { object-position:55% top; }
           .lp-hero { padding-top:20px; padding-bottom:40px; align-items:flex-start; }
           .lp-title { font-size:clamp(28px, 8vw, 38px); }
           .lp-desc { font-size:14.5px; }
@@ -296,13 +448,18 @@ export default function LandingPage() {
           .lp-cap-grid { grid-template-columns:1fr; }
           .lp-section { padding:64px 20px; }
           .lp-flip-card { height:240px; }
+          .lp-face-viewport { width:160px; height:160px; }
         }
       `}</style>
 
-      <video
+      <div className="lp-progress-track">
+        <motion.div className="lp-progress-bar" style={{ scaleX: progressWidth }} />
+      </div>
+
+      <motion.video
         ref={videoRef}
         className="lp-video"
-        style={{ opacity: videoOpacity, transition: "opacity 0.1s linear" }}
+        style={{ opacity: videoOpacity, transition: "opacity 0.1s linear", y: videoY, scale: videoScale }}
         autoPlay muted loop playsInline
         src="/robot-face.mp4"
       />
@@ -351,14 +508,9 @@ export default function LandingPage() {
           </motion.p>
 
           <motion.div initial="hidden" animate="show" custom={0.56} variants={fadeUp} className="lp-cta-row">
-            <motion.button
-              whileHover={{ scale: 1.03, y: -2 }}
-              whileTap={{ scale: 0.97 }}
-              className="lp-enter-btn"
-              onClick={goEnter}
-            >
+            <MagneticButton className="lp-enter-btn" onClick={goEnter}>
               ENTER THE LAB →
-            </motion.button>
+            </MagneticButton>
             <span className="lp-meta">No account? You'll be able to request access next.</span>
           </motion.div>
         </div>
@@ -366,7 +518,40 @@ export default function LandingPage() {
 
       <div className="lp-below">
 
-        {/* ---------- capabilities ---------- */}
+        {/* ---------- interactive 3D ---------- */}
+        <motion.section
+          className="lp-section"
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        >
+          {/* Layout here is plain inline style, not Tailwind utility classes --
+              this project doesn't have Tailwind configured, so classes like
+              w-full/max-w-[560px]/flex/items-center would silently do nothing. */}
+          <div
+            className="lp-interactive corner-frame"
+            style={{ width: "100%", maxWidth: 560, margin: "0 auto", minHeight: 380, position: "relative", overflow: "hidden" }}
+          >
+            <div className="lp-hud-scan" />
+            <div style={{
+              display: "flex", height: "100%", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              position: "relative", zIndex: 10, textAlign: "center", padding: "40px 24px", boxSizing: "border-box",
+            }}>
+              <div className="lp-file-tag">File 00 · Subject</div>
+              <div className="lp-eyebrow" style={{ marginBottom: 14 }}>Meet SIRA</div>
+              <div className="lp-face-viewport">
+                <SplineScene
+                  scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
+                  className="lp-face-scene"
+                />
+              </div>
+              <LiveTelemetry />
+            </div>
+          </div>
+        </motion.section>
+
+        {/* ---------- capabilities (below the robot, as before) ---------- */}
         <motion.section
           className="lp-section"
           initial={{ opacity: 0, y: 24 }}
@@ -375,6 +560,7 @@ export default function LandingPage() {
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="lp-section-head">
+            <div className="lp-file-tag">File 01 · Capability</div>
             <div className="lp-eyebrow">What SIRA Does</div>
             <h2 className="lp-section-title">One analyst's view of everything on the wire.</h2>
           </div>
@@ -400,6 +586,31 @@ export default function LandingPage() {
           </motion.div>
         </motion.section>
 
+        {/* ---------- stats strip (moved up: proof before pitch) ---------- */}
+        <motion.section
+          className="lp-section"
+          style={{ paddingTop: 44, paddingBottom: 44 }}
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: "-80px" }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <div className="lp-stats">
+            <div className="lp-stat">
+              <div className="lp-stat-label">Real Traffic</div>
+              <div className="lp-stat-body">Runs on live Suricata and Zeek output, not canned demo data.</div>
+            </div>
+            <div className="lp-stat">
+              <div className="lp-stat-label">Full Reasoning Trace</div>
+              <div className="lp-stat-body">Every Hermes verdict comes with the steps that led to it.</div>
+            </div>
+            <div className="lp-stat">
+              <div className="lp-stat-label">Studio 6 Build</div>
+              <div className="lp-stat-body">Built and iterated in the open for Otago Polytechnic, Block 3 2026.</div>
+            </div>
+          </div>
+        </motion.section>
+
         {/* ---------- pipeline ---------- */}
         <motion.section
           className="lp-section"
@@ -409,7 +620,8 @@ export default function LandingPage() {
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="lp-section-head">
-            <div className="lp-eyebrow">Pipeline</div>
+            <div className="lp-file-tag">File 02 · Pipeline</div>
+            <div className="lp-eyebrow">How It Works</div>
             <h2 className="lp-section-title">From packet to verdict.</h2>
           </div>
           <motion.div
@@ -445,6 +657,7 @@ export default function LandingPage() {
         >
           <div className="lp-hermes-wrap">
             <div className="lp-hermes-copy">
+              <div className="lp-file-tag">File 03 · Investigation</div>
               <div className="lp-eyebrow">Meet Hermes</div>
               <h2 className="lp-section-title" style={{ marginBottom: 18 }}>
                 It doesn't just flag it, it explains it.
@@ -455,60 +668,46 @@ export default function LandingPage() {
                 landed on a verdict — so you can trust it, or overrule it.
               </p>
             </div>
-            <div className="lp-terminal corner-frame">
+            <motion.div
+              className="lp-terminal corner-frame"
+              variants={terminalContainer}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-60px" }}
+            >
               <div className="lp-terminal-head">
                 <span className="lp-terminal-dot" />
                 <span className="lp-terminal-dot" />
                 <span className="lp-terminal-dot" />
               </div>
               {HERMES_LOG.map((l, i) => (
-                <div className="lp-terminal-line" key={i} style={{ color: l.c }}>
+                <motion.div className="lp-terminal-line" key={i} style={{ color: l.c }} variants={terminalLine}>
                   {i === 0 ? "> " : "  "}{l.t}
                   {i === HERMES_LOG.length - 1 && <span className="lp-terminal-caret" />}
-                </div>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </motion.section>
 
-        {/* ---------- stats strip ---------- */}
+        {/* ---------- tech stack marquee ---------- */}
         <motion.section
-          className="lp-section"
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="lp-stats">
-            <div className="lp-stat">
-              <div className="lp-stat-label">Real Traffic</div>
-              <div className="lp-stat-body">Runs on live Suricata and Zeek output, not canned demo data.</div>
-            </div>
-            <div className="lp-stat">
-              <div className="lp-stat-label">Full Reasoning Trace</div>
-              <div className="lp-stat-body">Every Hermes verdict comes with the steps that led to it.</div>
-            </div>
-            <div className="lp-stat">
-              <div className="lp-stat-label">Studio 6 Build</div>
-              <div className="lp-stat-body">Built and iterated in the open for Otago Polytechnic, Block 3 2026.</div>
-            </div>
-          </div>
-        </motion.section>
-
-        {/* ---------- tech stack ---------- */}
-        <motion.section
-          className="lp-section"
+          className="lp-section lp-marquee-section"
           style={{ paddingTop: 44, paddingBottom: 44 }}
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.5 }}
         >
-          <div className="lp-eyebrow" style={{ marginBottom: 18 }}>Built With</div>
-          <div className="lp-stack-row">
-            {STACK.map((s) => (
-              <span className="lp-stack-item" key={s}>{s}</span>
-            ))}
+          <div className="lp-eyebrow" style={{ marginBottom: 18, padding: "0 clamp(20px, 5vw, 64px)" }}>
+            Built With
+          </div>
+          <div className="lp-marquee">
+            <div className="lp-marquee-track">
+              {[...STACK, ...STACK, ...STACK].map((s, i) => (
+                <span className="lp-stack-item" key={`${s}-${i}`}>{s}</span>
+              ))}
+            </div>
           </div>
         </motion.section>
 
@@ -521,6 +720,7 @@ export default function LandingPage() {
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="lp-section-head">
+            <div className="lp-file-tag">File 04 · Personnel</div>
             <div className="lp-eyebrow">The Team</div>
             <h2 className="lp-section-title">Two people, one lab.</h2>
           </div>
@@ -580,14 +780,9 @@ export default function LandingPage() {
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
           <h2 className="lp-close-title">Ready to see it triage something?</h2>
-          <motion.button
-            whileHover={{ scale: 1.03, y: -2 }}
-            whileTap={{ scale: 0.97 }}
-            className="lp-enter-btn"
-            onClick={goEnter}
-          >
+          <MagneticButton className="lp-enter-btn" onClick={goEnter}>
             ENTER THE LAB →
-          </motion.button>
+          </MagneticButton>
         </motion.section>
 
         <footer className="lp-footer">

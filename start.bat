@@ -1,7 +1,7 @@
 @echo off
 echo Starting SOC Copilot...
 
-git checkout -b SC-24-connect-dashboard-to-live-flask-backend-data
+set PYTHON=C:\Users\satya\AppData\Local\Python\pythoncore-3.14-64\python.exe
 
 echo [1/5] Starting Ollama...
 start "" ollama serve

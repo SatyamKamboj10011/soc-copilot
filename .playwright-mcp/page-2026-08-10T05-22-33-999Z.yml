@@ -1,0 +1,170 @@
+- generic [active] [ref=f4e1]:
+  - generic [ref=f4e3]:
+    - navigation [ref=f4e7]:
+      - generic [ref=f4e8]:
+        - generic [ref=f4e9]: ⬡
+        - text: SIRA
+      - generic [ref=f4e11]:
+        - generic [ref=f4e12] [cursor=pointer]: FAQ
+        - button "LOGIN" [ref=f4e13] [cursor=pointer]
+    - generic [ref=f4e15]:
+      - generic [ref=f4e16]: AI SOC Copilot
+      - heading "SIRA watches your network so you don't have to watch alone." [level=1] [ref=f4e17]
+      - paragraph [ref=f4e18]: SIRA analyses real Suricata and Zeek traffic, triages alerts autonomously, and investigates every incident with Hermes — an AI agent that shows its reasoning instead of hiding it. Built for Studio 6 at Otago Polytechnic.
+      - generic [ref=f4e19]:
+        - button "ENTER THE LAB →" [ref=f4e20] [cursor=pointer]
+        - generic [ref=f4e21]: No account? You'll be able to request access next.
+    - generic [ref=f4e22]:
+      - generic [ref=f4e26]:
+        - generic [ref=f4e27]: File 00 · Subject
+        - generic [ref=f4e28]: Meet SIRA
+        - generic [ref=f4e30]:
+          - generic [ref=f4e31]:
+            - text: STATUS
+            - generic [ref=f4e33]: ACTIVE
+          - generic [ref=f4e34]: 1,240 pkt/s
+          - generic [ref=f4e35]: 14ms latency
+      - generic [ref=f4e36]:
+        - generic [ref=f4e37]:
+          - generic [ref=f4e38]: File 01 · Capability
+          - generic [ref=f4e39]: What SIRA Does
+          - heading "One analyst's view of everything on the wire." [level=2] [ref=f4e40]
+        - generic [ref=f4e41]:
+          - generic [ref=f4e42]:
+            - heading "Live Traffic Analysis" [level=3] [ref=f4e43]
+            - paragraph [ref=f4e44]: Ingests real Suricata and Zeek output, not sample data, so every alert traces back to an actual packet.
+          - generic [ref=f4e45]:
+            - heading "Autonomous Triage" [level=3] [ref=f4e46]
+            - paragraph [ref=f4e47]: Alerts are scored and sorted before an analyst even opens the queue.
+          - generic [ref=f4e48]:
+            - heading "Hermes Investigation" [level=3] [ref=f4e49]
+            - paragraph [ref=f4e50]: An AI agent walks through each incident step by step, and shows the reasoning behind every conclusion.
+          - generic [ref=f4e51]:
+            - heading "Case Management" [level=3] [ref=f4e52]
+            - paragraph [ref=f4e53]: Every investigation becomes a case file — alerts, evidence, and Hermes's findings in one place.
+          - generic [ref=f4e54]:
+            - heading "Network Map" [level=3] [ref=f4e55]
+            - paragraph [ref=f4e56]: See where an alert sits in your topology at a glance, not just its IP address.
+          - generic [ref=f4e57]:
+            - heading "Threat Summary" [level=3] [ref=f4e58]
+            - paragraph [ref=f4e59]: A live rollup of what's active right now, ranked by what actually needs eyes on it.
+      - generic [ref=f4e61]:
+        - generic [ref=f4e62]:
+          - generic [ref=f4e63]: Real Traffic
+          - generic [ref=f4e64]: Runs on live Suricata and Zeek output, not canned demo data.
+        - generic [ref=f4e65]:
+          - generic [ref=f4e66]: Full Reasoning Trace
+          - generic [ref=f4e67]: Every Hermes verdict comes with the steps that led to it.
+        - generic [ref=f4e68]:
+          - generic [ref=f4e69]: Studio 6 Build
+          - generic [ref=f4e70]: Built and iterated in the open for Otago Polytechnic, Block 3 2026.
+      - generic [ref=f4e71]:
+        - generic [ref=f4e72]:
+          - generic [ref=f4e73]: File 02 · Pipeline
+          - generic [ref=f4e74]: How It Works
+          - heading "From packet to verdict." [level=2] [ref=f4e75]
+        - generic [ref=f4e76]:
+          - generic [ref=f4e77]:
+            - generic [ref=f4e78]: STAGE 01
+            - heading "Capture" [level=3] [ref=f4e79]
+            - paragraph [ref=f4e80]: Suricata and Zeek watch the wire and log everything that looks worth a second glance.
+          - generic [ref=f4e81]:
+            - generic [ref=f4e82]: STAGE 02
+            - heading "Index" [level=3] [ref=f4e83]
+            - paragraph [ref=f4e84]: Alerts and context are embedded into a local vector store so Hermes can reason over real history.
+          - generic [ref=f4e85]:
+            - generic [ref=f4e86]: STAGE 03
+            - heading "Investigate" [level=3] [ref=f4e87]
+            - paragraph [ref=f4e88]: Hermes pulls related evidence, cross-references it, and builds a case — reasoning shown at every step.
+          - generic [ref=f4e89]:
+            - generic [ref=f4e90]: STAGE 04
+            - heading "Review" [level=3] [ref=f4e91]
+            - paragraph [ref=f4e92]: The analyst gets a finished case file, not a black box, and can override the verdict any time.
+      - generic [ref=f4e94]:
+        - generic [ref=f4e95]:
+          - generic [ref=f4e96]: File 03 · Investigation
+          - generic [ref=f4e97]: Meet Hermes
+          - heading "It doesn't just flag it, it explains it." [level=2] [ref=f4e98]
+          - paragraph [ref=f4e99]: Every Hermes investigation is a visible chain of reasoning, not a single score. You see exactly what it checked, what it ruled out, and why it landed on a verdict — so you can trust it, or overrule it.
+        - generic [ref=f4e100]:
+          - generic [ref=f4e105]: "> analyzing alert #4471 — suspicious outbound TLS"
+          - generic [ref=f4e106]: checking source host history... 3 prior alerts, none critical
+          - generic [ref=f4e107]: cross-referencing destination IP against known indicators... no match
+          - generic [ref=f4e108]: reviewing connection timing... matches beaconing pattern (14s interval)
+          - generic [ref=f4e109]: "verdict: ESCALATE — beaconing behavior outweighs clean IP reputation"
+      - generic [ref=f4e111]:
+        - generic [ref=f4e112]: Built With
+        - generic [ref=f4e114]:
+          - generic [ref=f4e115]: Suricata
+          - generic [ref=f4e116]: Zeek
+          - generic [ref=f4e117]: ChromaDB
+          - generic [ref=f4e118]: Groq
+          - generic [ref=f4e119]: Gemini
+          - generic [ref=f4e120]: Ollama
+          - generic [ref=f4e121]: React
+          - generic [ref=f4e122]: Flask
+          - generic [ref=f4e123]: Suricata
+          - generic [ref=f4e124]: Zeek
+          - generic [ref=f4e125]: ChromaDB
+          - generic [ref=f4e126]: Groq
+          - generic [ref=f4e127]: Gemini
+          - generic [ref=f4e128]: Ollama
+          - generic [ref=f4e129]: React
+          - generic [ref=f4e130]: Flask
+          - generic [ref=f4e131]: Suricata
+          - generic [ref=f4e132]: Zeek
+          - generic [ref=f4e133]: ChromaDB
+          - generic [ref=f4e134]: Groq
+          - generic [ref=f4e135]: Gemini
+          - generic [ref=f4e136]: Ollama
+          - generic [ref=f4e137]: React
+          - generic [ref=f4e138]: Flask
+      - generic [ref=f4e139]:
+        - generic [ref=f4e140]:
+          - generic [ref=f4e141]: File 04 · Personnel
+          - generic [ref=f4e142]: The Team
+          - heading "Two people, one lab." [level=2] [ref=f4e143]
+        - generic [ref=f4e144]:
+          - generic [ref=f4e146] [cursor=pointer]:
+            - generic [ref=f4e147]:
+              - generic [ref=f4e148]: SK
+              - heading "Satyam Kamboj" [level=3] [ref=f4e149]
+              - generic [ref=f4e150]: BACKEND, AI & DEPLOYMENT
+              - paragraph [ref=f4e151]: Builds the ingestion pipeline, the RAG/Hermes reasoning layer, and ships it.
+              - generic [ref=f4e152]: HOVER TO VIEW →
+            - generic [ref=f4e153]:
+              - img "Satyam Kamboj" [ref=f4e154]
+              - generic [ref=f4e155]:
+                - heading "Satyam Kamboj" [level=3] [ref=f4e156]
+                - generic [ref=f4e157]: BACKEND, AI & DEPLOYMENT
+          - generic [ref=f4e159] [cursor=pointer]:
+            - generic [ref=f4e160]:
+              - generic [ref=f4e161]: P
+              - heading "Pratham" [level=3] [ref=f4e162]
+              - generic [ref=f4e163]: FRONTEND, UX & DOCUMENTATION
+              - paragraph [ref=f4e164]: Designs and builds the dashboard, case views, and keeps the docs honest.
+              - generic [ref=f4e165]: HOVER TO VIEW →
+            - generic [ref=f4e166]:
+              - img "Pratham" [ref=f4e167]
+              - generic [ref=f4e168]:
+                - heading "Pratham" [level=3] [ref=f4e169]
+                - generic [ref=f4e170]: FRONTEND, UX & DOCUMENTATION
+      - generic [ref=f4e171]:
+        - heading "Ready to see it triage something?" [level=2] [ref=f4e172]
+        - button "ENTER THE LAB →" [ref=f4e173] [cursor=pointer]
+      - contentinfo [ref=f4e174]:
+        - generic [ref=f4e175]: SIRA v4 · AI SOC Copilot
+        - generic [ref=f4e176]: Satyam Kamboj & Pratham · Otago Polytechnic 2026
+  - application "AI Agent Video Chat" [ref=f4e178]:
+    - region "Chat call":
+      - log:
+        - generic:
+          - article
+    - generic [ref=f4e179]:
+      - generic: Loading...
+      - generic [ref=f4e180]:
+        - generic "Agent idle video" [ref=f4e181]
+        - generic "Agent video stream" [ref=f4e182]
+      - toolbar "Control header"
+      - dialog "Welcome message" [ref=f4e183]:
+        - button "Start call" [ref=f4e185] [cursor=pointer]

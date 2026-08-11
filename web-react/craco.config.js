@@ -1,4 +1,9 @@
 module.exports = {
+  style: {
+    postcss: {
+      plugins: [require("tailwindcss"), require("autoprefixer")],
+    },
+  },
   webpack: {
     configure: (webpackConfig) => {
       const rule = webpackConfig.module.rules.find(r => r.oneOf);

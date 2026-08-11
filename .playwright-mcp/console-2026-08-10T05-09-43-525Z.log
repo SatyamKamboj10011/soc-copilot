@@ -1,0 +1,51 @@
+[    1050ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:3000/static/js/bundle.js:97076
+[    1221ms] [INFO] 🌐 i18next is maintained with support from Locize — consider powering your project with managed localization (AI, CDN, integrations): https://locize.com 💙 @ https://agent.d-id.com/2.1.26/index-Bz9aiB6A.js:22492
+[    1813ms] [WARNING] ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition. @ http://localhost:3000/static/js/bundle.js:100362
+[    1814ms] [WARNING] ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath. @ http://localhost:3000/static/js/bundle.js:100362
+[    2288ms] [WARNING] updating from  114 to  122 @ http://localhost:3000/static/js/vendors-node_modules_splinetool_react-spline_dist_react-spline_js.chunk.js:26977
+[    6870ms] [INFO] [LaunchDarkly] LaunchDarkly client initialized @ https://agent.d-id.com/2.1.26/ldclient.es-CFOmAAa4.js:277
+[  289271ms] [WARNING] updating from  114 to  122 @ http://localhost:3000/static/js/vendors-node_modules_splinetool_react-spline_dist_react-spline_js.chunk.js:26977
+[  351192ms] ReferenceError: LiveTelemetry is not defined
+    at LandingPage (http://localhost:3000/main.5a4c8bc0c42a231790a3.hot-update.js:757:99)
+    at renderWithHooks (http://localhost:3000/static/js/bundle.js:84784:22)
+    at updateFunctionComponent (http://localhost:3000/static/js/bundle.js:88352:24)
+    at beginWork (http://localhost:3000/static/js/bundle.js:90071:20)
+    at HTMLUnknownElement.callCallback (http://localhost:3000/static/js/bundle.js:75040:18)
+    at Object.invokeGuardedCallbackDev (http://localhost:3000/static/js/bundle.js:75084:20)
+    at invokeGuardedCallback (http://localhost:3000/static/js/bundle.js:75141:35)
+    at beginWork$1 (http://localhost:3000/static/js/bundle.js:95040:11)
+    at performUnitOfWork (http://localhost:3000/static/js/bundle.js:94288:16)
+    at workLoopSync (http://localhost:3000/static/js/bundle.js:94211:9)
+[  351202ms] ReferenceError: LiveTelemetry is not defined
+    at LandingPage (http://localhost:3000/main.5a4c8bc0c42a231790a3.hot-update.js:757:99)
+    at renderWithHooks (http://localhost:3000/static/js/bundle.js:84784:22)
+    at updateFunctionComponent (http://localhost:3000/static/js/bundle.js:88352:24)
+    at beginWork (http://localhost:3000/static/js/bundle.js:90071:20)
+    at HTMLUnknownElement.callCallback (http://localhost:3000/static/js/bundle.js:75040:18)
+    at Object.invokeGuardedCallbackDev (http://localhost:3000/static/js/bundle.js:75084:20)
+    at invokeGuardedCallback (http://localhost:3000/static/js/bundle.js:75141:35)
+    at beginWork$1 (http://localhost:3000/static/js/bundle.js:95040:11)
+    at performUnitOfWork (http://localhost:3000/static/js/bundle.js:94288:16)
+    at workLoopSync (http://localhost:3000/static/js/bundle.js:94211:9)
+[  351207ms] [ERROR] The above error occurred in the <LandingPage> component:
+
+    at LandingPage (http://localhost:3000/main.5a4c8bc0c42a231790a3.hot-update.js:238:81)
+    at RenderedRoute (http://localhost:3000/static/js/bundle.js:99946:5)
+    at Routes (http://localhost:3000/static/js/bundle.js:100680:5)
+    at Router (http://localhost:3000/static/js/bundle.js:100614:15)
+    at BrowserRouter (http://localhost:3000/static/js/bundle.js:98515:5)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries. @ http://localhost:3000/static/js/bundle.js:87564
+[  351209ms] ReferenceError: LiveTelemetry is not defined
+    at LandingPage (http://localhost:3000/main.5a4c8bc0c42a231790a3.hot-update.js:757:99)
+    at renderWithHooks (http://localhost:3000/static/js/bundle.js:84784:22)
+    at updateFunctionComponent (http://localhost:3000/static/js/bundle.js:88352:24)
+    at beginWork (http://localhost:3000/static/js/bundle.js:90071:20)
+    at beginWork$1 (http://localhost:3000/static/js/bundle.js:95018:18)
+    at performUnitOfWork (http://localhost:3000/static/js/bundle.js:94288:16)
+    at workLoopSync (http://localhost:3000/static/js/bundle.js:94211:9)
+    at renderRootSync (http://localhost:3000/static/js/bundle.js:94184:11)
+    at recoverFromConcurrentError (http://localhost:3000/static/js/bundle.js:93676:24)
+    at performSyncWorkOnRoot (http://localhost:3000/static/js/bundle.js:93885:24)
+[  351546ms] [WARNING] updating from  114 to  122 @ http://localhost:3000/static/js/vendors-node_modules_splinetool_react-spline_dist_react-spline_js.chunk.js:26977
