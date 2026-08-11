@@ -266,55 +266,41 @@ const sharedCss = `
   .top-ip-count { font-family: var(--mono); font-size: 10px; color: var(--text-dim); min-width: 30px; text-align: right; }
 
   /* ===== SOC 2 COMPLIANCE DASHBOARD (bento grid) ===== */
-  /* One typeface for the whole dashboard (Inter). Mono is reserved for genuine
-     tabular data — IPs, timestamps — never for ordinary labels. */
-  .bento-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 1px 8px rgba(0,0,0,0.18); }
-  .bento-card-title { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--text); letter-spacing: -0.1px; }
-  .bento-card-sub { font-family: var(--sans); font-size: 12.5px; color: var(--text-mid); margin-top: 3px; line-height: 1.5; }
-  .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 8px; background: var(--accent); color: #06141B; font-family: var(--sans); font-size: 12.5px; font-weight: 600; border: none; cursor: pointer; transition: background 0.15s, transform 0.1s; }
-  .bento-pill:hover { background: var(--accent2); }
-  .bento-pill:active { transform: translateY(1px); }
-  .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 20px; font-family: var(--sans); font-size: 11.5px; font-weight: 500; white-space: nowrap; }
-  .status-badge.critical { background: var(--red-dim); color: var(--red); }
-  .status-badge.elevated { background: var(--orange-dim); color: var(--orange); }
-  .status-badge.informational { background: var(--green-dim); color: var(--green); }
-  .bento-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; display: inline-block; }
+  .bento-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden; }
+  .bento-card-title { font-family: var(--sans); font-size: 16px; font-weight: 700; color: var(--text); }
+  .bento-card-sub { font-family: var(--sans); font-size: 12px; color: var(--text-mid); margin-top: 2px; }
+  .bento-eyebrow { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
+  .bento-pill { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 30px; background: linear-gradient(135deg, var(--accent), var(--magenta)); color: #060608; font-family: var(--sans); font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 6px 20px -6px var(--accent-glow); }
+  .bento-pill:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -6px var(--accent-glow); }
+  .bento-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .bento-dot.critical { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .bento-dot.elevated { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+  .bento-dot.informational { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .bento-widget { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; text-align: center; }
   .bento-widget:hover { border-color: var(--border2); transform: translateY(-2px); }
   .bento-widget.active { border-color: var(--accent); background: var(--accent-dim); }
   .bento-widget-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; color: var(--accent); }
-  .bento-widget-label { font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--text-mid); }
+  .bento-widget-label { font-family: var(--sans); font-size: 12px; color: var(--text-mid); }
   .bento-table { width: 100%; border-collapse: collapse; font-family: var(--sans); font-size: 13px; }
-  .bento-table th { text-align: left; padding: 8px 8px; color: var(--text-dim); font-family: var(--sans); font-size: 11px; font-weight: 500; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bento-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); color: var(--text-mid); font-size: 13px; }
+  .bento-table th { text-align: left; padding: 8px 8px; color: var(--text-dim); font-family: var(--mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bento-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-mid); font-size: 12.5px; }
   .bento-table tr:last-child td { border-bottom: none; }
   .bento-table tr:hover td { color: var(--text); }
-  .bento-see-all { font-family: var(--sans); font-size: 12px; font-weight: 500; color: var(--accent); background: none; border: none; cursor: pointer; }
+  .bento-see-all { font-family: var(--sans); font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: none; cursor: pointer; }
   .bento-heat-row { display: grid; grid-template-columns: 28px repeat(24, 1fr); gap: 2px; align-items: center; }
   .bento-heat-cell { aspect-ratio: 1; border-radius: 3px; }
-  .bento-heat-label { font-family: var(--sans); font-size: 10px; color: var(--text-dim); }
+  .bento-heat-label { font-family: var(--mono); font-size: 8px; color: var(--text-dim); }
   .balance-row { display: grid; gap: 0; }
   .balance-card { padding: 0 18px; border-left: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
   .balance-card:first-child { padding-left: 0; border-left: none; }
-  .balance-label { font-family: var(--sans); font-size: 12.5px; font-weight: 500; color: var(--text-mid); }
-  .balance-delta { font-family: var(--sans); font-size: 11.5px; color: var(--text-dim); }
+  .balance-label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); }
+  .balance-value { font-family: var(--display); font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; }
+  .balance-delta { font-family: var(--sans); font-size: 11px; font-weight: 600; }
+  .balance-delta.up { color: var(--green); }
+  .balance-delta.down { color: var(--red); }
   .lollipop-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
   .lollipop-stem { width: 3px; border-radius: 2px; background: var(--border2); position: relative; }
   .lollipop-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: -5px; }
-
-  /* ===== DASHBOARD: quiet status + stat primitives ===== */
-  .hud-card:hover { border-color: var(--border2); }
-
-  .hud-live { display: inline-flex; align-items: center; gap: 6px; font-family: var(--sans); font-size: 12px; font-weight: 500; color: var(--text-mid); }
-  .hud-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: blink 2s infinite; }
-
-  .hud-stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .hud-stat-chip { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 1px 8px rgba(0,0,0,0.18); }
-  .hud-stat-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg3); color: var(--text-mid); }
-  .hud-stat-label { font-family: var(--sans); font-size: 12px; color: var(--text-dim); margin-bottom: 3px; }
-  .hud-stat-value { font-family: var(--sans); font-size: 21px; font-weight: 650; color: var(--text); line-height: 1; letter-spacing: -0.3px; }
-
-  .radial-gauge-label { font-family: var(--sans); font-weight: 650; letter-spacing: -0.2px; }
 `;
 function SimpleExplain({ text }) {
   const [open, setOpen]       = useState(false);
@@ -494,13 +480,19 @@ function SiraMessage({ text, modelChip }) {
 }
 
 const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
-  const [logs, setLogs]                     = useState([]);
+  const [rows, setRows]                     = useState([]);
   const [search, setSearch]                 = useState("");
+  const [offset, setOffset]                 = useState(0);
+  const [total, setTotal]                   = useState(0);
+  const [searching, setSearching]           = useState(false);
+  const [loadingMore, setLoadingMore]       = useState(false);
   const [selected, setSelected]             = useState(null);
   const [profile, setProfile]               = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [whatIf, setWhatIf]                 = useState(null);
   const [whatIfLoading, setWhatIfLoading]   = useState(false);
+  const searchDebounce                      = useRef(null);
+  const PAGE_SIZE = 50;
 
   const loadProfile = async (ip) => {
     setProfileLoading(true); setProfile(null);
@@ -509,9 +501,50 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
     setProfileLoading(false);
   };
 
-  useEffect(() => { fetch(`${FLASK_URL}/logs?limit=200`).then(r=>r.json()).then(setLogs).catch(()=>{}); }, []);
+  // /logs returns a plain array (no total count); /search returns {results, total}.
+  // Both are handled here so the rest of the component doesn't care which one is active.
+  const fetchPage = (q, pageOffset, append) => {
+    if (q) {
+      fetch(`${FLASK_URL}/search?q=${encodeURIComponent(q)}&offset=${pageOffset}&limit=${PAGE_SIZE}`)
+        .then(r => r.json())
+        .then(data => {
+          setRows(prev => append ? [...prev, ...data.results] : data.results);
+          setTotal(data.total);
+          setOffset(pageOffset + data.results.length);
+          setSearching(false);
+          setLoadingMore(false);
+        })
+        .catch(() => { setSearching(false); setLoadingMore(false); });
+    } else {
+      // no query — /logs has no total, so "load more" just asks for more rows
+      // and we infer more-available from whether we got a full page back
+      const nextLimit = pageOffset + PAGE_SIZE;
+      fetch(`${FLASK_URL}/logs?limit=${nextLimit}`)
+        .then(r => r.json())
+        .then(data => {
+          setRows(data);
+          setTotal(data.length === nextLimit ? nextLimit + 1 : data.length); // +1 signals "there may be more"
+          setOffset(data.length);
+          setSearching(false);
+          setLoadingMore(false);
+        })
+        .catch(() => { setSearching(false); setLoadingMore(false); });
+    }
+  };
 
-  const filtered = logs.filter(l => !search || l.src_ip?.includes(search) || l.dest_ip?.includes(search) || l.alert?.signature?.toLowerCase().includes(search.toLowerCase()));
+  // initial load
+  useEffect(() => { fetchPage("", 0, false); }, []); // eslint-disable-line
+
+  // debounced search — resets to page 1 every time the query changes
+  useEffect(() => {
+    clearTimeout(searchDebounce.current);
+    setSearching(true);
+    searchDebounce.current = setTimeout(() => fetchPage(search.trim(), 0, false), 300);
+    return () => clearTimeout(searchDebounce.current);
+  }, [search]); // eslint-disable-line
+
+  const loadMore = () => { setLoadingMore(true); fetchPage(search.trim(), offset, true); };
+  const hasMore = offset < total;
 
   return (
     <div className="page">
@@ -519,10 +552,13 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
       <div className="page-sub">SEARCH AND ANALYSE LOG EVENTS</div>
       <input className="inv-search" placeholder="Search by IP or alert signature..." value={search} onChange={e=>setSearch(e.target.value)} />
       <div className="page-card">
+        {searching && (
+          <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",marginBottom:10,letterSpacing:1}}>◈ SEARCHING...</div>
+        )}
         <table className="inv-table">
           <thead><tr><th>TYPE</th><th>TIME</th><th>SOURCE IP</th><th>DEST IP</th><th>DETAILS</th></tr></thead>
           <tbody>
-            {filtered.slice(0,100).map((l,i)=>(
+            {rows.map((l,i)=>(
               <tr key={i} onClick={()=>setSelected(l)}>
                 <td><span className={`inv-type-badge inv-type-${l.event_type}`}>{l.event_type}</span></td>
                 <td>{l.timestamp?.substring(11,19)}</td>
@@ -531,8 +567,25 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
                 <td style={{color:"var(--text-dim)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.alert?.signature||l.dns?.rrname||l.http?.hostname||"—"}</td>
               </tr>
             ))}
+            {rows.length===0 && !searching && (
+              <tr><td colSpan={5} style={{textAlign:"center",padding:20,color:"var(--text-dim)",fontFamily:"var(--mono)",fontSize:10}}>
+                {search.trim() ? "No matching events found" : "No events loaded"}
+              </td></tr>
+            )}
           </tbody>
         </table>
+        {hasMore && rows.length > 0 && (
+          <button onClick={loadMore} disabled={loadingMore} style={{
+            width:"100%", marginTop:14, padding:"10px", background:"var(--bg3)", border:"1px solid var(--border2)",
+            borderRadius:8, color:"var(--accent)", fontFamily:"var(--mono)", fontSize:10, letterSpacing:1,
+            cursor: loadingMore ? "not-allowed" : "pointer", textTransform:"uppercase", opacity: loadingMore?0.5:1
+          }}>{loadingMore ? "LOADING..." : "LOAD MORE"}</button>
+        )}
+        {rows.length > 0 && (
+          <div style={{textAlign:"center",marginTop:8,fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)"}}>
+            Showing {rows.length} of {total}
+          </div>
+        )}
       </div>
 
       {selected && (
@@ -940,6 +993,7 @@ export default function App() {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const isRightResizing = useRef(false);
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
   const [page, setPage]                   = useState("dashboard");
@@ -1193,7 +1247,7 @@ setLoading(false);
         </div>
       )}
 
-      <div className="app" style={{gridTemplateColumns:`${sidebarWidth}px 1fr`}}>
+      <div className="app" style={{gridTemplateColumns:`${leftPanelOpen ? sidebarWidth : 0}px 1fr`, transition: isResizing.current ? "none" : "grid-template-columns 0.2s"}}>
         <nav className="topnav">
           <div className="nav-brand">
             <div className="brand-icon">⬡</div>
@@ -1222,8 +1276,10 @@ setLoading(false);
           </div>
         </nav>
 
-        <aside className="left-panel" style={{position:"relative"}}>
-          <div onMouseDown={startResize} style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",zIndex:10,background:"transparent"}} onMouseEnter={e=>e.target.style.background="var(--accent)"} onMouseLeave={e=>e.target.style.background="transparent"}/>
+        <aside className="left-panel" style={{position:"relative", overflow: leftPanelOpen ? undefined : "hidden"}}>
+          {leftPanelOpen && (
+            <div onMouseDown={startResize} style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",zIndex:10,background:"transparent"}} onMouseEnter={e=>e.target.style.background="var(--accent)"} onMouseLeave={e=>e.target.style.background="transparent"}/>
+          )}
           <div className="section-label">AI Engine</div>
           <div className="model-select-wrap">
             <select className="model-select" value={selectedModel} onChange={handleModelChange}>
@@ -1311,6 +1367,12 @@ setLoading(false);
             </div>
           </div>
         </aside>
+
+        <button onClick={()=>setLeftPanelOpen(o=>!o)} title={leftPanelOpen ? "Hide panel" : "Show panel"} style={{
+          position: "absolute", left: leftPanelOpen ? sidebarWidth - 12 : 0, top: "50%", transform: "translateY(-50%)",
+          width: 24, height: 40, borderRadius: "0 6px 6px 0", background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "none",
+          color: "var(--text-dim)", cursor: "pointer", fontSize: 11, zIndex: 20, transition: "left 0.2s",
+        }}>{leftPanelOpen ? "\u2039" : "\u203A"}</button>
 
         <div style={{display:page==="analytics"?"flex":"none",flex:1,overflow:"hidden"}}>
           <Soc2Dashboard
