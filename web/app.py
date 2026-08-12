@@ -334,6 +334,24 @@ def ask():
 
     llm, llm_type = get_llm(model, api_key)
 
+    # Identity/meta questions ("who are you", "what can you do") aren't
+    # about log data at all -- retrieving logs for them just grabs whatever
+    # random entries are nearest in the vector index, and the log-analysis
+    # prompt below then forces the model to write a fake incident report
+    # about them. Answer these directly instead, with no retrieval.
+    if re.search(r'\b(who are you|what are you|what is sira|introduce yourself|what can you do|how do you work|tell me about yourself)\b', question, re.IGNORECASE):
+        identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
+Speak like JARVIS from Iron Man: calm, precise, address the analyst as "Sir" occasionally.
+The analyst asked: "{question}"
+Answer conversationally in 2-4 sentences, describing who you are and what you help with
+(monitoring Suricata/Zeek network traffic, triaging alerts, investigating threats via Hermes).
+Do NOT perform log analysis, cite any IPs, or produce a security report for this message."""
+        if llm_type == "local":
+            identity_answer = llm.invoke(identity_prompt)
+        else:
+            identity_answer = llm.invoke(identity_prompt).content
+        return jsonify({'answer': identity_answer, 'model_used': model})
+
     docs = retriever.invoke(question)
 
     if date_filter:
@@ -389,6 +407,8 @@ STRICT RULES:
 - If information is missing say "Not available in logs"
 - Write so a junior analyst with 3 months experience can understand
 - VARY your response based on what is being asked — not every question needs 5 sections
+- Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure traffic, not external attackers — even with a high event count. Never describe traffic from these as unauthorized access, an intrusion, or an attack, and never recommend blocking them.
+- If the retrieved log data below doesn't actually relate to the question asked, say so plainly instead of forcing it into a security-report structure
 
 Previous conversation:
 {chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in history[-4:] if m.get('content')]) or "None"}
