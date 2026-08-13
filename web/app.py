@@ -488,10 +488,16 @@ Question: {question}
 
 Answer naturally. Pick the format that fits. Do not force sections that do not apply."""
 
-    if llm_type == "local":
-        answer = llm.invoke(prompt)
-    else:
-        answer = llm.invoke(prompt).content
+    try:
+        if llm_type == "local":
+            answer = llm.invoke(prompt)
+        else:
+            answer = llm.invoke(prompt).content
+    except Exception as e:
+        err_msg = str(e)
+        if any(k in err_msg.lower() for k in ["api key", "unauthorized", "401", "invalid_api_key", "authentication"]):
+            return jsonify({"error": "Invalid API key for this provider. Check the key and try again."}), 401
+        return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
 
     return jsonify({'answer': answer, 'model_used': model})
 
@@ -1556,6 +1562,7 @@ if __name__ == '__main__':
         host='0.0.0.0',
         debug=True,
         port=5000,
+        threaded=True,
         exclude_patterns=[
             "*/Wav2Lip/*",
             "*\\Wav2Lip\\*",

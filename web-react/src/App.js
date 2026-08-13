@@ -930,6 +930,9 @@ const [sessionId, setSessionId] = useState(() => {
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [sentinelIP, setSentinelIP]       = useState("");
   const [sentinelSaving, setSentinelSaving] = useState(false);
+  const [useOwnKey, setUseOwnKey]         = useState(false);
+  const [apiKeyInput, setApiKeyInput]     = useState("");
+  const [showApiKey, setShowApiKey]       = useState(false);
 
   const messagesRef  = useRef(null);
   const toastTimer   = useRef(null);
@@ -1053,6 +1056,27 @@ const [sessionId, setSessionId] = useState(() => {
 
   const handleModelChange = (e) => { const val=e.target.value; setSelectedModel(val); showToast(`Switched to ${MODEL_OPTIONS.find(x=>x.value===val).chip}`); };
 
+  // Load this provider's saved "use own key" preference + key whenever the model changes
+  useEffect(() => {
+    if (!modelObj.cloud) { setUseOwnKey(false); setApiKeyInput(""); return; }
+    const storedUseOwn = localStorage.getItem(`sira_use_own_key_${selectedModel}`) === "true";
+    const storedKey = localStorage.getItem(`sira_api_key_${selectedModel}`) || "";
+    setUseOwnKey(storedUseOwn);
+    setApiKeyInput(storedKey);
+    setShowApiKey(false);
+  }, [selectedModel]); // eslint-disable-line
+
+  const handleToggleOwnKey = () => {
+    const next = !useOwnKey;
+    setUseOwnKey(next);
+    localStorage.setItem(`sira_use_own_key_${selectedModel}`, next ? "true" : "false");
+  };
+
+  const saveApiKey = () => {
+    localStorage.setItem(`sira_api_key_${selectedModel}`, apiKeyInput.trim());
+    showToast(`API key saved for ${modelObj.chip}`);
+  };
+
   const startHermes = async () => {
     if (!hermesTask.trim()) return;
     setHermesLoading(true); setHermesSteps([]); setHermesAnswer("");
@@ -1076,8 +1100,13 @@ try {
   await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"user",message:q,model_used:selectedModel,created_at:serverTimestamp()});
 } catch(e) { console.error("Firestore user save error:",e); }
 try {
-  const recentHistory = messages.slice(-6).filter(m=>!m.isWelcome).map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
-  const data = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory})}).then(r=>r.json());
+  const recentHistory = messages.slice(-6).filter(m=>!m.isWelcome && !m.isError).map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
+  const useOwn = localStorage.getItem(`sira_use_own_key_${selectedModel}`) === "true";
+  const storedKey = localStorage.getItem(`sira_api_key_${selectedModel}`);
+  const apiKeyToSend = (useOwn && storedKey) ? storedKey : undefined;
+  const res = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory,...(apiKeyToSend && {api_key:apiKeyToSend})})});
+  const data = await res.json();
+  if (!res.ok) { throw new Error(data.error || `Request failed (${res.status})`); }
   setMessages(prev=>[...prev,{role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
   const cleanForVoice = (data.answer || "")
     .replace(/SUMMARY:|THREAT DETAILS:|WHAT THIS MEANS:|RISK ASSESSMENT:|RECOMMENDED ACTIONS:|OVERVIEW:|TOP THREATS:|PATTERNS DETECTED:|PRIORITY ACTIONS:|SITUATION:|IMMEDIATE ACTIONS:|TODAY:|THIS WEEK:/g, "")
@@ -1087,7 +1116,7 @@ try {
     await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"ai",message:data.answer,model_used:selectedModel,created_at:serverTimestamp()});
     await setDoc(doc(db,"soc_sessions",sessionId),{updated_at:serverTimestamp(),message_count:increment(1)},{merge:true});
   } catch(e) { console.error("Firestore AI save error:",e); }
-} catch(err) { setMessages(prev=>[...prev,{role:"ai",text:`Error: ${err.message}`,time:new Date().toLocaleTimeString()}]); }
+} catch(err) { setMessages(prev=>[...prev,{role:"ai",text:`Error: ${err.message}`,time:new Date().toLocaleTimeString(),model:modelObj.chip,isError:true}]); }
 setLoading(false);
   }
 
@@ -1230,6 +1259,60 @@ setLoading(false);
               </select>
             </div>
             <div className={`model-badge ${modelObj.cloud?"badge-cloud":"badge-local"}`}>⬡ {modelObj.tag}</div>
+
+            {modelObj.cloud ? (
+              <div style={{padding:"12px 20px 0"}}>
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontFamily:"var(--mono)",fontSize:9,color:"var(--text-mid)",letterSpacing:1}}>
+                  <input type="checkbox" checked={useOwnKey} onChange={handleToggleOwnKey} style={{accentColor:"var(--accent)",cursor:"pointer"}}/>
+                  USE YOUR OWN API KEY
+                </label>
+                {useOwnKey && (
+                  <div style={{marginTop:8,display:"flex",gap:6}}>
+                    <div style={{position:"relative",flex:1}}>
+                      <input
+                        type={showApiKey ? "text" : "password"}
+                        value={apiKeyInput}
+                        onChange={e=>setApiKeyInput(e.target.value)}
+                        onKeyDown={e=>e.key==="Enter"&&saveApiKey()}
+                        placeholder={`Enter ${modelObj.chip} key`}
+                        style={{width:"100%",background:"rgba(255,255,255,0.04)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)",padding:"7px 32px 7px 10px",color:"var(--text)",fontFamily:"var(--mono)",fontSize:10,outline:"none",boxSizing:"border-box"}}
+                      />
+                      <button
+                        type="button"
+                        onClick={()=>setShowApiKey(s=>!s)}
+                        title={showApiKey ? "Hide key" : "Show key"}
+                        style={{position:"absolute",right:5,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"var(--text-dim)",cursor:"pointer",padding:2,display:"flex",alignItems:"center"}}
+                      >
+                        {showApiKey ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M17.94 17.94A10.94 10.94 0 0112 19c-7 0-11-7-11-7a21.6 21.6 0 015.06-6.06M9.9 4.24A10.4 10.4 0 0112 4c7 0 11 7 11 7a21.6 21.6 0 01-3.22 4.19M14.12 14.12a3 3 0 11-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                        )}
+                      </button>
+                    </div>
+                    <button
+                      onClick={saveApiKey}
+                      disabled={!apiKeyInput.trim()}
+                      style={{padding:"7px 14px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:"var(--radius-sm)",color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:apiKeyInput.trim()?"pointer":"not-allowed",opacity:apiKeyInput.trim()?1:0.4,textTransform:"uppercase"}}
+                    >SAVE</button>
+                  </div>
+                )}
+                {selectedModel === "mistral" && useOwnKey && (
+                  <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",lineHeight:1.5}}>
+                    Note: backend needs an update from Satyam before Mistral will actually use this key.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{padding:"12px 20px 0"}}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",background:"rgba(255,255,255,0.035)",border:"1px solid var(--border2)",borderRadius:"var(--radius-sm)"}}>
+                  <span style={{color:"var(--green)",fontSize:13,lineHeight:1,flexShrink:0,marginTop:1}}>ⓘ</span>
+                  <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-mid)",lineHeight:1.6}}>
+                    Runs locally via Ollama — requires <span style={{color:"var(--accent)"}}>ollama serve</span> on <span style={{color:"var(--accent)"}}>localhost:11434</span>. No API key needed.
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="panel-divider"/>
             <div className="section-label" style={{justifyContent:"space-between"}}>
               Overview
