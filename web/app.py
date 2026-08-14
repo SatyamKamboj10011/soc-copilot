@@ -140,10 +140,31 @@ def get_llm(model, api_key=None):
         return OllamaLLM(model="sira-model"), "local"
 
 
+# eve.json is now genuinely large (growing continuously from real honeypot
+# traffic) and load_logs() used to re-read and re-parse the entire file on
+# every single API call (/stats, /logs, /search, /timeline, /top-ips, ...)
+# with no caching at all -- every dashboard refresh got a little slower as
+# the file grew. This cache keys off the file's mtime + size (both change
+# whenever honeypot_log_sync.py overwrites the file with fresh data) so a
+# re-parse only happens when the data has actually changed, not on every
+# request between syncs.
+MAX_CACHED_EVENTS = 5000
+_logs_cache = {"mtime": None, "size": None, "data": None}
+
+
 def load_logs():
+    log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
+    try:
+        stat = os.stat(log_path)
+    except FileNotFoundError:
+        return []
+
+    if (_logs_cache["data"] is not None
+            and _logs_cache["mtime"] == stat.st_mtime
+            and _logs_cache["size"] == stat.st_size):
+        return _logs_cache["data"]
 
     logs = []
-    log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
     try:
         with open(log_path, 'r') as f:
             for line in f:
@@ -155,6 +176,18 @@ def load_logs():
                     pass
     except FileNotFoundError:
         pass
+
+    # eve.json is chronological (oldest first). Keeping the most recent
+    # MAX_CACHED_EVENTS instead of all of them bounds both memory and the
+    # per-request cost of the Counter()/sort operations every endpoint below
+    # runs over this list, while keeping the dashboard focused on current
+    # activity rather than the oldest events on record.
+    if len(logs) > MAX_CACHED_EVENTS:
+        logs = logs[-MAX_CACHED_EVENTS:]
+
+    _logs_cache["mtime"] = stat.st_mtime
+    _logs_cache["size"] = stat.st_size
+    _logs_cache["data"] = logs
     return logs
 
 # ── ADD HERE ──────────────────────────────────────────────────────────────────
@@ -1540,31 +1573,4 @@ def compliance_trend():
 
 
 if __name__ == '__main__':
-    # Pull Suricata/Zeek logs from the public honeypot VM automatically,
-    # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
-    # only set in the child process the debug reloader actually forks to
-    # serve requests -- checking it here (rather than starting unconditionally)
-    # stops the sync thread from being started twice (once in the reloader's
-    # parent watcher process, once in the child) when debug=True.
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        from ai.honeypot_log_sync import start_background_sync
-        start_background_sync()
-
-    # NOTE: debug=True's reloader watches every .py file under the project
-    # tree recursively, including web/Wav2Lip/. When /sira-face-speak runs
-    # inference (which touches files inside face_detection/detection/sfd/),
-    # the reloader saw that as "code changed" and killed + restarted the
-    # whole Flask process mid-request -> browser saw it as a CORS failure
-    # (connection reset, no headers ever sent), not a real error.
-    # exclude_patterns keeps the reloader watching your actual app code
-    # while ignoring the Wav2Lip subdirectory entirely.
-    app.run(
-        host='0.0.0.0',
-        debug=True,
-        port=5000,
-        threaded=True,
-        exclude_patterns=[
-            "*/Wav2Lip/*",
-            "*\\Wav2Lip\\*",
-        ],
-    )
+    app.run(host='0.0.0.0', debug=True, port=5000)

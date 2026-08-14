@@ -1,8 +1,9 @@
 """
 Honeypot log sync -- pulls eve.json (Suricata) and conn.log (Zeek) from the
 public-facing Azure honeypot VM via SFTP, polling every 15 seconds. Only
-downloads when the remote file's size has changed since the last poll, so
-idle periods don't cause constant re-transfer of an unchanged file.
+transfers the bytes appended since the last poll (not the whole file every
+time), and correctly re-fetches fresh if the remote file was rotated
+(shrunk) since the last check.
 
 Designed to run as a background daemon thread started once from app.py at
 Flask startup (see start_background_sync()), but can also be run standalone
@@ -19,6 +20,7 @@ setup, but can be overridden via environment variables without editing code:
 """
 
 import os
+import sys
 import time
 import threading
 
@@ -72,13 +74,43 @@ def _sync_once(sftp):
             print(f"[honeypot_log_sync] stat failed for {remote_path}: {e}")
             continue
 
-        if _last_sizes.get(remote_path) == remote_size:
+        # Resume from the local file's actual on-disk size if this is the
+        # first check since the process started (rather than assuming 0),
+        # so restarting the script doesn't re-download everything it
+        # already has, or duplicate bytes it's already synced.
+        last_size = _last_sizes.get(remote_path)
+        if last_size is None:
+            last_size = os.path.getsize(local_path) if os.path.exists(local_path) else 0
+
+        if remote_size == last_size:
             continue  # unchanged since last poll -- skip transfer
 
         try:
-            sftp.get(remote_path, local_path)
+            if remote_size < last_size:
+                # The remote file is now SMALLER than what we last saw --
+                # it was rotated (logrotate ran on the honeypot) or Suricata
+                # restarted with a fresh file. Appending from the old byte
+                # offset would no longer make sense against the new file,
+                # so start over: re-fetch it whole (now small, since it just
+                # rotated) rather than trying to resume a stale offset.
+                print(f"[honeypot_log_sync] {os.path.basename(remote_path)} was rotated on the honeypot (was {last_size} bytes, now {remote_size}) -- re-fetching fresh")
+                with sftp.open(remote_path, "rb") as rf, open(local_path, "wb") as lf:
+                    lf.write(rf.read())
+            else:
+                # Normal case: fetch only the bytes appended since the last
+                # poll and append them locally, instead of re-downloading
+                # the entire (potentially very large) file every cycle --
+                # this is what previously re-transferred the full,
+                # continuously-growing eve.json on every single 15s poll.
+                with sftp.open(remote_path, "rb") as rf:
+                    rf.seek(last_size)
+                    new_data = rf.read(remote_size - last_size)
+                with open(local_path, "ab") as lf:
+                    lf.write(new_data)
+
+            added = remote_size - last_size
             _last_sizes[remote_path] = remote_size
-            print(f"[honeypot_log_sync] pulled {os.path.basename(remote_path)} ({remote_size} bytes)")
+            print(f"[honeypot_log_sync] pulled {os.path.basename(remote_path)} (+{added} bytes, {remote_size} total)")
         except Exception as e:
             print(f"[honeypot_log_sync] transfer failed for {remote_path}: {e}")
 
@@ -113,8 +145,33 @@ def start_background_sync():
     return thread
 
 
+def run_once():
+    """Connect, pull once, disconnect, return -- no infinite loop.
+
+    Used by start.bat *before* Flask starts: Flask holds ../ai/chroma_db's
+    sqlite file open for as long as it's running (a hard Windows file lock),
+    which directly conflicts with rag_setup.py's shutil.rmtree() during a
+    rebuild. The sync itself only touches ../logs/eve.json and conn.log --
+    it never needs Flask or Chroma to be running at all. Pulling fresh data
+    once, standalone, before Flask (and therefore before Chroma) ever
+    starts avoids that lock conflict entirely, while still guaranteeing the
+    rebuild that follows sees genuinely current data.
+    """
+    print(f"[honeypot_log_sync] one-shot mode -- pulling from {HONEYPOT_HOST}")
+    client = _connect()
+    try:
+        sftp = client.open_sftp()
+        _sync_once(sftp)
+    finally:
+        client.close()
+    print("[honeypot_log_sync] one-shot pull complete")
+
+
 if __name__ == "__main__":
-    # Standalone test mode: run the loop directly (blocking) so you can watch
-    # it work before wiring it into Flask.
-    print("[honeypot_log_sync] standalone mode -- Ctrl+C to stop")
-    _run_loop()
+    if "--once" in sys.argv:
+        run_once()
+    else:
+        # Standalone continuous mode: run the loop directly (blocking) so
+        # you can watch it work before wiring it into Flask.
+        print("[honeypot_log_sync] standalone mode -- Ctrl+C to stop")
+        _run_loop()
