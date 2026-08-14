@@ -521,10 +521,16 @@ Question: {question}
 
 Answer naturally. Pick the format that fits. Do not force sections that do not apply."""
 
-    if llm_type == "local":
-        answer = llm.invoke(prompt)
-    else:
-        answer = llm.invoke(prompt).content
+    try:
+        if llm_type == "local":
+            answer = llm.invoke(prompt)
+        else:
+            answer = llm.invoke(prompt).content
+    except Exception as e:
+        err_msg = str(e)
+        if any(k in err_msg.lower() for k in ["api key", "unauthorized", "401", "invalid_api_key", "authentication"]):
+            return jsonify({"error": "Invalid API key for this provider. Check the key and try again."}), 401
+        return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
 
     return jsonify({'answer': answer, 'model_used': model})
 
@@ -1567,49 +1573,4 @@ def compliance_trend():
 
 
 if __name__ == '__main__':
-    # Pull Suricata/Zeek logs from the public honeypot VM automatically,
-    # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
-    # only set in the child process the debug reloader actually forks to
-    # serve requests -- checking it here (rather than starting unconditionally)
-    # stops the sync thread from being started twice (once in the reloader's
-    # parent watcher process, once in the child) when debug=True.
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        from ai.honeypot_log_sync import start_background_sync
-        start_background_sync()
-
-    # NOTE: debug=True's reloader watches every file under the project tree
-    # recursively -- this originally caused two separate problems:
-    #
-    # 1) /sira-face-speak runs inference (touches files inside
-    #    face_detection/detection/sfd/), which the reloader saw as "code
-    #    changed" and killed + restarted the whole Flask process mid-request
-    #    -> browser saw a CORS failure (connection reset, no headers ever
-    #    sent), not a real error.
-    #
-    # 2) honeypot_log_sync.py writes ../logs/eve.json and ../logs/conn.log
-    #    every ~15s whenever the honeypot has new data, and rag_setup.py
-    #    rewrites ../ai/chroma_db/ on every rebuild. The reloader was
-    #    watching both of those too, so a routine sync write was *also*
-    #    seen as "code changed" and restarted Flask -- which re-ran
-    #    start_background_sync() in the new child process, which then wrote
-    #    to eve.json again on its next poll, restarting Flask again, and so
-    #    on. This is what looked like "the embeddings/rebuild ran multiple
-    #    times back-to-back": it was actually Flask itself restarting in a
-    #    loop, not the rebuild script being invoked repeatedly.
-    #
-    # exclude_patterns keeps the reloader watching your actual app code
-    # while ignoring Wav2Lip's working files and the two data directories
-    # that are never supposed to contain source code in the first place.
-    app.run(
-        host='0.0.0.0',
-        debug=True,
-        port=5000,
-        exclude_patterns=[
-            "*/Wav2Lip/*",
-            "*\\Wav2Lip\\*",
-            "*/logs/*",
-            "*\\logs\\*",
-            "*/chroma_db/*",
-            "*\\chroma_db\\*",
-        ],
-    )
+    app.run(host='0.0.0.0', debug=True, port=5000)
