@@ -5,11 +5,10 @@ from flask_bcrypt import Bcrypt
 from langchain_ollama import OllamaLLM
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_mistralai import ChatMistralAI
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 import sqlite3
 import json
 import os
@@ -101,7 +100,13 @@ def init_db():
 init_db()
 # ─────────────────────────────────────────────────────────────────────────────
 
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
+# langchain_ollama.OllamaEmbeddings was not honoring an explicit base_url on
+# this machine -- it kept targeting a stray non-standard local port instead
+# of 127.0.0.1:11434 regardless of what was passed in. DirectOllamaEmbeddings
+# bypasses it and talks to the ollama package directly (confirmed working).
+from ai.ollama_embeddings import DirectOllamaEmbeddings
+
+embeddings = DirectOllamaEmbeddings(model="nomic-embed-text", host="http://127.0.0.1:11434")
 
 vectorstore = Chroma(
     persist_directory="../ai/chroma_db",
@@ -135,10 +140,31 @@ def get_llm(model, api_key=None):
         return OllamaLLM(model="sira-model"), "local"
 
 
+# eve.json is now genuinely large (growing continuously from real honeypot
+# traffic) and load_logs() used to re-read and re-parse the entire file on
+# every single API call (/stats, /logs, /search, /timeline, /top-ips, ...)
+# with no caching at all -- every dashboard refresh got a little slower as
+# the file grew. This cache keys off the file's mtime + size (both change
+# whenever honeypot_log_sync.py overwrites the file with fresh data) so a
+# re-parse only happens when the data has actually changed, not on every
+# request between syncs.
+MAX_CACHED_EVENTS = 5000
+_logs_cache = {"mtime": None, "size": None, "data": None}
+
+
 def load_logs():
+    log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
+    try:
+        stat = os.stat(log_path)
+    except FileNotFoundError:
+        return []
+
+    if (_logs_cache["data"] is not None
+            and _logs_cache["mtime"] == stat.st_mtime
+            and _logs_cache["size"] == stat.st_size):
+        return _logs_cache["data"]
 
     logs = []
-    log_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
     try:
         with open(log_path, 'r') as f:
             for line in f:
@@ -150,6 +176,18 @@ def load_logs():
                     pass
     except FileNotFoundError:
         pass
+
+    # eve.json is chronological (oldest first). Keeping the most recent
+    # MAX_CACHED_EVENTS instead of all of them bounds both memory and the
+    # per-request cost of the Counter()/sort operations every endpoint below
+    # runs over this list, while keeping the dashboard focused on current
+    # activity rather than the oldest events on record.
+    if len(logs) > MAX_CACHED_EVENTS:
+        logs = logs[-MAX_CACHED_EVENTS:]
+
+    _logs_cache["mtime"] = stat.st_mtime
+    _logs_cache["size"] = stat.st_size
+    _logs_cache["data"] = logs
     return logs
 
 # ── ADD HERE ──────────────────────────────────────────────────────────────────
@@ -329,6 +367,24 @@ def ask():
 
     llm, llm_type = get_llm(model, api_key)
 
+    # Identity/meta questions ("who are you", "what can you do") aren't
+    # about log data at all -- retrieving logs for them just grabs whatever
+    # random entries are nearest in the vector index, and the log-analysis
+    # prompt below then forces the model to write a fake incident report
+    # about them. Answer these directly instead, with no retrieval.
+    if re.search(r'\b(who are you|what are you|what is sira|introduce yourself|what can you do|how do you work|tell me about yourself)\b', question, re.IGNORECASE):
+        identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
+Speak like JARVIS from Iron Man: calm, precise, address the analyst as "Sir" occasionally.
+The analyst asked: "{question}"
+Answer conversationally in 2-4 sentences, describing who you are and what you help with
+(monitoring Suricata/Zeek network traffic, triaging alerts, investigating threats via Hermes).
+Do NOT perform log analysis, cite any IPs, or produce a security report for this message."""
+        if llm_type == "local":
+            identity_answer = llm.invoke(identity_prompt)
+        else:
+            identity_answer = llm.invoke(identity_prompt).content
+        return jsonify({'answer': identity_answer, 'model_used': model})
+
     docs = retriever.invoke(question)
 
     if date_filter:
@@ -384,6 +440,8 @@ STRICT RULES:
 - If information is missing say "Not available in logs"
 - Write so a junior analyst with 3 months experience can understand
 - VARY your response based on what is being asked — not every question needs 5 sections
+- Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure traffic, not external attackers — even with a high event count. Never describe traffic from these as unauthorized access, an intrusion, or an attack, and never recommend blocking them.
+- If the retrieved log data below doesn't actually relate to the question asked, say so plainly instead of forcing it into a security-report structure
 
 Previous conversation:
 {chr(10).join([f"{m['role'].upper()}: {m['content']}" for m in history[-4:] if m.get('content')]) or "None"}
@@ -474,8 +532,7 @@ Answer naturally. Pick the format that fits. Do not force sections that do not a
 @app.route('/logs', methods=['GET'])
 def get_logs():
     logs = load_logs()
-    limit = min(int(request.args.get('limit', 50)), 1000)
-    return jsonify(logs[:limit])
+    return jsonify(logs[:50])
 
 
 @app.route('/models', methods=['GET'])
@@ -560,8 +617,6 @@ def health():
 def search():
     query  = request.args.get('q', '').strip()
     event_type = request.args.get('type', None)
-    offset = int(request.args.get('offset', 0))
-    limit  = min(int(request.args.get('limit', 100)), 500)
     logs  = load_logs()
 
     if query:
@@ -572,12 +627,7 @@ def search():
     if event_type:
         logs = [l for l in logs if l.get('event_type') == event_type]
 
-    return jsonify({
-        "results": logs[offset:offset+limit],
-        "total": len(logs),
-        "offset": offset,
-        "limit": limit,
-    })
+    return jsonify(logs[:100])  # return top 100 matches
 
 
 @app.route('/timeline', methods=['GET'])
@@ -596,8 +646,6 @@ def timeline():
 @app.route('/top-ips', methods=['GET'])
 def top_ips():
     logs = load_logs()
-    hours = request.args.get('hours', type=int)
-    logs = _filter_by_hours(logs, hours)
     limit = int(request.args.get('limit', 10))
     ip_counts = Counter(l.get('src_ip') for l in logs if l.get('src_ip'))
     result = [{"ip": ip, "count": count} for ip, count in ip_counts.most_common(limit)]
@@ -1314,25 +1362,8 @@ def _log_date_hour(ts):
     return m.group(1), int(m.group(2))
 
 
-def _parse_full_ts(ts):
-    """Parse a Suricata ISO timestamp into a naive UTC datetime, or None."""
-    try:
-        return datetime.strptime((ts or "")[:19], "%Y-%m-%dT%H:%M:%S")
-    except ValueError:
-        return None
-
-
-def _filter_by_hours(logs, hours):
-    """Keep only logs within the last `hours` hours. hours=None/0 = no filtering (all time)."""
-    if not hours:
-        return logs
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
-    return [l for l in logs if (dt := _parse_full_ts(l.get('timestamp'))) and dt >= cutoff]
-
-
-def _compliance_context(hours=None):
+def _compliance_context():
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     total_events = len(logs)
     alert_events = [l for l in logs if l.get('event_type') == 'alert']
     alert_count = len(alert_events)
@@ -1435,8 +1466,7 @@ def _evaluate_controls(ctx):
 
 @app.route('/compliance/overview', methods=['GET'])
 def compliance_overview():
-    hours = request.args.get('hours', type=int)
-    ctx = _compliance_context(hours)
+    ctx = _compliance_context()
     controls = _evaluate_controls(ctx)
     weight = {"pass": 1, "warn": 0.5, "fail": 0}
 
@@ -1466,17 +1496,14 @@ def compliance_overview():
 
 @app.route('/compliance/controls', methods=['GET'])
 def compliance_controls():
-    hours = request.args.get('hours', type=int)
-    ctx = _compliance_context(hours)
+    ctx = _compliance_context()
     return jsonify(_evaluate_controls(ctx))
 
 
 @app.route('/compliance/findings', methods=['GET'])
 def compliance_findings():
     limit = min(int(request.args.get('limit', 10)), 200)
-    hours = request.args.get('hours', type=int)
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     alerts = [l for l in logs if l.get('event_type') == 'alert']
     alerts.sort(key=lambda l: l.get('timestamp', ''), reverse=True)
 
@@ -1499,9 +1526,7 @@ def compliance_findings():
 
 @app.route('/compliance/heatmap', methods=['GET'])
 def compliance_heatmap():
-    hours = request.args.get('hours', type=int)
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     grid = Counter()
     for l in logs:
         if l.get('event_type') != 'alert':
@@ -1521,9 +1546,7 @@ def compliance_heatmap():
 
 @app.route('/compliance/trend', methods=['GET'])
 def compliance_trend():
-    hours = request.args.get('hours', type=int)
     logs = load_logs()
-    logs = _filter_by_hours(logs, hours)
     by_day = {}
     for l in logs:
         date_str, _ = _log_date_hour(l.get('timestamp'))
@@ -1544,4 +1567,49 @@ def compliance_trend():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5000)
+    # Pull Suricata/Zeek logs from the public honeypot VM automatically,
+    # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
+    # only set in the child process the debug reloader actually forks to
+    # serve requests -- checking it here (rather than starting unconditionally)
+    # stops the sync thread from being started twice (once in the reloader's
+    # parent watcher process, once in the child) when debug=True.
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        from ai.honeypot_log_sync import start_background_sync
+        start_background_sync()
+
+    # NOTE: debug=True's reloader watches every file under the project tree
+    # recursively -- this originally caused two separate problems:
+    #
+    # 1) /sira-face-speak runs inference (touches files inside
+    #    face_detection/detection/sfd/), which the reloader saw as "code
+    #    changed" and killed + restarted the whole Flask process mid-request
+    #    -> browser saw a CORS failure (connection reset, no headers ever
+    #    sent), not a real error.
+    #
+    # 2) honeypot_log_sync.py writes ../logs/eve.json and ../logs/conn.log
+    #    every ~15s whenever the honeypot has new data, and rag_setup.py
+    #    rewrites ../ai/chroma_db/ on every rebuild. The reloader was
+    #    watching both of those too, so a routine sync write was *also*
+    #    seen as "code changed" and restarted Flask -- which re-ran
+    #    start_background_sync() in the new child process, which then wrote
+    #    to eve.json again on its next poll, restarting Flask again, and so
+    #    on. This is what looked like "the embeddings/rebuild ran multiple
+    #    times back-to-back": it was actually Flask itself restarting in a
+    #    loop, not the rebuild script being invoked repeatedly.
+    #
+    # exclude_patterns keeps the reloader watching your actual app code
+    # while ignoring Wav2Lip's working files and the two data directories
+    # that are never supposed to contain source code in the first place.
+    app.run(
+        host='0.0.0.0',
+        debug=True,
+        port=5000,
+        exclude_patterns=[
+            "*/Wav2Lip/*",
+            "*\\Wav2Lip\\*",
+            "*/logs/*",
+            "*\\logs\\*",
+            "*/chroma_db/*",
+            "*\\chroma_db\\*",
+        ],
+    )
