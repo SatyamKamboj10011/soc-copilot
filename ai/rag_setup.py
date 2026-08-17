@@ -11,7 +11,7 @@ import datetime
 import json
 import shutil
 import argparse
-from langchain_chroma import Chroma
+import chromadb
 from langchain_core.documents import Document
 from ollama_embeddings import DirectOllamaEmbeddings
 
@@ -24,7 +24,7 @@ OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 USEFUL_TYPES = {"alert", "dns", "http", "tls", "flow"}
-MAX_EVENTS   = 50000
+MAX_EVENTS   = 5000
 
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
@@ -123,10 +123,17 @@ def load_logs(path):
                         "split":      "train" if args.mode == "train" else "full"
                     }
                 ))
-                if len(docs) >= MAX_EVENTS:
-                    break
             except:
                 continue
+    # eve.json is chronological (oldest first). Previously this loop broke
+    # as soon as MAX_EVENTS was reached, which meant the OLDEST events won
+    # once the file grew past the cap -- SIRA would get permanently stuck
+    # reasoning about old data and blind to everything newer from that point
+    # on. Keeping the most recent MAX_EVENTS instead means the cap always
+    # reflects current activity, not whichever events happened to come first
+    # the day the threshold was first crossed.
+    if len(docs) > MAX_EVENTS:
+        docs = docs[-MAX_EVENTS:]
     return docs
 
 
@@ -185,11 +192,44 @@ print(docs[0].page_content)
 print()
 
 print(f"Building ChromaDB (Ollama at {OLLAMA_BASE_URL})...")
-embeddings  = DirectOllamaEmbeddings(model="nomic-embed-text", host=OLLAMA_BASE_URL)
-vectorstore = Chroma.from_documents(
-    docs,
-    embeddings,
-    persist_directory=CHROMA_DB_PATH
-)
+embeddings = DirectOllamaEmbeddings(model="nomic-embed-text", host=OLLAMA_BASE_URL)
+
+# NOTE: this used to call langchain_chroma's Chroma.from_documents(), which
+# was silently re-invoking embeddings.embed_documents() on the FULL document
+# list multiple times in a row (visible as the progress counter completing
+# 5461/5461 and then restarting from 0 with no error and no explanation in
+# between). from_documents() internally batches and writes through several
+# layers of langchain_chroma/chromadb that were not behaving predictably in
+# this environment. Rather than chase that further, this now computes
+# embeddings exactly once ourselves (the batching in DirectOllamaEmbeddings
+# is already proven to complete cleanly on its own) and writes them straight
+# into chromadb's own client in a single, plain, bounded loop -- no
+# framework retry logic left that can loop silently.
+texts     = [d.page_content for d in docs]
+metadatas = [d.metadata for d in docs]
+ids       = [str(i) for i in range(len(docs))]
+
+print(f"Computing embeddings for {len(texts)} documents (single pass)...")
+vectors = embeddings.embed_documents(texts)
+print(f"Computed {len(vectors)} embeddings.")
+
+client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+# "langchain" matches langchain_chroma's default collection_name, so app.py's
+# existing `Chroma(persist_directory=..., embedding_function=embeddings)`
+# (which doesn't pass an explicit collection_name) finds this collection
+# without any change needed on that side.
+collection = client.get_or_create_collection(name="langchain")
+
+WRITE_BATCH = 500
+for start in range(0, len(texts), WRITE_BATCH):
+    end = min(start + WRITE_BATCH, len(texts))
+    collection.add(
+        ids=ids[start:end],
+        embeddings=vectors[start:end],
+        documents=texts[start:end],
+        metadatas=metadatas[start:end],
+    )
+    print(f"[chromadb] wrote {end}/{len(texts)}")
+
 print(f"\n✅ Done! {len(docs)} events stored in ChromaDB")
 print(f"   Mode: {args.mode.upper()}")

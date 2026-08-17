@@ -15,14 +15,6 @@ import { SaveToDocumentButton, HermesDocumentsPanel } from "./HermesDocuments";
 
 const FLASK_URL = "http://localhost:5000";
 
-const MODEL_OPTIONS = [
-  { value: "ollama",      label: "SIRA — qwen2.5:7b (local)",       tag: "LOCAL — FREE", chip: "sira-model (local)",    cloud: false },
-  { value: "ollama_phi3", label: "Phi3 3.8B — fastest (local)",     tag: "LOCAL — FREE", chip: "phi3 3.8b (local)",     cloud: false },
-  { value: "groq",        label: "Groq — Llama 3.3 70B (cloud)",    tag: "CLOUD — FREE", chip: "groq llama3 (cloud)",   cloud: true  },
-  { value: "gemini",      label: "Google Gemini 2.0 Flash (cloud)", tag: "CLOUD — FREE", chip: "gemini 2.0 (cloud)",    cloud: true  },
-  { value: "mistral",     label: "Mistral Small (cloud — free)",    tag: "CLOUD — FREE", chip: "mistral small (cloud)", cloud: true  },
-];
-
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",
   "Suspicious activity?",
@@ -288,10 +280,7 @@ const sharedCss = `
   }
   .modal-close { position: absolute; top: 18px; right: 18px; background: rgba(255,255,255,0.06); border: 1px solid var(--border2); border-radius: 8px; width: 28px; height: 28px; color: var(--text-dim); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; }
 
-  /* ===== FLOATING PANELS — non-blocking, draggable, no backdrop.
-     Used for things you want to consult *alongside* the rest of the app
-     (machine inspector, Hermes agent) rather than a decision you must
-     make before continuing (those stay as real .modal dialogs). ===== */
+  /* ===== FLOATING PANELS ===== */
   .float-panel {
     position: fixed; z-index: 150; width: 420px; max-width: calc(100vw - 40px); max-height: 78vh; overflow-y: auto;
     background: linear-gradient(180deg, rgba(30,30,34,0.88), rgba(20,20,24,0.9));
@@ -409,7 +398,6 @@ function ConfidenceRing({ pct, color }) {
   }, [pct, color]);
   return <canvas ref={ref} width={40} height={40} style={{ width: 40, height: 40 }} />;
 }
-
 function SiraMessage({ text, modelChip }) {
   if (!text) return null;
   const sections = {};
@@ -493,7 +481,6 @@ function SiraMessage({ text, modelChip }) {
     </div>
   );
 }
-
 const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
   const [rows, setRows]                     = useState([]);
   const [search, setSearch]                 = useState("");
@@ -516,8 +503,6 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
     setProfileLoading(false);
   };
 
-  // /logs returns a plain array (no total count); /search returns {results, total}.
-  // Both are handled here so the rest of the component doesn't care which one is active.
   const fetchPage = (q, pageOffset, append) => {
     if (q) {
       fetch(`${FLASK_URL}/search?q=${encodeURIComponent(q)}&offset=${pageOffset}&limit=${PAGE_SIZE}`)
@@ -531,14 +516,12 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
         })
         .catch(() => { setSearching(false); setLoadingMore(false); });
     } else {
-      // no query — /logs has no total, so "load more" just asks for more rows
-      // and we infer more-available from whether we got a full page back
       const nextLimit = pageOffset + PAGE_SIZE;
       fetch(`${FLASK_URL}/logs?limit=${nextLimit}`)
         .then(r => r.json())
         .then(data => {
           setRows(data);
-          setTotal(data.length === nextLimit ? nextLimit + 1 : data.length); // +1 signals "there may be more"
+          setTotal(data.length === nextLimit ? nextLimit + 1 : data.length);
           setOffset(data.length);
           setSearching(false);
           setLoadingMore(false);
@@ -547,10 +530,8 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
     }
   };
 
-  // initial load
   useEffect(() => { fetchPage("", 0, false); }, []); // eslint-disable-line
 
-  // debounced search — resets to page 1 every time the query changes
   useEffect(() => {
     clearTimeout(searchDebounce.current);
     setSearching(true);
@@ -698,7 +679,6 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
     </div>
   );
 });
-
 function BootSequence({ onComplete }) {
   const [lines, setLines] = useState([]);
   const [done, setDone]   = useState(false);
@@ -798,6 +778,49 @@ function ThreatLevelCard({ alertCount }) {
   );
 }
 
+// Rustinel EDR widget -- reads real Sigma/YARA/IOC detections from the
+// /rustinel-alerts endpoint (see ai/rustinel_reader.py + app.py). Separate
+// from the Connected Machines list above it: that shows Sentinel's raw
+// connection heuristic, this shows Rustinel's actual rule-based detections
+// -- two different depths of endpoint visibility, kept visually consistent
+// (same list-item pattern) but functionally distinct.
+function RustinelPanel() {
+  const [ralerts, setRalerts] = useState([]);
+  useEffect(() => {
+    const fetchAlerts = () => fetch(`${FLASK_URL}/rustinel-alerts?limit=5`).then(r=>r.json()).then(setRalerts).catch(()=>{});
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 20000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const severityColor = (sev) => {
+    const s = (sev||"").toLowerCase();
+    if (s === "critical" || s === "high") return "var(--red)";
+    if (s === "medium") return "var(--orange)";
+    return "var(--accent)"; // low/unknown
+  };
+
+  return (
+    <>
+      <div className="panel-divider"/>
+      <div className="section-label">Rustinel EDR</div>
+      <div style={{padding:"8px 20px"}}>
+        {ralerts.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO DETECTIONS</div>}
+        {ralerts.map((a,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)"}}>
+            <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:severityColor(a.severity),boxShadow:`0 0 6px ${severityColor(a.severity)}`}}/>
+            <div style={{flex:1,overflow:"hidden"}}>
+              <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.rule_name}</div>
+              <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.engine} — {a.process_name || a.host_os}</div>
+            </div>
+            <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,flexShrink:0,background:`${severityColor(a.severity)}22`,color:severityColor(a.severity),border:`1px solid ${severityColor(a.severity)}44`}}>{a.severity}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView }) {
   const canvasRef = useRef(null);
   const alertEvents = alerts.filter(a => a.event_type === "alert");
@@ -887,6 +910,61 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
 }
 export default function App() {
   const [selectedModel, setSelectedModel] = useState("ollama");
+  const [modelOptions, setModelOptions]   = useState([]);
+  useEffect(() => {
+    // Single source of truth is now Flask's /models endpoint (see app.py) --
+    // this replaces a hardcoded array that had silently drifted out of sync
+    // with the backend (two newly-added lightweight models existed
+    // server-side but weren't selectable here at all, since this list was
+    // never updated to match).
+    fetch(`${FLASK_URL}/models`).then(r=>r.json()).then(data => {
+      setModelOptions(data.map(m => ({
+        value: m.id,
+        label: m.name,
+        chip: m.chip,
+        tag: m.cloud ? "CLOUD — FREE" : "LOCAL — FREE",
+        cloud: m.cloud,
+      })));
+    }).catch(()=>{});
+  }, []);
+
+  // ── Performance tier system ───────────────────────────────────────────
+  // Embeddings (nomic-embed-text) never change here -- only the reasoning
+  // models (SIRA chat + Hermes reports) switch. Changing the embedding
+  // model would silently break retrieval, since ChromaDB's whole index was
+  // built against one specific embedding space.
+  const PERF_TIERS = {
+    full:     { label: "Full",     siraModel: "ollama",          hermesModel: "nous-hermes2", ram: "~11 GB" },
+    balanced: { label: "Balanced", siraModel: "ollama_phi4mini", hermesModel: "phi4-mini",     ram: "~3 GB"  },
+    light:    { label: "Light",    siraModel: "ollama_llama32",  hermesModel: "phi4-mini",     ram: "~2.5 GB" },
+  };
+  const [perfTier, setPerfTier] = useState(() => localStorage.getItem("sira_perf_tier") || "full");
+  const [hwSpecs, setHwSpecs] = useState(null);
+  const [suggestedTier, setSuggestedTier] = useState(null);
+
+  useEffect(() => {
+    // navigator.deviceMemory is Chrome/Edge-only and browsers deliberately
+    // round/cap it for privacy (e.g. reports "8" for anything >=8GB) -- a
+    // rough heuristic to SUGGEST a tier, never something to force silently.
+    const cores = navigator.hardwareConcurrency || null;
+    const mem = navigator.deviceMemory || null; // undefined on Firefox/Safari
+    setHwSpecs({ cores, mem });
+    let suggestion = "full";
+    if (mem && mem <= 4) suggestion = "light";
+    else if (mem && mem <= 8) suggestion = "balanced";
+    else if (!mem && cores && cores <= 4) suggestion = "balanced"; // no deviceMemory support -- fall back to core count only
+    setSuggestedTier(suggestion);
+  }, []);
+
+  const applyPerfTier = (tierKey) => {
+    const tier = PERF_TIERS[tierKey];
+    if (!tier) return;
+    setPerfTier(tierKey);
+    localStorage.setItem("sira_perf_tier", tierKey);
+    setSelectedModel(tier.siraModel);
+    showToast(`Switched to ${tier.label} mode`);
+  };
+  // ─────────────────────────────────────────────────────────────────────
   const [messages, setMessages]           = useState([{ role:"ai", text:null, time:new Date().toLocaleTimeString(), isWelcome:true }]);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [lastSession, setLastSession]     = useState(null);
@@ -904,7 +982,7 @@ export default function App() {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const isRightResizing = useRef(false);
-  const [machinePanelPos, setMachinePanelPos] = useState(null); // null = default corner position; {x,y} once dragged
+  const [machinePanelPos, setMachinePanelPos] = useState(null);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
@@ -942,7 +1020,8 @@ const [sessionId, setSessionId] = useState(() => {
   const voicePlayed  = useRef(false);
 
   const username = localStorage.getItem("username") || "USER";
-  const modelObj = MODEL_OPTIONS.find(m => m.value === selectedModel);
+  const modelObj = modelOptions.find(m => m.value === selectedModel)
+    || { value: "ollama", label: "SIRA (local)", tag: "LOCAL — FREE", chip: "sira-model (local)", cloud: false };
   const charCount = input.length;
   const charClass = charCount === 0 ? "ok" : charCount > MAX_CHARS ? "over" : charCount > MAX_CHARS * 0.8 ? "warn" : "ok";
 
@@ -960,16 +1039,13 @@ const [sessionId, setSessionId] = useState(() => {
     const startX = e.clientX, startWidth = rightPanelWidth;
     const onMove = (e) => {
       if (!isRightResizing.current) return;
-      const delta = startX - e.clientX; // dragging left grows the right panel
+      const delta = startX - e.clientX;
       setRightPanelWidth(Math.min(420, Math.max(200, startWidth + delta)));
     };
     const onUp = () => { isRightResizing.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
   };
 
-  // Drags a .float-panel by its handle. Reads the panel's current on-screen
-  // position at drag start (whether it's still sitting at its default
-  // corner or was already moved) so the first frame never jumps.
   const startPanelDrag = (setPos) => (e) => {
     const panelEl = e.currentTarget.closest(".float-panel");
     const rect = panelEl.getBoundingClientRect();
@@ -1055,9 +1131,8 @@ const [sessionId, setSessionId] = useState(() => {
     alertIPs.slice(0,3).forEach((ip,i) => setTimeout(()=>checkReputation(ip), i*1000));
   }, [alerts]); // eslint-disable-line
 
-  const handleModelChange = (e) => { const val=e.target.value; setSelectedModel(val); showToast(`Switched to ${MODEL_OPTIONS.find(x=>x.value===val).chip}`); };
+  const handleModelChange = (e) => { const val=e.target.value; setSelectedModel(val); showToast(`Switched to ${modelOptions.find(x=>x.value===val)?.chip || val}`); };
 
-  // Load this provider's saved "use own key" preference + key whenever the model changes
   useEffect(() => {
     if (!modelObj.cloud) { setUseOwnKey(false); setApiKeyInput(""); return; }
     const storedUseOwn = localStorage.getItem(`sira_use_own_key_${selectedModel}`) === "true";
@@ -1082,7 +1157,8 @@ const [sessionId, setSessionId] = useState(() => {
     if (!hermesTask.trim()) return;
     setHermesLoading(true); setHermesSteps([]); setHermesAnswer("");
     try {
-      const data = await fetch(`${FLASK_URL}/hermes-agent`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:hermesTask})}).then(r=>r.json());
+      const hermesModel = PERF_TIERS[perfTier]?.hermesModel || "nous-hermes2";
+      const data = await fetch(`${FLASK_URL}/hermes-agent`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:hermesTask, model:hermesModel})}).then(r=>r.json());
       setHermesSteps(data.steps||[]); setHermesAnswer(data.answer||"Investigation complete");
     } catch(err) { setHermesAnswer(`Error: ${err.message}`); }
     setHermesLoading(false);
@@ -1256,7 +1332,7 @@ setLoading(false);
             <div className="section-label">AI Engine</div>
             <div className="model-select-wrap">
               <select className="model-select" value={selectedModel} onChange={handleModelChange}>
-                {MODEL_OPTIONS.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
+                {modelOptions.map(m=><option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
             <div className={`model-badge ${modelObj.cloud?"badge-cloud":"badge-local"}`}>⬡ {modelObj.tag}</div>
@@ -1314,6 +1390,35 @@ setLoading(false);
                 </div>
               </div>
             )}
+
+            {/* ── Performance Mode — hardware-based tier picker ────────────
+                Sets BOTH SIRA's model (via selectedModel, reusing the
+                existing dropdown machinery) and Hermes's model (sent per-
+                request in startHermes) together. Embeddings never change. */}
+            <div className="section-label">Performance Mode</div>
+            <div style={{padding:"10px 20px 0"}}>
+              <div style={{display:"flex",gap:6,marginBottom:8}}>
+                {Object.entries(PERF_TIERS).map(([key,t])=>(
+                  <button key={key} onClick={()=>applyPerfTier(key)} style={{
+                    flex:1, padding:"8px 6px", borderRadius:"var(--radius-sm)", cursor:"pointer",
+                    fontFamily:"var(--mono)", fontSize:9, letterSpacing:0.5, textTransform:"uppercase",
+                    background: perfTier===key ? "var(--accent)" : "var(--bg3)",
+                    color: perfTier===key ? "var(--bg)" : "var(--text-mid)",
+                    border: perfTier===key ? "1px solid var(--accent)" : "1px solid var(--border2)",
+                    fontWeight: perfTier===key ? 700 : 400,
+                  }}>
+                    {t.label}
+                    {suggestedTier===key && <div style={{fontSize:7,marginTop:2,opacity:0.75}}>SUGGESTED</div>}
+                  </button>
+                ))}
+              </div>
+              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",lineHeight:1.6}}>
+                {hwSpecs && (
+                  <>Detected: {hwSpecs.cores||"?"} cores{hwSpecs.mem ? `, ~${hwSpecs.mem}GB RAM` : " (RAM detection unsupported in this browser)"}.<br/></>
+                )}
+                Est. RAM for current mode: <span style={{color:"var(--accent)"}}>{PERF_TIERS[perfTier].ram}</span>
+              </div>
+            </div>
             <div className="panel-divider"/>
             <div className="section-label" style={{justifyContent:"space-between"}}>
               Overview
@@ -1363,6 +1468,7 @@ setLoading(false);
                 </div>
               </div>
             </div>
+            <RustinelPanel/>
             <div className="panel-divider"/>
             <div className="feed-wrap">
               <div style={{padding:"0 20px 10px"}}>
@@ -1617,4 +1723,4 @@ setLoading(false);
       />
     </>
   );
-  }
+}

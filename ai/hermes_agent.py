@@ -111,6 +111,62 @@ def correlate_zeek(ip: str) -> str:
         return f"Zeek correlation failed: {str(e)}"
 
 
+def check_endpoint_activity(machine_id: str = "") -> str:
+    """Check Sentinel endpoint telemetry -- registered machines' last
+    check-in and any flagged suspicious connections or processes -- plus
+    real Sigma/YARA/IOC detections from Rustinel, if it's running. These
+    are two separate endpoint data sources (raw connection heuristics vs.
+    actual behavioral detection rules), reported together since they both
+    describe YOUR OWN monitored machines, not attacker traffic."""
+    try:
+        if machine_id:
+            res = requests.get(f"{FLASK_URL}/machine/{machine_id}", timeout=10)
+            data = res.json()
+            if not data:
+                result = f"No Sentinel data found for machine '{machine_id}'.\n"
+            else:
+                result = (f"Endpoint {data.get('id')}:\n"
+                         f"- Platform: {data.get('platform')}\n"
+                         f"- Local IP: {data.get('local_ip')}\n"
+                         f"- Last seen: {data.get('last_seen')}\n"
+                         f"- Flagged: {data.get('alert')}\n")
+                suspicious = data.get('suspicious', [])
+                if suspicious:
+                    result += f"- Suspicious connections ({len(suspicious)}):\n"
+                    for s in suspicious[:5]:
+                        result += f"  - {s.get('remote', 'unknown')}\n"
+        else:
+            res = requests.get(f"{FLASK_URL}/machines", timeout=10)
+            data = res.json()
+            if not data:
+                result = "No Sentinel endpoints currently registered.\n"
+            else:
+                result = f"Registered Sentinel endpoints ({len(data)}):\n"
+                for m in data:
+                    flag = "FLAGGED" if m.get('alert') else "clean"
+                    result += f"- {m.get('id')} ({m.get('platform')}) — last seen {m.get('last_seen')} — {flag}, {m.get('suspicious_count', 0)} suspicious connection(s)\n"
+
+        # Real Sigma/YARA/IOC detections from Rustinel, if it's running --
+        # a genuinely richer source than the connection-heuristic check
+        # above, when available.
+        try:
+            rres = requests.get(f"{FLASK_URL}/rustinel-alerts", params={"limit": 5}, timeout=5)
+            rustinel_alerts = rres.json()
+        except Exception:
+            rustinel_alerts = []
+
+        if rustinel_alerts:
+            result += f"\nRustinel EDR detections ({len(rustinel_alerts)} most recent):\n"
+            for a in rustinel_alerts:
+                result += f"- [{a.get('engine')}] {a.get('rule_name')} — severity {a.get('severity')} — host: {a.get('host_name') or a.get('host_os')}\n"
+        else:
+            result += "\nRustinel EDR: no alerts (either not running, or no detections triggered).\n"
+
+        return result
+    except Exception as e:
+        return f"Sentinel endpoint check failed: {str(e)}"
+
+
 def get_stats(query: str = "") -> str:
     """Get overall network statistics — total events, alerts, unique IPs."""
     try:
@@ -188,8 +244,13 @@ def _pick_cve_search_term(target_ip: str, raw_logs):
 
 # ── AGENT RUNNER ─────────────────────────────────────────────────────────
 
-def run_hermes_agent(task: str) -> dict:
-    llm = OllamaLLM(model="nous-hermes2", temperature=0.3, num_predict=2048)
+def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
+    # model is now a real parameter, not hardcoded -- lets the frontend's
+    # performance-tier picker choose a lighter model (e.g. phi4-mini) for
+    # the report-writing step when the user's hardware doesn't comfortably
+    # fit nous-hermes2 (10.7B, ~6.1GB). Defaults to nous-hermes2 so any
+    # existing caller that doesn't pass a model keeps today's behaviour.
+    llm = OllamaLLM(model=model, temperature=0.3, num_predict=2048)
 
     steps = []
 
@@ -204,7 +265,16 @@ def run_hermes_agent(task: str) -> dict:
     ips_result = get_top_ips("")
     steps.append({"step": 2, "tool": "get_top_ips", "input": "", "result": ips_result, "status": "done"})
 
-    # Step 3 — Pick a real target IP: explicit from the task, else the
+    # Step 3 — Check Sentinel endpoint telemetry -- separate data source
+    # from the honeypot's network logs (your own monitored machines, not
+    # attacker traffic), but genuinely relevant context for a full
+    # investigation: is anything flagged on the machines Hermes is meant
+    # to be protecting, independent of what's happening on the honeypot?
+    print("Step 3: Checking Sentinel endpoint activity...")
+    endpoint_result = check_endpoint_activity("")
+    steps.append({"step": 3, "tool": "check_endpoint_activity", "input": "", "result": endpoint_result, "status": "done"})
+
+    # Step 4 — Pick a real target IP: explicit from the task, else the
     # highest-volume genuinely external IP. No hardcoded placeholder.
     target_ip = _pick_target_ip(task, top_ips_data)
 
@@ -213,41 +283,41 @@ def run_hermes_agent(task: str) -> dict:
         # honestly instead of inventing a target IP to run the rest of the
         # pipeline against.
         no_target_msg = "No external (non-internal) attacking IP found in current top-IPs data."
-        steps.append({"step": 3, "tool": "search_logs", "input": "(none)", "result": no_target_msg, "status": "skipped"})
-        steps.append({"step": 4, "tool": "check_reputation", "input": "(none)", "result": no_target_msg, "status": "skipped"})
-        steps.append({"step": 5, "tool": "lookup_cve", "input": "(none)", "result": no_target_msg, "status": "skipped"})
-        steps.append({"step": 6, "tool": "correlate_zeek", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        steps.append({"step": 4, "tool": "search_logs", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        steps.append({"step": 5, "tool": "check_reputation", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        steps.append({"step": 6, "tool": "lookup_cve", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        steps.append({"step": 7, "tool": "correlate_zeek", "input": "(none)", "result": no_target_msg, "status": "skipped"})
         logs_result = rep_result = cve_result = zeek_result = no_target_msg
         raw_logs = []
     else:
-        # Step 4 — Search logs for target IP
-        print(f"Step 3: Searching logs for {target_ip}...")
+        # Step 5 — Search logs for target IP
+        print(f"Step 4: Searching logs for {target_ip}...")
         raw_logs = _search_logs_raw(target_ip)
         logs_result = search_logs(target_ip)
-        steps.append({"step": 3, "tool": "search_logs", "input": target_ip, "result": logs_result, "status": "done"})
+        steps.append({"step": 4, "tool": "search_logs", "input": target_ip, "result": logs_result, "status": "done"})
 
-        # Step 5 — Check reputation
-        print(f"Step 4: Checking reputation of {target_ip}...")
+        # Step 6 — Check reputation
+        print(f"Step 5: Checking reputation of {target_ip}...")
         rep_result = check_reputation(target_ip)
-        steps.append({"step": 4, "tool": "check_reputation", "input": target_ip, "result": rep_result, "status": "done"})
+        steps.append({"step": 5, "tool": "check_reputation", "input": target_ip, "result": rep_result, "status": "done"})
 
-        # Step 6 — CVE lookup, driven by a real detected signature
+        # Step 7 — CVE lookup, driven by a real detected signature
         cve_search_term = _pick_cve_search_term(target_ip, raw_logs)
         if cve_search_term:
-            print(f"Step 5: Looking up CVEs for signature '{cve_search_term}'...")
+            print(f"Step 6: Looking up CVEs for signature '{cve_search_term}'...")
             cve_result = lookup_cve(cve_search_term)
-            steps.append({"step": 5, "tool": "lookup_cve", "input": cve_search_term, "result": cve_result, "status": "done"})
+            steps.append({"step": 6, "tool": "lookup_cve", "input": cve_search_term, "result": cve_result, "status": "done"})
         else:
             cve_result = f"No alert signature detected for {target_ip} to correlate against CVEs."
-            steps.append({"step": 5, "tool": "lookup_cve", "input": "(no signature)", "result": cve_result, "status": "skipped"})
+            steps.append({"step": 6, "tool": "lookup_cve", "input": "(no signature)", "result": cve_result, "status": "skipped"})
 
-        # Step 7 — Zeek correlation
-        print(f"Step 6: Correlating Zeek data for {target_ip}...")
+        # Step 8 — Zeek correlation
+        print(f"Step 7: Correlating Zeek data for {target_ip}...")
         zeek_result = correlate_zeek(target_ip)
-        steps.append({"step": 6, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": "done"})
+        steps.append({"step": 7, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": "done"})
 
-    # Step 8 — Generate final report with Hermes
-    print("Step 7: Generating investigation report with Nous Hermes2...")
+    # Step 9 — Generate final report with Hermes
+    print("Step 8: Generating investigation report with Nous Hermes2...")
 
     prompt = f"""You are SIRA — Security Incident Response Assistant powered by Nous Hermes2.
 You have completed an autonomous investigation. Here are the results:
@@ -259,6 +329,9 @@ NETWORK STATISTICS:
 
 TOP ATTACKING IPs:
 {ips_result}
+
+SENTINEL ENDPOINT ACTIVITY:
+{endpoint_result}
 
 LOG SEARCH RESULTS for {target_ip or "(no external target identified)"}:
 {logs_result}
@@ -273,9 +346,11 @@ ZEEK CORRELATION for {target_ip or "(no external target identified)"}:
 {zeek_result}
 
 STRICT GROUNDING RULES — follow these exactly:
-- Only reference IP addresses, CVE identifiers, signatures, and figures that appear explicitly in the tool results above. Never invent or assume an IP, CVE, or vulnerability not listed above.
+- Only reference IP addresses, CVE identifiers, signatures, endpoint names, and figures that appear explicitly in the tool results above. Never invent or assume an IP, CVE, vulnerability, or endpoint not listed above.
 - Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure traffic, not external attackers -- even if they show a very high event count. Do not describe activity from these IPs as unauthorized access, an intrusion, or an attack.
-- If no external attacker or no relevant CVE was found in the results above, say so plainly instead of filling the gap with a plausible-sounding but unverified claim.
+- Sentinel endpoint activity is a SEPARATE data source from the honeypot's network logs -- it describes your own monitored machines, not attacker traffic. Do not conflate a flagged endpoint (Sentinel's connection heuristic, or a real Rustinel Sigma/YARA/IOC detection) with a network-level attacker finding, or vice versa.
+- Rustinel detections are real, rule-based findings (Sigma/YARA/IOC) -- if none are present, say "no Rustinel alerts" rather than inventing one, same as any other tool result.
+- If no external attacker, no relevant CVE, or no flagged endpoint was found in the results above, say so plainly instead of filling the gap with a plausible-sounding but unverified claim.
 
 Based on all this intelligence, write a comprehensive investigation report with:
 
@@ -284,6 +359,9 @@ SUMMARY:
 
 TOP THREATS:
 [Most dangerous findings with specific IPs and signatures]
+
+ENDPOINT SECURITY:
+[Any flagged Sentinel endpoints, or state clearly that none are flagged]
 
 RISK LEVEL:
 [CRITICAL / HIGH / MEDIUM / LOW — with justification]
