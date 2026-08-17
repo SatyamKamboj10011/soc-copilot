@@ -121,6 +121,18 @@ def get_llm(model, api_key=None):
         return OllamaLLM(model="qwen2.5:7b"), "local"
     elif model == "ollama_phi3":
         return OllamaLLM(model="phi3:3.8b"), "local"
+    elif model == "ollama_phi4mini":
+        # Phi-4-mini (3.8B, ~3GB) -- specifically documented as strong at
+        # structured output and precise instruction-following despite its
+        # small size, unlike a generic small model that trades that away.
+        # Roughly half the footprint of qwen2.5:7b -- the lightweight
+        # deployment-friendly option, not just a smaller/worse fallback.
+        return OllamaLLM(model="phi4-mini"), "local"
+    elif model == "ollama_llama32":
+        # Llama 3.2 3B (~2.5GB) -- smallest general-purpose option here,
+        # solid everyday instruction-following for routine questions where
+        # speed/footprint matters more than handling complex reasoning.
+        return OllamaLLM(model="llama3.2:3b"), "local"
     elif model == "groq":
         return ChatGroq(
             model="llama-3.3-70b-versatile",
@@ -543,12 +555,27 @@ def get_logs():
 
 @app.route('/models', methods=['GET'])
 def get_models():
+    # This is the single source of truth for every model's display metadata
+    # (name, short "chip" label, whether it's cloud/local). The frontend
+    # fetches this on load instead of keeping its own separate hardcoded
+    # list -- that duplication is exactly what let ollama_phi4mini and
+    # ollama_llama32 exist here but be unreachable in the UI, since the
+    # frontend's copy never got updated when these were added.
     return jsonify([
-        {"id": "ollama",      "name": "SIRA — qwen2.5:7b (local)",          "requires_key": False},
-        {"id": "ollama_phi3", "name": "Phi3 3.8B — fastest (local)",         "requires_key": False},
-        {"id": "groq",        "name": "Groq — Llama 3.3 70B (cloud)",        "requires_key": False},
-        {"id": "gemini",      "name": "Google Gemini 2.0 Flash (cloud)",      "requires_key": False},
-        {"id": "mistral",     "name": "Mistral Small (cloud — free)",         "requires_key": False},
+        {"id": "ollama",          "name": "SIRA — qwen2.5:7b (local)",
+         "chip": "sira-model (local)", "cloud": False, "requires_key": False},
+        {"id": "ollama_phi4mini", "name": "Phi-4-mini 3.8B — lightweight, strong structured output (local)",
+         "chip": "phi4-mini (local)", "cloud": False, "requires_key": False},
+        {"id": "ollama_llama32",  "name": "Llama 3.2 3B — smallest, everyday questions (local)",
+         "chip": "llama3.2 3b (local)", "cloud": False, "requires_key": False},
+        {"id": "ollama_phi3",     "name": "Phi3 3.8B — fastest (local)",
+         "chip": "phi3 3.8b (local)", "cloud": False, "requires_key": False},
+        {"id": "groq",            "name": "Groq — Llama 3.3 70B (cloud)",
+         "chip": "groq llama3 (cloud)", "cloud": True, "requires_key": False},
+        {"id": "gemini",          "name": "Google Gemini 2.0 Flash (cloud)",
+         "chip": "gemini 2.0 (cloud)", "cloud": True, "requires_key": False},
+        {"id": "mistral",         "name": "Mistral Small (cloud — free)",
+         "chip": "mistral small (cloud)", "cloud": True, "requires_key": False},
     ])
 
 
@@ -950,6 +977,21 @@ def log_info():
     })
 
 
+# ── RUSTINEL: local endpoint detection (Sigma/YARA/IOC), separate source ────
+# from both the honeypot's network logs and Sentinel's raw connection
+# reports. Reads ECS NDJSON alert files Rustinel writes locally -- same
+# machine as this backend, so no sync/network transfer needed, just a
+# direct file read (see ai/rustinel_reader.py).
+from ai.rustinel_reader import load_rustinel_alerts
+
+
+@app.route('/rustinel-alerts', methods=['GET'])
+def rustinel_alerts():
+    limit = min(int(request.args.get('limit', 50)), 500)
+    alerts = load_rustinel_alerts()
+    return jsonify(alerts[:limit])
+
+
 @app.route('/attacker-profile/<ip>', methods=['GET'])
 def attacker_profile(ip):
     import requests as req
@@ -1094,13 +1136,16 @@ One plain English sentence on what this tells us about our defences."""
 @app.route('/hermes-agent', methods=['POST'])
 def hermes_agent():
     data = request.json
-    task = data.get('task', '').strip()
+    task  = data.get('task', '').strip()
+    # Optional model override from the frontend's performance-tier picker --
+    # defaults to nous-hermes2 (today's behaviour) if not provided.
+    model = data.get('model', 'nous-hermes2')
     if not task:
         return jsonify({"error": "No task provided"}), 400
 
     try:
         from ai.hermes_agent import run_hermes_agent
-        result = run_hermes_agent(task)
+        result = run_hermes_agent(task, model=model)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1573,4 +1618,49 @@ def compliance_trend():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5000)
+    # Pull Suricata/Zeek logs from the public honeypot VM automatically,
+    # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
+    # only set in the child process the debug reloader actually forks to
+    # serve requests -- checking it here (rather than starting unconditionally)
+    # stops the sync thread from being started twice (once in the reloader's
+    # parent watcher process, once in the child) when debug=True.
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        from ai.honeypot_log_sync import start_background_sync
+        start_background_sync()
+
+    # NOTE: debug=True's reloader watches every file under the project tree
+    # recursively -- this originally caused two separate problems:
+    #
+    # 1) /sira-face-speak runs inference (touches files inside
+    #    face_detection/detection/sfd/), which the reloader saw as "code
+    #    changed" and killed + restarted the whole Flask process mid-request
+    #    -> browser saw a CORS failure (connection reset, no headers ever
+    #    sent), not a real error.
+    #
+    # 2) honeypot_log_sync.py writes ../logs/eve.json and ../logs/conn.log
+    #    every ~15s whenever the honeypot has new data, and rag_setup.py
+    #    rewrites ../ai/chroma_db/ on every rebuild. The reloader was
+    #    watching both of those too, so a routine sync write was *also*
+    #    seen as "code changed" and restarted Flask -- which re-ran
+    #    start_background_sync() in the new child process, which then wrote
+    #    to eve.json again on its next poll, restarting Flask again, and so
+    #    on. This is what looked like "the embeddings/rebuild ran multiple
+    #    times back-to-back": it was actually Flask itself restarting in a
+    #    loop, not the rebuild script being invoked repeatedly.
+    #
+    # exclude_patterns keeps the reloader watching your actual app code
+    # while ignoring Wav2Lip's working files and the two data directories
+    # that are never supposed to contain source code in the first place.
+    app.run(
+        host='0.0.0.0',
+        debug=True,
+        port=5000,
+        exclude_patterns=[
+            "*/Wav2Lip/*",
+            "*\\Wav2Lip\\*",
+            "*/logs/*",
+            "*\\logs\\*",
+            "*/chroma_db/*",
+            "*\\chroma_db\\*",
+        ],
+    )

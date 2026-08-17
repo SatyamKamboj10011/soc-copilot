@@ -7,29 +7,12 @@ import os
 # different random port on every run) wins instead.
 os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
 
-import os
-
-# Set BEFORE any langchain_ollama/ollama imports -- if any part of that import
-# chain reads OLLAMA_HOST at import time rather than fresh on every call, an
-# override placed after the import (as this used to be) arrives too late and
-# whatever the system/Ollama desktop app had already set (observed: a
-# different random port on every run) wins instead.
-os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
-
 import datetime
 import json
 import shutil
 import argparse
 import chromadb
 from langchain_core.documents import Document
-from ollama_embeddings import DirectOllamaEmbeddings
-
-# The single source of truth for where Ollama actually lives. Passed
-# explicitly to OllamaEmbeddings below (not just left to the env var) so the
-# connection can't be silently hijacked by anything else on the system that
-# also sets OLLAMA_HOST -- explicit constructor args are evaluated fresh at
-# call time, not cached at import time.
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 from ollama_embeddings import DirectOllamaEmbeddings
 
 # The single source of truth for where Ollama actually lives. Passed
