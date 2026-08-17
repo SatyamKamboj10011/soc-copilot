@@ -7,6 +7,7 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 from langchain_mistralai import ChatMistralAI
+from hermes_documents import documents_bp
 from collections import Counter
 from datetime import datetime
 import sqlite3
@@ -98,6 +99,9 @@ def init_db():
     print("SQLite database ready — users.db")
 
 init_db()
+
+app.register_blueprint(documents_bp, url_prefix="/api/documents")
+print("Hermes documents API ready")
 # ─────────────────────────────────────────────────────────────────────────────
 
 # langchain_ollama.OllamaEmbeddings was not honoring an explicit base_url on

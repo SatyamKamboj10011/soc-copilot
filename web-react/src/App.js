@@ -11,6 +11,7 @@ import { collection, doc, setDoc, addDoc, serverTimestamp, increment } from "fir
 import SiraVoice from "./SiraVoice";
 import SiraAvatar from "./SiraAvatar";
 import { HermesModal } from "./HermesModal";
+import { SaveToDocumentButton, HermesDocumentsPanel } from "./HermesDocuments";
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -1221,7 +1222,7 @@ setLoading(false);
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div className="mac-tabs">
-              {["dashboard","analytics","investigation","history"].map(p=>(
+              {["dashboard","analytics","investigation","history","documents"].map(p=>(
                 <button key={p} className={`mac-tab${page===p?" active":""}`} onClick={()=>setPage(p)}>
                   {page===p && <motion.div layoutId="mac-tab-pill" className="mac-tab-pill" transition={{type:"spring",stiffness:500,damping:36}} />}
                   <span style={{position:"relative",zIndex:1}}>{p}</span>
@@ -1412,6 +1413,9 @@ setLoading(false);
         </div>
         <div style={{display:page==="history"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <History/>
+        </div>
+        <div style={{display:page==="documents"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
+          <HermesDocumentsPanel username={username} />
         </div>
         <div style={{display:page==="dashboard"?"flex":"none",flexDirection:"column",flex:1,overflow:"hidden",minHeight:0}}>
         <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative",gap:10,minHeight:0}}>
@@ -1609,6 +1613,7 @@ setLoading(false);
         hermesLoading={hermesLoading} hermesTask={hermesTask} setHermesTask={setHermesTask}
         startHermes={startHermes} hermesSteps={hermesSteps} hermesAnswer={hermesAnswer}
         setHermesAnswer={setHermesAnswer} setHermesSteps={setHermesSteps} showToast={showToast}
+        username={username}
       />
     </>
   );
