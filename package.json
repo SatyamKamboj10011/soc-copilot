@@ -2,5 +2,8 @@
   "dependencies": {
     "lottie-react": "^2.4.1",
     "react-router-dom": "^7.15.1"
+  },
+  "devDependencies": {
+    "shadcn": "^4.18.0"
   }
 }
