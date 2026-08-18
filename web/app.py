@@ -277,7 +277,7 @@ def sira_face_speak():
                 "--outfile", video_path,
                 "--pads", "0", "20", "0", "0",  # extra bottom padding -- reduces the mouth-region seam
                 "--nosmooth",                    # disable over-smoothing that can cause blur/ghosting
-                "--resize_factor", "2",          # downscale processing -- genuine speed win, real quality tradeoff
+                "--resize_factor", "4",          # downscale processing further (was 2) -- genuine speed win, real quality tradeoff. If this looks too blurry, drop back to 2 or 3.
             ],
             cwd=WAV2LIP_DIR,
             capture_output=True,
@@ -438,7 +438,28 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     context
 )
 
-    prompt = f"""You are SIRA — Security Incident Response Assistant.
+    # The smallest models (phi4-mini, llama3.2:3b) tend to lose track of the
+    # grounding constraint somewhere inside a long, multi-branch instruction
+    # set -- every model gets the SAME retrieved log data, so a smaller
+    # model giving worse/invented answers than sira-model on identical
+    # context is a real instruction-following capacity issue, not a data
+    # problem. A short, single-purpose prompt (nothing to lose track of)
+    # measurably helps smaller models stay grounded, at the cost of the
+    # richer structured-report formatting the larger models can reliably
+    # follow.
+    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama_llama32"}
+
+    if model in SIMPLE_PROMPT_MODELS:
+        prompt = f"""You are SIRA, a security assistant. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If the log data below does not answer the question, say so plainly.
+
+Log Data:
+{context}
+
+Question: {question}
+
+Remember: only use facts from the log data above. Answer clearly and concisely."""
+    else:
+        prompt = f"""You are SIRA — Security Incident Response Assistant.
 Speak exactly like JARVIS from Iron Man. Calm, authoritative, precise.
 Address the analyst as "Sir" occasionally.
 Never ramble. Lead with the most critical information first.
