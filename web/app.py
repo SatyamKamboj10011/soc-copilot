@@ -117,39 +117,54 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
 
 def get_llm(model, api_key=None):
+    # sira-model's own Modelfile bakes in temperature=0.4 for controlled,
+    # grounded output -- every other model here was previously falling back
+    # to its provider's own default (Ollama's default ~0.8, each cloud
+    # provider's own default), which is meaningfully more random. Setting
+    # the same tuned temperature explicitly everywhere -- rather than
+    # creating and maintaining a separate Modelfile per model -- is the
+    # simpler way to get consistent behaviour across every model choice.
+    SIRA_TEMPERATURE = 0.4
+
     if model == "ollama_qwen":
-        return OllamaLLM(model="qwen2.5:7b"), "local"
+        return OllamaLLM(model="qwen2.5:7b", temperature=SIRA_TEMPERATURE), "local"
     elif model == "ollama_phi3":
-        return OllamaLLM(model="phi3:3.8b"), "local"
+        return OllamaLLM(model="phi3:3.8b", temperature=SIRA_TEMPERATURE), "local"
     elif model == "ollama_phi4mini":
         # Phi-4-mini (3.8B, ~3GB) -- specifically documented as strong at
         # structured output and precise instruction-following despite its
         # small size, unlike a generic small model that trades that away.
         # Roughly half the footprint of qwen2.5:7b -- the lightweight
         # deployment-friendly option, not just a smaller/worse fallback.
-        return OllamaLLM(model="phi4-mini"), "local"
+        return OllamaLLM(model="phi4-mini", temperature=SIRA_TEMPERATURE), "local"
     elif model == "ollama_llama32":
         # Llama 3.2 3B (~2.5GB) -- smallest general-purpose option here,
         # solid everyday instruction-following for routine questions where
         # speed/footprint matters more than handling complex reasoning.
-        return OllamaLLM(model="llama3.2:3b"), "local"
+        return OllamaLLM(model="llama3.2:3b", temperature=SIRA_TEMPERATURE), "local"
     elif model == "groq":
         return ChatGroq(
             model="llama-3.3-70b-versatile",
-            groq_api_key=api_key or os.getenv("GROQ_API_KEY")
+            groq_api_key=api_key or os.getenv("GROQ_API_KEY"),
+            temperature=SIRA_TEMPERATURE,
         ), "cloud"
     elif model == "gemini":
         return ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",
-            google_api_key=api_key or os.getenv("GEMINI_API_KEY")
+            google_api_key=api_key or os.getenv("GEMINI_API_KEY"),
+            temperature=SIRA_TEMPERATURE,
         ), "cloud"
     elif model == "mistral":
         return ChatMistralAI(
             model="mistral-small-latest",
-            mistral_api_key=os.getenv("MISTRAL_API_KEY")
+            mistral_api_key=os.getenv("MISTRAL_API_KEY"),
+            temperature=SIRA_TEMPERATURE,
         ), "cloud"
     else:
-        return OllamaLLM(model="sira-model"), "local"
+        # sira-model's Modelfile already bakes this in -- set explicitly
+        # too, purely so every branch here reads consistently rather than
+        # leaving a reader to wonder why this one's different.
+        return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
 
 
 # eve.json is now genuinely large (growing continuously from real honeypot
@@ -367,6 +382,40 @@ def me():
 
 # ── EXISTING ENDPOINTS ───────────────────────────────────────────────────────
 
+def _rewrite_followup_question(question, history):
+    """Turns a vague follow-up ("what is this IP", "the second one", "compare
+    that to the one before") into ONE fully self-contained question, using
+    recent conversation context to fill in whatever it's actually referring
+    to. This is what lets retrieval handle ordinal references ("the second
+    one") and multi-hop follow-ups that keyword matching or single-turn
+    semantic search can't resolve on their own -- those need something to
+    actually reason about what the reference points to first.
+
+    Uses phi4-mini specifically: this is a small, bounded rewriting task,
+    not the full grounded-QA problem -- a fast, light model is a good fit
+    here even though a bigger model is used for the real answer.
+    Fails safe: any error, or an empty result, just returns the original
+    question unchanged rather than blocking the request.
+    """
+    if not history:
+        return question  # nothing to resolve a reference against -- skip the extra call entirely
+    try:
+        recent = "\n".join([f"{m['role'].upper()}: {m['content'][:300]}" for m in history[-4:] if m.get('content')])
+        rewrite_prompt = f"""Given this recent conversation and a follow-up question, rewrite the follow-up into ONE fully self-contained question that includes any specific detail (IP address, signature name, number, etc.) it refers back to. If the follow-up is already self-contained, return it exactly unchanged. Reply with ONLY the rewritten question -- no explanation, no quotes.
+
+Recent conversation:
+{recent}
+
+Follow-up question: {question}
+
+Rewritten question:"""
+        rewriter = OllamaLLM(model="phi4-mini", temperature=0, num_predict=80)
+        rewritten = rewriter.invoke(rewrite_prompt).strip().strip('"').strip()
+        return rewritten if rewritten else question
+    except Exception:
+        return question
+
+
 @app.route('/ask', methods=['POST'])
 def ask():
     data        = request.json
@@ -397,7 +446,31 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
             identity_answer = llm.invoke(identity_prompt).content
         return jsonify({'answer': identity_answer, 'model_used': model})
 
-    docs = retriever.invoke(question)
+    # Retrieval normally only searches the CURRENT question's text -- but a
+    # vague follow-up ("what is this IP", "tell me more about that") gives
+    # the search almost nothing concrete to match against, even though the
+    # user is clearly referring to something from the PREVIOUS answer. This
+    # is why a real IP mentioned in a summary a moment ago can come back
+    # "not found in logs" on the very next question -- retrieval genuinely
+    # found nothing, not because the data isn't there.
+    last_ai_text = ""
+    for m in reversed(history):
+        if m.get('role') in ('assistant', 'ai') and m.get('content'):
+            last_ai_text = m['content']
+            break
+
+    # Resolve vague references ("this IP", "the second one") into a real,
+    # self-contained question BEFORE retrieval -- everything downstream
+    # (semantic search, the IP regex boost, the final prompt) uses this
+    # resolved version instead of the raw, possibly-ambiguous original.
+    resolved_question = _rewrite_followup_question(question, history)
+
+    docs = retriever.invoke(resolved_question)
+    if last_ai_text:
+        # Supplement with a query that includes what was just discussed,
+        # so vague follow-ups can still land on the right log entries.
+        followup_docs = retriever.invoke(f"{last_ai_text[:400]} {resolved_question}")
+        docs = followup_docs + docs
 
     if date_filter:
         docs = [d for d in docs if d.metadata.get('date') == date_filter]
@@ -411,8 +484,13 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     other_docs  = [d for d in docs if d.metadata.get('event_type') != 'alert']
     docs = alert_docs + other_docs
 
-# If question contains an IP, fetch extra targeted logs for that IP
-    ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', question)
+# If question contains an IP, fetch extra targeted logs for that IP. If the
+# CURRENT question doesn't name one explicitly -- e.g. "what is this IP",
+# referring back to something already discussed -- fall back to any IP
+# mentioned in the most recent AI response, instead of finding nothing.
+    ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', resolved_question)
+    if not ip_match and last_ai_text:
+        ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', last_ai_text)
     if ip_match:
         extra_docs = []
         for ip in ip_match:
@@ -455,7 +533,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
 Log Data:
 {context}
 
-Question: {question}
+Question: {resolved_question}
 
 Remember: only use facts from the log data above. Answer clearly and concisely."""
     else:
@@ -550,7 +628,7 @@ THIS WEEK:
 Log Data:
 {context}
 
-Question: {question}
+Question: {resolved_question}
 
 Answer naturally. Pick the format that fits. Do not force sections that do not apply."""
 
@@ -1255,6 +1333,175 @@ def init_sentinel_db():
     conn.close()
 
 init_sentinel_db()
+
+
+# ── APPROVAL-GATED ACTIONS ────────────────────────────────────────────────
+# Hermes (or SIRA) PROPOSES an action here -- it never executes anything
+# directly itself. A human must explicitly approve before anything real
+# happens. This is a deliberate design choice, not a missing feature:
+# autonomous firewall/service actions carry real risk (a false positive
+# blocking legitimate traffic, a bad service restart), so every action
+# waits for a person to click approve first.
+
+def init_actions_db():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pending_actions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL,   -- block_ip | isolate_endpoint | restart_service | add_suricata_rule
+            target      TEXT NOT NULL,   -- IP / machine_id / service name / rule text
+            machine_id  TEXT,            -- which endpoint this applies to, NULL for honeypot-side actions
+            reason      TEXT,            -- why this was proposed -- real evidence, not a guess
+            status      TEXT DEFAULT 'pending',  -- pending | approved | rejected | executed | failed
+            created_at  TEXT,
+            executed_at TEXT,
+            result      TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_actions_db()
+
+
+def _execute_add_suricata_rule(rule_text):
+    """SSH to the honeypot and append a new custom Suricata rule, then
+    reload Suricata via SIGHUP -- same connection details as
+    honeypot_log_sync.py, and the same SIGHUP-not-SIGUSR2 lesson learned
+    earlier (SIGUSR2 only reloads rules, it does NOT reopen log files --
+    but here we specifically WANT the rule-reload behaviour SIGHUP also
+    provides, so either signal works for this specific action; SIGHUP is
+    used for consistency with the rest of the project).
+
+    IMPORTANT SETUP NOTE: this appends to /etc/suricata/rules/custom.rules
+    on the honeypot. That file must actually be listed in suricata.yaml's
+    rule-files section for Suricata to load it -- if alerts from a newly
+    added rule never show up, check that first before assuming this
+    function is broken.
+    """
+    import paramiko
+    from ai.honeypot_log_sync import HONEYPOT_HOST, HONEYPOT_USER, HONEYPOT_KEY_PATH
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(hostname=HONEYPOT_HOST, username=HONEYPOT_USER,
+                        key_filename=HONEYPOT_KEY_PATH, timeout=10)
+        safe_rule = rule_text.replace("'", "'\\''")
+        cmd = f"echo '{safe_rule}' | sudo tee -a /etc/suricata/rules/custom.rules"
+        stdin, stdout, stderr = client.exec_command(cmd)
+        exit_code = stdout.channel.recv_exit_status()
+        if exit_code != 0:
+            return False, f"Failed to write rule: {stderr.read().decode()[:300]}"
+        client.exec_command("sudo kill -HUP $(cat /run/suricata.pid)")
+        return True, "Rule added to custom.rules and Suricata reloaded"
+    except Exception as e:
+        return False, str(e)[:300]
+    finally:
+        client.close()
+
+
+@app.route('/propose-action', methods=['POST'])
+def propose_action():
+    """Hermes (or SIRA) calls this to propose an action -- it only ever
+    creates a pending row. Nothing executes until a human approves it via
+    /pending-actions/<id>/approve."""
+    data = request.json or {}
+    action_type = data.get('action_type')
+    target      = data.get('target', '').strip()
+    reason      = data.get('reason', '').strip()
+    machine_id  = data.get('machine_id')
+
+    valid_types = {'block_ip', 'isolate_endpoint', 'restart_service', 'add_suricata_rule'}
+    if action_type not in valid_types:
+        return jsonify({"error": f"action_type must be one of {sorted(valid_types)}"}), 400
+    if not target:
+        return jsonify({"error": "target is required"}), 400
+
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO pending_actions (action_type, target, machine_id, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+        (action_type, target, machine_id, reason, datetime.utcnow().isoformat() + "Z")
+    )
+    conn.commit()
+    action_id = cur.lastrowid
+    conn.close()
+    return jsonify({"id": action_id, "status": "pending"}), 201
+
+
+@app.route('/pending-actions', methods=['GET'])
+def list_pending_actions():
+    status_filter = request.args.get('status')
+    conn = get_db()
+    if status_filter:
+        rows = conn.execute("SELECT * FROM pending_actions WHERE status = ? ORDER BY id DESC", (status_filter,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM pending_actions ORDER BY id DESC").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/pending-actions/<int:action_id>/approve', methods=['POST'])
+def approve_pending_action(action_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "not found"}), 404
+    if row["status"] != "pending":
+        conn.close()
+        return jsonify({"error": f"action is already {row['status']}, not pending"}), 400
+
+    action_type = row["action_type"]
+    target = row["target"]
+    now = datetime.utcnow().isoformat() + "Z"
+
+    if action_type == "block_ip":
+        # Reuses the existing Sentinel block-queue mechanism -- delivered
+        # to any polling endpoint agent's next /ingest check-in.
+        conn.execute("INSERT INTO sentinel_block_queue (ip) VALUES (?)", (target,))
+        conn.execute("UPDATE pending_actions SET status='executed', executed_at=?, result=? WHERE id=?",
+                     (now, "Queued for next Sentinel check-in", action_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "executed", "detail": "Queued for next Sentinel check-in"})
+
+    elif action_type == "add_suricata_rule":
+        ok, detail = _execute_add_suricata_rule(target)
+        conn.execute("UPDATE pending_actions SET status=?, executed_at=?, result=? WHERE id=?",
+                     ("executed" if ok else "failed", now, detail, action_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "executed" if ok else "failed", "detail": detail})
+
+    elif action_type in ("isolate_endpoint", "restart_service"):
+        # Marked approved and queryable, but NOT yet actually executable --
+        # that needs new command handling inside sentinel_launcher.py
+        # (the endpoint agent) which isn't wired up yet. Kept as a real,
+        # visible "approved but not yet executable" state rather than
+        # silently pretending it worked.
+        conn.execute("UPDATE pending_actions SET status='approved', executed_at=?, result=? WHERE id=?",
+                     (now, "Approved -- execution for this action type is not yet implemented on the endpoint agent", action_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "approved", "detail": "Approved, but endpoint-agent execution isn't wired up yet for this action type"})
+
+    conn.close()
+    return jsonify({"error": "unknown action_type"}), 400
+
+
+@app.route('/pending-actions/<int:action_id>/reject', methods=['POST'])
+def reject_pending_action(action_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "not found"}), 404
+    conn.execute("UPDATE pending_actions SET status='rejected' WHERE id=?", (action_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "rejected"})
+
+
 
 # Ports commonly associated with backdoors, RATs, and C2 channels.
 # Heuristic only — a starting point, not a substitute for real threat intel.

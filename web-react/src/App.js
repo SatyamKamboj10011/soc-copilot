@@ -982,6 +982,10 @@ export default function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const isRightResizing = useRef(false);
   const [machinePanelPos, setMachinePanelPos] = useState(null);
+  const [pendingActions, setPendingActions] = useState([]);
+  const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
+  const [actionsPanelPos, setActionsPanelPos] = useState(null);
+  const [actionsBusy, setActionsBusy] = useState(null); // id currently being approved/rejected, for a disabled state
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
@@ -1123,6 +1127,35 @@ const [sessionId, setSessionId] = useState(() => {
     }, 2000);
     return () => clearTimeout(t);
   }, []);
+
+  const fetchPendingActions = useCallback(() => {
+    fetch(`${FLASK_URL}/pending-actions?status=pending`).then(r=>r.json()).then(setPendingActions).catch(()=>{});
+  }, []);
+  useEffect(() => {
+    fetchPendingActions();
+    const interval = setInterval(fetchPendingActions, 15000);
+    return () => clearInterval(interval);
+  }, [fetchPendingActions]);
+
+  const approveAction = async (id) => {
+    setActionsBusy(id);
+    try {
+      const res = await fetch(`${FLASK_URL}/pending-actions/${id}/approve`, { method: "POST" });
+      const data = await res.json();
+      showToast(data.detail || `Action #${id} approved`);
+    } catch { showToast("Failed to approve action"); }
+    setActionsBusy(null);
+    fetchPendingActions();
+  };
+  const rejectAction = async (id) => {
+    setActionsBusy(id);
+    try {
+      await fetch(`${FLASK_URL}/pending-actions/${id}/reject`, { method: "POST" });
+      showToast(`Action #${id} rejected`);
+    } catch { showToast("Failed to reject action"); }
+    setActionsBusy(null);
+    fetchPendingActions();
+  };
 
   const checkReputation = async (ip) => { if (reputations[ip]) return; try { const data = await fetch(`${FLASK_URL}/reputation/${ip}`).then(r=>r.json()); setReputations(prev=>({...prev,[ip]:data})); } catch {} };
   useEffect(() => {
@@ -1311,6 +1344,10 @@ setLoading(false);
               <div className="status-pill"><div className={`ndot ${health?.status==="ok"?"ndot-green":"ndot-red"}`}/>SURICATA</div>
               <div className="status-pill"><div className={`ndot ${health?.status==="ok"?"ndot-green":"ndot-red"}`}/>ZEEK</div>
               <div className="status-pill"><div className="ndot ndot-red"/>{stats?.alert_count??alertCount} ALERTS</div>
+              <div className="status-pill" style={{cursor:"pointer", background: pendingActions.length>0 ? "var(--purple-dim)" : undefined, border: pendingActions.length>0 ? "1px solid var(--purple)" : undefined}} onClick={()=>setActionsPanelOpen(true)} title="Actions proposed by Hermes, awaiting your approval">
+                <div className="ndot" style={{background: pendingActions.length>0 ? "var(--purple)" : "var(--text-dim)", boxShadow: pendingActions.length>0 ? "0 0 6px var(--purple)" : "none", animation: pendingActions.length>0 ? "blink 1.4s infinite" : "none"}}/>
+                {pendingActions.length} PENDING
+              </div>
               <div className="status-pill"><div className={`ndot ${health?.ollama==="ok"?"ndot-cyan":"ndot-red"}`}/>AI {health?.ollama==="ok"?"READY":"OFFLINE"}</div>
             </div>
             <div className="nav-time"><NavClock/></div>
@@ -1703,6 +1740,57 @@ setLoading(false);
         </div>
       )}
 
+    </div>
+  </div>,
+  document.body
+)}
+
+      {actionsPanelOpen && createPortal(
+  <div
+    className="float-panel"
+    style={actionsPanelPos
+      ? { left: actionsPanelPos.x, top: actionsPanelPos.y, right: "auto", bottom: "auto" }
+      : { right: 20, bottom: 20 }}
+  >
+    <div className="float-panel-handle">
+      <div className="float-panel-grip" onMouseDown={startPanelDrag(setActionsPanelPos)} />
+    </div>
+    <button className="modal-close" onClick={()=>setActionsPanelOpen(false)} style={{top:14,right:14,zIndex:5}}>✕</button>
+    <div className="float-panel-body">
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <div style={{width:34,height:34,borderRadius:10,background:"linear-gradient(135deg,var(--purple),var(--accent))",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>⚠</div>
+        <div>
+          <div style={{fontFamily:"var(--display)",fontSize:16,fontWeight:600,color:"var(--text)"}}>Pending Actions</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-mid)"}}>Proposed by Hermes — nothing executes until you approve</div>
+        </div>
+      </div>
+
+      {pendingActions.length === 0 && (
+        <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text-dim)",padding:"20px 0",textAlign:"center"}}>No actions currently awaiting approval.</div>
+      )}
+
+      {pendingActions.map(a => (
+        <div key={a.id} style={{marginBottom:12,padding:14,background:"rgba(255,255,255,0.03)",border:"1px solid var(--border2)",borderLeft:"3px solid var(--purple)",borderRadius:"var(--radius-sm)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+            <span style={{fontFamily:"var(--mono)",fontSize:10,fontWeight:700,color:"var(--purple)",textTransform:"uppercase",letterSpacing:0.5}}>{a.action_type.replace(/_/g," ")}</span>
+            <span style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)"}}>#{a.id}</span>
+          </div>
+          <div style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--text)",marginBottom:6,wordBreak:"break-word"}}>{a.target}</div>
+          {a.reason && <div style={{fontFamily:"var(--sans)",fontSize:11,color:"var(--text-mid)",lineHeight:1.5,marginBottom:10}}>{a.reason}</div>}
+          <div style={{display:"flex",gap:8}}>
+            <button
+              disabled={actionsBusy===a.id}
+              onClick={()=>approveAction(a.id)}
+              style={{flex:1,padding:"8px",background:"var(--green-dim)",border:"1px solid var(--green)",borderRadius:8,color:"var(--green)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:actionsBusy===a.id?"not-allowed":"pointer",opacity:actionsBusy===a.id?0.5:1,textTransform:"uppercase"}}
+            >{actionsBusy===a.id ? "..." : "✓ Approve"}</button>
+            <button
+              disabled={actionsBusy===a.id}
+              onClick={()=>rejectAction(a.id)}
+              style={{flex:1,padding:"8px",background:"var(--red-dim)",border:"1px solid var(--red)",borderRadius:8,color:"var(--red)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:actionsBusy===a.id?"not-allowed":"pointer",opacity:actionsBusy===a.id?0.5:1,textTransform:"uppercase"}}
+            >{actionsBusy===a.id ? "..." : "✕ Reject"}</button>
+          </div>
+        </div>
+      ))}
     </div>
   </div>,
   document.body
