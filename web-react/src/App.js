@@ -505,12 +505,23 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
 
   const fetchPage = (q, pageOffset, append) => {
     if (q) {
+      // /search returns a plain array; the total count comes back in an
+      // X-Total-Count header. Guarding with Array.isArray means a change to
+      // that response shape degrades to an empty list rather than crashing
+      // the whole page on rows.map().
       fetch(`${FLASK_URL}/search?q=${encodeURIComponent(q)}&offset=${pageOffset}&limit=${PAGE_SIZE}`)
-        .then(r => r.json())
-        .then(data => {
-          setRows(prev => append ? [...prev, ...data.results] : data.results);
-          setTotal(data.total);
-          setOffset(pageOffset + data.results.length);
+        .then(async r => {
+          const headerTotal = parseInt(r.headers.get("X-Total-Count"), 10);
+          const body = await r.json();
+          const data = Array.isArray(body) ? body : (Array.isArray(body?.results) ? body.results : []);
+          return { data, headerTotal, bodyTotal: body?.total };
+        })
+        .then(({ data, headerTotal, bodyTotal }) => {
+          setRows(prev => append ? [...prev, ...data] : data);
+          const resolvedTotal = !Number.isNaN(headerTotal) ? headerTotal
+            : (typeof bodyTotal === "number" ? bodyTotal : pageOffset + data.length);
+          setTotal(resolvedTotal);
+          setOffset(pageOffset + data.length);
           setSearching(false);
           setLoadingMore(false);
         })
@@ -519,7 +530,8 @@ const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
       const nextLimit = pageOffset + PAGE_SIZE;
       fetch(`${FLASK_URL}/logs?limit=${nextLimit}`)
         .then(r => r.json())
-        .then(data => {
+        .then(body => {
+          const data = Array.isArray(body) ? body : [];
           setRows(data);
           setTotal(data.length === nextLimit ? nextLimit + 1 : data.length);
           setOffset(data.length);

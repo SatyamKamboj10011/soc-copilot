@@ -1,6 +1,8 @@
 import os
 import io
 import smtplib
+from dotenv import load_dotenv
+
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -14,6 +16,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.enums import TA_LEFT
 
 documents_bp = Blueprint("documents", __name__)
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 
 def _build_pdf(title, content, meta_lines=None):

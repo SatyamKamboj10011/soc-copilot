@@ -9,8 +9,8 @@ cd /d %~dp0
 
 echo Starting SOC Copilot...
 
-set PYTHON=C:\Users\satya\AppData\Local\Python\pythoncore-3.14-64\python.exe
-set RUSTINEL_DIR=C:\Users\satya\Documents\rustinel_soc\rustinel-1.3.0-x86_64-pc-windows-msvc
+set PYTHON=C:\Users\prath\AppData\Local\Programs\Python\Python313\python.exe
+set RUSTINEL_DIR=C:\Users\prath\rustinel
 
 echo [1/7] Starting Ollama...
 start "" ollama serve
