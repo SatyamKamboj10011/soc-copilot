@@ -244,6 +244,16 @@ def _pick_cve_search_term(target_ip: str, raw_logs):
 
 # ── AGENT RUNNER ─────────────────────────────────────────────────────────
 
+def _safe_step(label, fn, *args):
+    """Run one investigation step without letting a single failing tool
+    abort the entire run. Any exception is captured as that step's result
+    so the report still gets produced with whatever did succeed."""
+    try:
+        return fn(*args), "done"
+    except Exception as e:
+        return f"{label} failed: {type(e).__name__}: {e}", "failed"
+
+
 def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
     # model is now a real parameter, not hardcoded -- lets the frontend's
     # performance-tier picker choose a lighter model (e.g. phi4-mini) for
@@ -256,14 +266,17 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
 
     # Step 1 — Get stats
     print("Step 1: Getting network stats...")
-    stats_result = get_stats("")
-    steps.append({"step": 1, "tool": "get_stats", "input": "", "result": stats_result, "status": "done"})
+    stats_result, status = _safe_step("get_stats", get_stats, "")
+    steps.append({"step": 1, "tool": "get_stats", "input": "", "result": stats_result, "status": status})
 
     # Step 2 — Get top IPs
     print("Step 2: Getting top IPs...")
-    top_ips_data = _fetch_top_ips_raw(limit=5)
-    ips_result = get_top_ips("")
-    steps.append({"step": 2, "tool": "get_top_ips", "input": "", "result": ips_result, "status": "done"})
+    try:
+        top_ips_data = _fetch_top_ips_raw(limit=5)
+    except Exception:
+        top_ips_data = []
+    ips_result, status = _safe_step("get_top_ips", get_top_ips, "")
+    steps.append({"step": 2, "tool": "get_top_ips", "input": "", "result": ips_result, "status": status})
 
     # Step 3 — Check Sentinel endpoint telemetry -- separate data source
     # from the honeypot's network logs (your own monitored machines, not
@@ -271,12 +284,15 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
     # investigation: is anything flagged on the machines Hermes is meant
     # to be protecting, independent of what's happening on the honeypot?
     print("Step 3: Checking Sentinel endpoint activity...")
-    endpoint_result = check_endpoint_activity("")
-    steps.append({"step": 3, "tool": "check_endpoint_activity", "input": "", "result": endpoint_result, "status": "done"})
+    endpoint_result, status = _safe_step("check_endpoint_activity", check_endpoint_activity, "")
+    steps.append({"step": 3, "tool": "check_endpoint_activity", "input": "", "result": endpoint_result, "status": status})
 
     # Step 4 — Pick a real target IP: explicit from the task, else the
     # highest-volume genuinely external IP. No hardcoded placeholder.
-    target_ip = _pick_target_ip(task, top_ips_data)
+    try:
+        target_ip = _pick_target_ip(task, top_ips_data)
+    except Exception:
+        target_ip = None
 
     if target_ip is None:
         # Nothing external to investigate in the current data -- say so
@@ -292,29 +308,35 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
     else:
         # Step 5 — Search logs for target IP
         print(f"Step 4: Searching logs for {target_ip}...")
-        raw_logs = _search_logs_raw(target_ip)
-        logs_result = search_logs(target_ip)
-        steps.append({"step": 4, "tool": "search_logs", "input": target_ip, "result": logs_result, "status": "done"})
+        try:
+            raw_logs = _search_logs_raw(target_ip)
+        except Exception:
+            raw_logs = []
+        logs_result, status = _safe_step("search_logs", search_logs, target_ip)
+        steps.append({"step": 4, "tool": "search_logs", "input": target_ip, "result": logs_result, "status": status})
 
         # Step 6 — Check reputation
         print(f"Step 5: Checking reputation of {target_ip}...")
-        rep_result = check_reputation(target_ip)
-        steps.append({"step": 5, "tool": "check_reputation", "input": target_ip, "result": rep_result, "status": "done"})
+        rep_result, status = _safe_step("check_reputation", check_reputation, target_ip)
+        steps.append({"step": 5, "tool": "check_reputation", "input": target_ip, "result": rep_result, "status": status})
 
         # Step 7 — CVE lookup, driven by a real detected signature
-        cve_search_term = _pick_cve_search_term(target_ip, raw_logs)
+        try:
+            cve_search_term = _pick_cve_search_term(target_ip, raw_logs)
+        except Exception:
+            cve_search_term = None
         if cve_search_term:
             print(f"Step 6: Looking up CVEs for signature '{cve_search_term}'...")
-            cve_result = lookup_cve(cve_search_term)
-            steps.append({"step": 6, "tool": "lookup_cve", "input": cve_search_term, "result": cve_result, "status": "done"})
+            cve_result, status = _safe_step("lookup_cve", lookup_cve, cve_search_term)
+            steps.append({"step": 6, "tool": "lookup_cve", "input": cve_search_term, "result": cve_result, "status": status})
         else:
             cve_result = f"No alert signature detected for {target_ip} to correlate against CVEs."
             steps.append({"step": 6, "tool": "lookup_cve", "input": "(no signature)", "result": cve_result, "status": "skipped"})
 
         # Step 8 — Zeek correlation
         print(f"Step 7: Correlating Zeek data for {target_ip}...")
-        zeek_result = correlate_zeek(target_ip)
-        steps.append({"step": 7, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": "done"})
+        zeek_result, status = _safe_step("correlate_zeek", correlate_zeek, target_ip)
+        steps.append({"step": 7, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": status})
 
     # Step 9 — Generate final report with Hermes
     print("Step 8: Generating investigation report with Nous Hermes2...")
@@ -376,7 +398,26 @@ RECOMMENDED ACTIONS:
 
 Write clearly for a junior SOC analyst."""
 
-    final_answer = llm.invoke(prompt)
+    try:
+        final_answer = llm.invoke(prompt)
+    except Exception as e:
+        # The report-writing model failed (model not pulled, Ollama not
+        # running, out of memory on a large model, etc). Return the steps
+        # that did complete plus a readable reason, rather than throwing and
+        # producing a bare 500 with no detail for the user.
+        final_answer = (
+            f"Report generation failed using model '{model}': {type(e).__name__}: {e}\n\n"
+            f"The investigation steps above completed successfully — only the final "
+            f"written report could not be generated. If this is a memory or model "
+            f"issue, try a lighter model from the performance-tier picker."
+        )
+        steps.append({
+            "step": len(steps) + 1,
+            "tool": "generate_report",
+            "input": model,
+            "result": final_answer,
+            "status": "failed",
+        })
 
     return {
         "steps": steps,
