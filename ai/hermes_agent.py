@@ -75,6 +75,36 @@ def check_reputation(ip: str) -> str:
         return f"Reputation check failed: {str(e)}"
 
 
+def _check_reputation_raw(ip: str):
+    """Same lookup as check_reputation(), but returns parsed data instead
+    of a formatted string -- used internally to decide whether there's
+    real enough evidence to PROPOSE an action, not just describe one."""
+    try:
+        res = requests.get(f"{FLASK_URL}/reputation/{ip.strip()}", timeout=10)
+        return res.json()
+    except Exception:
+        return {}
+
+
+def propose_action(action_type: str, target: str, reason: str, machine_id: str = None) -> str:
+    """Proposes an action for human approval -- this NEVER executes
+    anything itself, it only creates a pending row a person must approve
+    via the dashboard. Hermes calling this is not the same as Hermes
+    DOING something; it's Hermes recommending something, with its
+    reasoning attached, same as it would in written report form."""
+    try:
+        body = {"action_type": action_type, "target": target, "reason": reason}
+        if machine_id:
+            body["machine_id"] = machine_id
+        res = requests.post(f"{FLASK_URL}/propose-action", json=body, timeout=10)
+        data = res.json()
+        if res.status_code == 201:
+            return f"Proposed action #{data.get('id')}: {action_type} on {target} -- awaiting human approval."
+        return f"Failed to propose action: {data.get('error', 'unknown error')}"
+    except Exception as e:
+        return f"Failed to propose action: {str(e)}"
+
+
 def lookup_cve(signature: str) -> str:
     """Look up CVEs related to an attack signature from NVD database."""
     try:
@@ -301,9 +331,10 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
         no_target_msg = "No external (non-internal) attacking IP found in current top-IPs data."
         steps.append({"step": 4, "tool": "search_logs", "input": "(none)", "result": no_target_msg, "status": "skipped"})
         steps.append({"step": 5, "tool": "check_reputation", "input": "(none)", "result": no_target_msg, "status": "skipped"})
-        steps.append({"step": 6, "tool": "lookup_cve", "input": "(none)", "result": no_target_msg, "status": "skipped"})
-        steps.append({"step": 7, "tool": "correlate_zeek", "input": "(none)", "result": no_target_msg, "status": "skipped"})
-        logs_result = rep_result = cve_result = zeek_result = no_target_msg
+        steps.append({"step": 6, "tool": "propose_action", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        steps.append({"step": 7, "tool": "lookup_cve", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        steps.append({"step": 8, "tool": "correlate_zeek", "input": "(none)", "result": no_target_msg, "status": "skipped"})
+        logs_result = rep_result = cve_result = zeek_result = proposal_result = no_target_msg
         raw_logs = []
     else:
         # Step 5 — Search logs for target IP
@@ -320,6 +351,19 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
         rep_result, status = _safe_step("check_reputation", check_reputation, target_ip)
         steps.append({"step": 5, "tool": "check_reputation", "input": target_ip, "result": rep_result, "status": status})
 
+        # Step 6 — Propose blocking, but ONLY when AbuseIPDB itself
+        # confirms malicious=True -- a real evidence threshold, not
+        # "propose blocking every IP investigated". This never executes
+        # anything -- always waits for a human to approve via the dashboard.
+        rep_raw = _check_reputation_raw(target_ip)
+        if rep_raw.get("malicious"):
+            propose_reason = f"AbuseIPDB confirms malicious activity ({rep_raw.get('score')}% abuse score, {rep_raw.get('reports')} reports) during this Hermes investigation."
+            proposal_result = propose_action("block_ip", target_ip, propose_reason)
+            steps.append({"step": 6, "tool": "propose_action", "input": f"block_ip: {target_ip}", "result": proposal_result, "status": "done"})
+        else:
+            proposal_result = "No action proposed — AbuseIPDB does not confirm this IP as malicious."
+            steps.append({"step": 6, "tool": "propose_action", "input": target_ip, "result": proposal_result, "status": "skipped"})
+
         # Step 7 — CVE lookup, driven by a real detected signature
         try:
             cve_search_term = _pick_cve_search_term(target_ip, raw_logs)
@@ -327,19 +371,19 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
             cve_search_term = None
         if cve_search_term:
             print(f"Step 6: Looking up CVEs for signature '{cve_search_term}'...")
-            cve_result, status = _safe_step("lookup_cve", lookup_cve, cve_search_term)
-            steps.append({"step": 6, "tool": "lookup_cve", "input": cve_search_term, "result": cve_result, "status": status})
+            cve_result = lookup_cve(cve_search_term)
+            steps.append({"step": 6, "tool": "lookup_cve", "input": cve_search_term, "result": cve_result, "status": "done"})
         else:
             cve_result = f"No alert signature detected for {target_ip} to correlate against CVEs."
-            steps.append({"step": 6, "tool": "lookup_cve", "input": "(no signature)", "result": cve_result, "status": "skipped"})
+            steps.append({"step": 7, "tool": "lookup_cve", "input": "(no signature)", "result": cve_result, "status": "skipped"})
 
         # Step 8 — Zeek correlation
         print(f"Step 7: Correlating Zeek data for {target_ip}...")
-        zeek_result, status = _safe_step("correlate_zeek", correlate_zeek, target_ip)
-        steps.append({"step": 7, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": status})
+        zeek_result = correlate_zeek(target_ip)
+        steps.append({"step": 7, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": "done"})
 
     # Step 9 — Generate final report with Hermes
-    print("Step 8: Generating investigation report with Nous Hermes2...")
+    print("Step 9: Generating investigation report with Nous Hermes2...")
 
     prompt = f"""You are SIRA — Security Incident Response Assistant powered by Nous Hermes2.
 You have completed an autonomous investigation. Here are the results:
@@ -361,6 +405,9 @@ LOG SEARCH RESULTS for {target_ip or "(no external target identified)"}:
 REPUTATION CHECK for {target_ip or "(no external target identified)"}:
 {rep_result}
 
+PROPOSED ACTION RESULT:
+{proposal_result}
+
 CVE LOOKUP RESULTS:
 {cve_result}
 
@@ -373,6 +420,7 @@ STRICT GROUNDING RULES — follow these exactly:
 - Sentinel endpoint activity is a SEPARATE data source from the honeypot's network logs -- it describes your own monitored machines, not attacker traffic. Do not conflate a flagged endpoint (Sentinel's connection heuristic, or a real Rustinel Sigma/YARA/IOC detection) with a network-level attacker finding, or vice versa.
 - Rustinel detections are real, rule-based findings (Sigma/YARA/IOC) -- if none are present, say "no Rustinel alerts" rather than inventing one, same as any other tool result.
 - If no external attacker, no relevant CVE, or no flagged endpoint was found in the results above, say so plainly instead of filling the gap with a plausible-sounding but unverified claim.
+- You NEVER execute anything yourself -- you only PROPOSE actions, which require explicit human approval in the dashboard before anything happens. Never write as if an action has already been taken; the PROPOSED ACTION RESULT above tells you exactly what state it's actually in.
 
 Based on all this intelligence, write a comprehensive investigation report with:
 
@@ -384,6 +432,9 @@ TOP THREATS:
 
 ENDPOINT SECURITY:
 [Any flagged Sentinel endpoints, or state clearly that none are flagged]
+
+PROPOSED ACTIONS:
+[If an action was proposed above (e.g. blocking an IP), state it here plainly and note it is awaiting human approval in the dashboard -- do not claim it has already been done. If nothing was proposed, say so.]
 
 RISK LEVEL:
 [CRITICAL / HIGH / MEDIUM / LOW — with justification]
