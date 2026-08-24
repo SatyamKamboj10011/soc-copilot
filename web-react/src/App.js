@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
-import NeuralBrain from "./NeuralBrain";
+import { InvestigationPage } from "./InvestigationPage";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, serverTimestamp, increment } from "firebase/firestore";
 
 import SiraVoice from "./SiraVoice";
 import SiraAvatar from "./SiraAvatar";
-import { HermesModal } from "./HermesModal";
-import { SaveToDocumentButton, HermesDocumentsPanel } from "./HermesDocuments";
+import { HermesProvider, HermesNavBadge } from "./HermesContext";
+import { HermesPage } from "./HermesPage";
 
 const FLASK_URL = "http://localhost:5000";
 
@@ -20,6 +20,20 @@ const QUICK_QUESTIONS = [
   "Suspicious activity?",
   "What should I do?",
   "Summarise events",
+];
+
+// Curated from a live check on 2026-08-24 — the free-tier landscape shifts
+// every few months, not by the minute, so this needs occasional manual
+// refreshing (ask Claude to re-check it) rather than a real search API
+// call on every request. Wiring in a paid search API just to find free
+// model providers would defeat the point.
+const KNOWN_FREE_PROVIDERS = [
+  { id: "google-ai-studio",     name: "Google AI Studio (Gemini)",  keyword: "gemini",     signupUrl: "https://aistudio.google.com/",                                   note: "Gemini 2.5 Flash, 1M context, no card" },
+  { id: "openrouter",           name: "OpenRouter (free models)",   keyword: "openrouter", signupUrl: "https://openrouter.ai/",                                         note: "20+ free models behind one key" },
+  { id: "mistral",              name: "Mistral AI (free tier)",     keyword: "mistral",    signupUrl: "https://console.mistral.ai/",                                    note: "Enabled by default, no card" },
+  { id: "cloudflare-workers-ai",name: "Cloudflare Workers AI",      keyword: "cloudflare", signupUrl: "https://dash.cloudflare.com/?to=/:account/ai/workers-ai",       note: "10,000 Neurons/day free" },
+  { id: "nvidia-nim",           name: "NVIDIA NIM",                 keyword: "nvidia",     signupUrl: "https://build.nvidia.com/",                                      note: "100+ open models, phone verification" },
+  { id: "sambanova",            name: "SambaNova Cloud",            keyword: "sambanova",  signupUrl: "https://cloud.sambanova.ai/",                                    note: "200k tokens/day per model" },
 ];
 
 const MAX_CHARS = 500;
@@ -481,216 +495,6 @@ function SiraMessage({ text, modelChip }) {
     </div>
   );
 }
-const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
-  const [rows, setRows]                     = useState([]);
-  const [search, setSearch]                 = useState("");
-  const [offset, setOffset]                 = useState(0);
-  const [total, setTotal]                   = useState(0);
-  const [searching, setSearching]           = useState(false);
-  const [loadingMore, setLoadingMore]       = useState(false);
-  const [selected, setSelected]             = useState(null);
-  const [profile, setProfile]               = useState(null);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [whatIf, setWhatIf]                 = useState(null);
-  const [whatIfLoading, setWhatIfLoading]   = useState(false);
-  const searchDebounce                      = useRef(null);
-  const PAGE_SIZE = 50;
-
-  const loadProfile = async (ip) => {
-    setProfileLoading(true); setProfile(null);
-    try { const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}`); setProfile(await res.json()); }
-    catch { setProfile({ error:"Failed to load profile" }); }
-    setProfileLoading(false);
-  };
-
-  const fetchPage = (q, pageOffset, append) => {
-    if (q) {
-      // /search returns a plain array; the total count comes back in an
-      // X-Total-Count header. Guarding with Array.isArray means a change to
-      // that response shape degrades to an empty list rather than crashing
-      // the whole page on rows.map().
-      fetch(`${FLASK_URL}/search?q=${encodeURIComponent(q)}&offset=${pageOffset}&limit=${PAGE_SIZE}`)
-        .then(async r => {
-          const headerTotal = parseInt(r.headers.get("X-Total-Count"), 10);
-          const body = await r.json();
-          const data = Array.isArray(body) ? body : (Array.isArray(body?.results) ? body.results : []);
-          return { data, headerTotal, bodyTotal: body?.total };
-        })
-        .then(({ data, headerTotal, bodyTotal }) => {
-          setRows(prev => append ? [...prev, ...data] : data);
-          const resolvedTotal = !Number.isNaN(headerTotal) ? headerTotal
-            : (typeof bodyTotal === "number" ? bodyTotal : pageOffset + data.length);
-          setTotal(resolvedTotal);
-          setOffset(pageOffset + data.length);
-          setSearching(false);
-          setLoadingMore(false);
-        })
-        .catch(() => { setSearching(false); setLoadingMore(false); });
-    } else {
-      const nextLimit = pageOffset + PAGE_SIZE;
-      fetch(`${FLASK_URL}/logs?limit=${nextLimit}`)
-        .then(r => r.json())
-        .then(body => {
-          const data = Array.isArray(body) ? body : [];
-          setRows(data);
-          setTotal(data.length === nextLimit ? nextLimit + 1 : data.length);
-          setOffset(data.length);
-          setSearching(false);
-          setLoadingMore(false);
-        })
-        .catch(() => { setSearching(false); setLoadingMore(false); });
-    }
-  };
-
-  useEffect(() => { fetchPage("", 0, false); }, []); // eslint-disable-line
-
-  useEffect(() => {
-    clearTimeout(searchDebounce.current);
-    setSearching(true);
-    searchDebounce.current = setTimeout(() => fetchPage(search.trim(), 0, false), 300);
-    return () => clearTimeout(searchDebounce.current);
-  }, [search]); // eslint-disable-line
-
-  const loadMore = () => { setLoadingMore(true); fetchPage(search.trim(), offset, true); };
-  const hasMore = offset < total;
-
-  return (
-    <div className="page">
-      <div className="page-title">Investigation</div>
-      <div className="page-sub">SEARCH AND ANALYSE LOG EVENTS</div>
-      <input className="inv-search" placeholder="Search by IP or alert signature..." value={search} onChange={e=>setSearch(e.target.value)} />
-      <div className="page-card">
-        {searching && (
-          <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",marginBottom:10,letterSpacing:1}}>◈ SEARCHING...</div>
-        )}
-        <table className="inv-table">
-          <thead><tr><th>TYPE</th><th>TIME</th><th>SOURCE IP</th><th>DEST IP</th><th>DETAILS</th></tr></thead>
-          <tbody>
-            {rows.map((l,i)=>(
-              <tr key={i} onClick={()=>setSelected(l)}>
-                <td><span className={`inv-type-badge inv-type-${l.event_type}`}>{l.event_type}</span></td>
-                <td>{l.timestamp?.substring(11,19)}</td>
-                <td style={{color:"var(--accent)"}}>{l.src_ip}</td>
-                <td>{l.dest_ip}</td>
-                <td style={{color:"var(--text-dim)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.alert?.signature||l.dns?.rrname||l.http?.hostname||"—"}</td>
-              </tr>
-            ))}
-            {rows.length===0 && !searching && (
-              <tr><td colSpan={5} style={{textAlign:"center",padding:20,color:"var(--text-dim)",fontFamily:"var(--mono)",fontSize:10}}>
-                {search.trim() ? "No matching events found" : "No events loaded"}
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-        {hasMore && rows.length > 0 && (
-          <button onClick={loadMore} disabled={loadingMore} style={{
-            width:"100%", marginTop:14, padding:"10px", background:"var(--bg3)", border:"1px solid var(--border2)",
-            borderRadius:8, color:"var(--accent)", fontFamily:"var(--mono)", fontSize:10, letterSpacing:1,
-            cursor: loadingMore ? "not-allowed" : "pointer", textTransform:"uppercase", opacity: loadingMore?0.5:1
-          }}>{loadingMore ? "LOADING..." : "LOAD MORE"}</button>
-        )}
-        {rows.length > 0 && (
-          <div style={{textAlign:"center",marginTop:8,fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)"}}>
-            Showing {rows.length} of {total}
-          </div>
-        )}
-      </div>
-
-      {selected && (
-        <div className="modal-overlay" onClick={()=>setSelected(null)}>
-          <div className="modal" onClick={e=>e.stopPropagation()}>
-            <button className="modal-close" onClick={()=>setSelected(null)}>✕</button>
-            <div className="modal-title">Event Details</div>
-            <div className="modal-sub">{selected.timestamp}</div>
-            <div className="modal-row"><span className="modal-key">Type</span><span className="modal-val">{selected.event_type?.toUpperCase()}</span></div>
-            <div className="modal-row"><span className="modal-key">Source IP</span><span className="modal-val" style={{color:"var(--accent)"}}>{selected.src_ip}:{selected.src_port}</span></div>
-            <div className="modal-row"><span className="modal-key">Destination IP</span><span className="modal-val">{selected.dest_ip}:{selected.dest_port}</span></div>
-            <div className="modal-row"><span className="modal-key">Protocol</span><span className="modal-val">{selected.proto}</span></div>
-            {selected.alert && <>
-              <div className="modal-row"><span className="modal-key">Alert</span><span className="modal-val" style={{color:"var(--red)"}}>{selected.alert.signature}</span></div>
-              <div className="modal-row"><span className="modal-key">Category</span><span className="modal-val">{selected.alert.category}</span></div>
-              <div className="modal-row"><span className="modal-key">Severity</span><span className="modal-val">{selected.alert.severity}</span></div>
-            </>}
-            {selected.dns && <div className="modal-row"><span className="modal-key">DNS Query</span><span className="modal-val">{selected.dns.rrname}</span></div>}
-            {selected.http && <div className="modal-row"><span className="modal-key">HTTP</span><span className="modal-val">{selected.http.http_method} {selected.http.hostname}{selected.http.url}</span></div>}
-            {selected.src_ip && (
-              <button onClick={()=>{loadProfile(selected.src_ip);setSelected(null);}} style={{marginTop:14,width:"100%",padding:"11px",background:"var(--purple-dim)",border:"1px solid var(--purple)",borderRadius:10,color:"var(--purple)",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:"pointer",textTransform:"uppercase"}}>◈ VIEW ATTACKER PROFILE</button>
-            )}
-            <div style={{display:"flex",gap:8,marginTop:12}}>
-              <button className="ask-sira-btn" style={{flex:1,marginTop:0}} onClick={()=>{onAskSira(`Analyse this ${selected.event_type} event from ${selected.src_ip} to ${selected.dest_ip} at ${selected.timestamp}`);setSelected(null);}}>⬡ ASK SIRA</button>
-              {selected.alert?.signature && (
-                <button onClick={async()=>{
-                  const sig=selected.alert.signature,src=selected.src_ip,dst=selected.dest_ip;
-                  setSelected(null);setWhatIfLoading(true);setWhatIf(null);
-                  try{const res=await fetch(`${FLASK_URL}/what-if`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signature:sig,src_ip:src,dest_ip:dst})});setWhatIf(await res.json());}
-                  catch{setWhatIf({error:"Failed to load"});}
-                  setWhatIfLoading(false);
-                }} style={{flex:1,padding:"11px",background:"var(--orange-dim)",border:"1px solid var(--orange)",borderRadius:10,color:"var(--orange)",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:"pointer",textTransform:"uppercase"}}>⚠ WHAT IF?</button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {(profile||profileLoading) && (
-        <div className="modal-overlay" onClick={()=>setProfile(null)}>
-          <div className="modal" onClick={e=>e.stopPropagation()} style={{width:680}}>
-            <button className="modal-close" onClick={()=>setProfile(null)}>✕</button>
-            {profileLoading && <div style={{textAlign:"center",padding:40,fontFamily:"var(--mono)",color:"var(--accent)"}}>◈ Building attacker profile...</div>}
-            {profile && !profile.error && (
-              <>
-                <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:20,padding:"16px",background:"var(--bg3)",borderRadius:12,border:"1px solid var(--purple)",borderLeft:"3px solid var(--purple)"}}>
-                  <img src={`https://flagcdn.com/24x18/${profile.geo.flag?.toLowerCase()}.png`} alt="" style={{width:36,height:27,borderRadius:3}} onError={e=>e.target.style.display='none'}/>
-                  <div style={{flex:1}}>
-                    <div style={{fontFamily:"var(--mono)",fontSize:20,fontWeight:700,color:"var(--purple)"}}>{profile.ip}</div>
-                    <div style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text-mid)",marginTop:4}}>{profile.geo.city}, {profile.geo.country} — {profile.geo.isp}</div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontFamily:"var(--display)",fontSize:28,fontWeight:700,color:profile.abuse.score>75?"var(--red)":profile.abuse.score>25?"var(--orange)":"var(--green)"}}>{profile.abuse.score}%</div>
-                    <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5}}>ABUSE SCORE</div>
-                  </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:16}}>
-                  {[{label:"Total Events",value:profile.stats.total_events,color:"var(--accent)"},{label:"Alerts",value:profile.stats.total_alerts,color:"var(--red)"},{label:"AbuseIPDB Reports",value:profile.abuse.reports,color:"var(--orange)"},{label:"Ports Targeted",value:profile.stats.ports_targeted.length,color:"var(--purple)"}].map((s,i)=>(
-                    <div key={i} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,padding:"12px",textAlign:"center"}}>
-                      <div style={{fontFamily:"var(--display)",fontSize:22,fontWeight:700,color:s.color}}>{s.value}</div>
-                      <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1,marginTop:4}}>{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-                {profile.stats.signatures.length>0 && <div style={{marginBottom:16}}><div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:8}}>ATTACK SIGNATURES USED</div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{profile.stats.signatures.map((sig,i)=>(<span key={i} style={{fontFamily:"var(--mono)",fontSize:9,padding:"4px 10px",borderRadius:20,background:"var(--red-dim)",color:"var(--red)",border:"1px solid rgba(225,85,84,0.3)"}}>{sig}</span>))}</div></div>}
-                {profile.stats.ports_targeted.length>0 && <div style={{marginBottom:16}}><div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:8}}>PORTS TARGETED</div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{profile.stats.ports_targeted.map((port,i)=>(<span key={i} style={{fontFamily:"var(--mono)",fontSize:9,padding:"4px 10px",borderRadius:20,background:"var(--accent-dim)",color:"var(--accent)",border:"1px solid rgba(41,211,255,0.25)"}}>{port}</span>))}</div></div>}
-                <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderLeft:"2px solid var(--purple)",borderRadius:10,padding:16}}>
-                  <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--purple)",letterSpacing:1.5,marginBottom:12}}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
-                  <div style={{fontFamily:"var(--sans)",fontSize:12,color:"var(--text-mid)",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{profile.sira_assessment}</div>
-                </div>
-                <button className="ask-sira-btn" style={{marginTop:16}} onClick={()=>{onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`);setProfile(null);}}>⬡ ASK SIRA FOR FULL ANALYSIS</button>
-              </>
-            )}
-            {profile?.error && <div style={{color:"var(--red)",fontFamily:"var(--mono)",fontSize:12,padding:20}}>✗ {profile.error}</div>}
-          </div>
-        </div>
-      )}
-
-      {(whatIf||whatIfLoading) && (
-        <div className="modal-overlay" onClick={()=>{setWhatIf(null);setWhatIfLoading(false);}}>
-          <div className="modal" onClick={e=>e.stopPropagation()} style={{width:640}}>
-            <button className="modal-close" onClick={()=>{setWhatIf(null);setWhatIfLoading(false);}}>✕</button>
-            <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--orange)",letterSpacing:2,marginBottom:4}}>⚠ WHAT IF MODE</div>
-            <div className="modal-title">If This Attack Wasn't Blocked...</div>
-            <div className="modal-sub">{whatIf?.signature}</div>
-            {whatIfLoading && <div style={{textAlign:"center",padding:40,fontFamily:"var(--mono)",color:"var(--orange)"}}>⚠ SIRA is simulating the attack chain...</div>}
-            {whatIf && !whatIfLoading && (
-              <div style={{fontFamily:"var(--sans)",fontSize:12,color:"var(--text-mid)",lineHeight:1.8,whiteSpace:"pre-wrap",background:"var(--bg3)",border:"1px solid var(--orange)",borderLeft:"3px solid var(--orange)",borderRadius:10,padding:16}}>
-                {whatIf.error ? <span style={{color:"var(--red)"}}>✗ {whatIf.error}</span> : whatIf.answer}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-});
 function BootSequence({ onComplete }) {
   const [lines, setLines] = useState([]);
   const [done, setDone]   = useState(false);
@@ -984,6 +788,7 @@ export default function App() {
   const [loading, setLoading]             = useState(false);
   const [alerts, setAlerts]               = useState([]);
   const [toast, setToast]                 = useState(null);
+  const [modelSuggestion, setModelSuggestion] = useState(null); // {failedChip, suggestions:[{value,label,chip}]}
   const [severityFilter, setSeverityFilter] = useState("all");
   const [reputations, setReputations]     = useState({});
   const [isDark, setIsDark]               = useState(true);
@@ -1016,11 +821,6 @@ const [sessionId, setSessionId] = useState(() => {
 });
   const [didOpen, setDidOpen]             = useState(false);
   const [bootDone, setBootDone]           = useState(() => sessionStorage.getItem("bootDone") === "true");
-  const [hermesOpen, setHermesOpen]       = useState(false);
-  const [hermesTask, setHermesTask]       = useState("");
-  const [hermesLoading, setHermesLoading] = useState(false);
-  const [hermesSteps, setHermesSteps]     = useState([]);
-  const [hermesAnswer, setHermesAnswer]   = useState("");
   const [machines, setMachines]           = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [sentinelIP, setSentinelIP]       = useState("");
@@ -1198,17 +998,6 @@ const [sessionId, setSessionId] = useState(() => {
     showToast(`API key saved for ${modelObj.chip}`);
   };
 
-  const startHermes = async () => {
-    if (!hermesTask.trim()) return;
-    setHermesLoading(true); setHermesSteps([]); setHermesAnswer("");
-    try {
-      const hermesModel = PERF_TIERS[perfTier]?.hermesModel || "nous-hermes2";
-      const data = await fetch(`${FLASK_URL}/hermes-agent`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:hermesTask, model:hermesModel})}).then(r=>r.json());
-      setHermesSteps(data.steps||[]); setHermesAnswer(data.answer||"Investigation complete");
-    } catch(err) { setHermesAnswer(`Error: ${err.message}`); }
-    setHermesLoading(false);
-  };
-
   const sendMessage = async (text) => {
     const q = (text||input).trim();
     if (!q || loading || charCount > MAX_CHARS) return;
@@ -1221,6 +1010,7 @@ try {
   await setDoc(doc(db,"soc_sessions",sessionId),{username,...(sessionTitle&&{title:sessionTitle}),model_used:selectedModel,updated_at:serverTimestamp(),created_at:serverTimestamp()},{merge:true});
   await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"user",message:q,model_used:selectedModel,created_at:serverTimestamp()});
 } catch(e) { console.error("Firestore user save error:",e); }
+setModelSuggestion(null);
 try {
   const recentHistory = messages.slice(-6).filter(m=>!m.isWelcome && !m.isError).map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
   const useOwn = localStorage.getItem(`sira_use_own_key_${selectedModel}`) === "true";
@@ -1228,7 +1018,7 @@ try {
   const apiKeyToSend = (useOwn && storedKey) ? storedKey : undefined;
   const res = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory,...(apiKeyToSend && {api_key:apiKeyToSend})})});
   const data = await res.json();
-  if (!res.ok) { throw new Error(data.error || `Request failed (${res.status})`); }
+  if (!res.ok) { const err = new Error(data.error || `Request failed (${res.status})`); err.status = res.status; throw err; }
   setMessages(prev=>[...prev,{role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
   const cleanForVoice = (data.answer || "")
     .replace(/SUMMARY:|THREAT DETAILS:|WHAT THIS MEANS:|RISK ASSESSMENT:|RECOMMENDED ACTIONS:|OVERVIEW:|TOP THREATS:|PATTERNS DETECTED:|PRIORITY ACTIONS:|SITUATION:|IMMEDIATE ACTIONS:|TODAY:|THIS WEEK:/g, "")
@@ -1238,7 +1028,32 @@ try {
     await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"ai",message:data.answer,model_used:selectedModel,created_at:serverTimestamp()});
     await setDoc(doc(db,"soc_sessions",sessionId),{updated_at:serverTimestamp(),message_count:increment(1)},{merge:true});
   } catch(e) { console.error("Firestore AI save error:",e); }
-} catch(err) { setMessages(prev=>[...prev,{role:"ai",text:`Error: ${err.message}`,time:new Date().toLocaleTimeString(),model:modelObj.chip,isError:true}]); }
+} catch(err) {
+  setMessages(prev=>[...prev,{role:"ai",text:`Error: ${err.message}`,time:new Date().toLocaleTimeString(),model:modelObj.chip,isError:true}]);
+  // Every model in modelOptions is already tagged free (LOCAL — FREE / CLOUD — FREE, see
+  // /models in Flask), so "suggest an alternative" just means "suggest a different one from
+  // this list" — no separate free/paid curation needed. Local goes first since it can never
+  // rate-limit; everything else in the same request is a genuine 429/quota signal, not a
+  // one-off network blip, so we only show the banner for that.
+  const isRateLimit = err.status === 429 || /rate.?limit|quota|too many requests|429/i.test(err.message || "");
+  if (isRateLimit) {
+    const alternatives = modelOptions.filter(m => m.value !== selectedModel);
+    const local = alternatives.filter(m => !m.cloud);
+    const otherCloud = alternatives.filter(m => m.cloud).slice(0, 2);
+    const suggestions = [...local, ...otherCloud];
+    // Anything in KNOWN_FREE_PROVIDERS whose keyword isn't already reflected
+    // in a configured model's value/id counts as "not wired in yet" — these
+    // get a signup link instead of an instant switch, since your backend
+    // has no client for them.
+    const configuredValues = modelOptions.map(m => (m.value || "").toLowerCase());
+    const newProviders = KNOWN_FREE_PROVIDERS.filter(
+      p => !configuredValues.some(v => v.includes(p.keyword))
+    );
+    if (suggestions.length || newProviders.length) {
+      setModelSuggestion({ failedChip: modelObj.chip, suggestions, newProviders });
+    }
+  }
+}
 setLoading(false);
   }
 
@@ -1273,8 +1088,10 @@ setLoading(false);
   const alertCount  = alerts.filter(a=>a.event_type==="alert").length;
   const uniqueIPs   = [...new Set(alerts.map(a=>a.src_ip).filter(Boolean))].length;
   const loadingLabel = { ollama:"SIRA", ollama_phi3:"PHI3", groq:"GROQ", gemini:"GEMINI", mistral:"MISTRAL" };
+  const hermesModel = PERF_TIERS[perfTier]?.hermesModel || "nous-hermes2";
 
   return (
+    <HermesProvider hermesModel={hermesModel}>
     <>
       {!bootDone && <BootSequence onComplete={()=>{ sessionStorage.setItem("bootDone","true"); setBootDone(true); }}/>}
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
@@ -1343,14 +1160,14 @@ setLoading(false);
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div className="mac-tabs">
-              {["dashboard","analytics","investigation","history","documents"].map(p=>(
+              {["dashboard","analytics","investigation","history","hermes"].map(p=>(
                 <button key={p} className={`mac-tab${page===p?" active":""}`} onClick={()=>setPage(p)}>
                   {page===p && <motion.div layoutId="mac-tab-pill" className="mac-tab-pill" transition={{type:"spring",stiffness:500,damping:36}} />}
                   <span style={{position:"relative",zIndex:1}}>{p}</span>
                 </button>
               ))}
             </div>
-            <button className="mac-hermes-btn" onClick={()=>setHermesOpen(true)}>⬡ HERMES AGENT</button>
+            <HermesNavBadge onClick={()=>setPage("hermes")} />
           </div>
           <div className="nav-right">
             <div className="nav-status">
@@ -1442,8 +1259,9 @@ setLoading(false);
 
             {/* ── Performance Mode — hardware-based tier picker ────────────
                 Sets BOTH SIRA's model (via selectedModel, reusing the
-                existing dropdown machinery) and Hermes's model (sent per-
-                request in startHermes) together. Embeddings never change. */}
+                existing dropdown machinery) and Hermes's model (read from
+                HermesContext at investigation start). Embeddings never
+                change. */}
             <div className="section-label">Performance Mode</div>
             <div style={{padding:"10px 20px 0"}}>
               <div style={{display:"flex",gap:6,marginBottom:8}}>
@@ -1569,8 +1387,8 @@ setLoading(false);
         <div style={{display:page==="history"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <History/>
         </div>
-        <div style={{display:page==="documents"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
-          <HermesDocumentsPanel username={username} />
+        <div style={{display:page==="hermes"?"flex":"none",flex:1,overflow:"hidden",minHeight:0,padding:page==="hermes"?"4px":0,boxSizing:"border-box"}}>
+          <HermesPage username={username} />
         </div>
         <div style={{display:page==="dashboard"?"flex":"none",flexDirection:"column",flex:1,overflow:"hidden",minHeight:0}}>
         <div style={{display:"flex",flex:1,overflow:"hidden",position:"relative",gap:10,minHeight:0}}>
@@ -1637,6 +1455,57 @@ setLoading(false);
               {unreadCount>0 && <span className="unread-badge">{unreadCount>9?"9+":unreadCount}</span>}↓
             </button>
           </div>
+          {modelSuggestion && (
+            <div style={{
+              margin: "0 28px 14px", padding: "10px 14px", borderRadius: 10,
+              background: "var(--orange-dim)", border: "1px solid var(--orange)",
+              display: "flex", flexDirection: "column", gap: 8,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, flexShrink: 0 }}>⚠</span>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--orange)", flex: 1, minWidth: 200 }}>
+                  {modelSuggestion.failedChip} looks rate-limited. Try a free alternative:
+                </span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {modelSuggestion.suggestions.map(m => (
+                    <button
+                      key={m.value}
+                      onClick={() => { setSelectedModel(m.value); showToast(`Switched to ${m.chip}`); setModelSuggestion(null); }}
+                      style={{
+                        fontFamily: "var(--mono)", fontSize: 9, padding: "6px 12px", borderRadius: 20,
+                        border: "1px solid var(--orange)", background: "var(--bg3)", color: "var(--orange)",
+                        cursor: "pointer", letterSpacing: 0.5,
+                      }}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setModelSuggestion(null)} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", fontSize: 13, flexShrink: 0, marginLeft: 2 }}>✕</button>
+              </div>
+              {modelSuggestion.newProviders?.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 6, borderTop: "1px solid rgba(240,168,87,0.25)" }}>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: "var(--text-dim)", letterSpacing: 0.5 }}>Not wired in yet, but also free:</span>
+                  {modelSuggestion.newProviders.map(p => (
+                    <a
+                      key={p.id}
+                      href={p.signupUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={p.note}
+                      style={{
+                        fontFamily: "var(--mono)", fontSize: 8.5, padding: "5px 10px", borderRadius: 20,
+                        border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text-mid)",
+                        textDecoration: "none",
+                      }}
+                    >
+                      {p.name} ↗
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="input-area">
             <div className="quick-btns">{QUICK_QUESTIONS.map((q,i)=>(<button key={i} className="qbtn" onClick={()=>sendMessage(q)}>{q}</button>))}</div>
             <div className="input-row">
@@ -1708,8 +1577,7 @@ setLoading(false);
         </button>
         <button onClick={()=>{
           setSelectedMachine(null);
-          setPage("dashboard");
-          setTimeout(()=>sendMessage(`Run full Hermes investigation on machine ${selectedMachine.id} at IP ${selectedMachine.local_ip}`),300);
+          setPage("hermes");
         }} style={{flex:1,padding:"10px",background:"var(--purple-dim)",border:"1px solid var(--purple)",borderRadius:10,color:"var(--purple)",fontFamily:"var(--mono)",fontSize:9,cursor:"pointer",letterSpacing:1,textTransform:"uppercase"}}>
           ◈ HERMES SCAN
         </button>
@@ -1813,14 +1681,7 @@ setLoading(false);
 )}
 
       <SiraVoice isOpen={didOpen} onClose={()=>setDidOpen(false)}/>
-
-      <HermesModal
-        hermesOpen={hermesOpen} setHermesOpen={setHermesOpen}
-        hermesLoading={hermesLoading} hermesTask={hermesTask} setHermesTask={setHermesTask}
-        startHermes={startHermes} hermesSteps={hermesSteps} hermesAnswer={hermesAnswer}
-        setHermesAnswer={setHermesAnswer} setHermesSteps={setHermesSteps} showToast={showToast}
-        username={username}
-      />
     </>
+    </HermesProvider>
   );
 }
