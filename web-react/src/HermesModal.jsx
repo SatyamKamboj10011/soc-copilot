@@ -1,3 +1,5 @@
+import { SaveToDocumentButton } from "./HermesDocuments";
+
 // ── Inline icons (no new dependency) ────────────────────────────────────
 const ToolIcon = ({ tool, size = 15 }) => {
   const stroke = "currentColor";
@@ -146,7 +148,7 @@ function HermesTimeline({ steps, running }) {
 }
 
 // ── Full modal — swap in place of the existing {hermesOpen && (...)} block
-export function HermesModal({ hermesOpen, setHermesOpen, hermesLoading, hermesTask, setHermesTask, startHermes, hermesSteps, hermesAnswer, setHermesAnswer, setHermesSteps, showToast }) {
+export function HermesModal({ hermesOpen, setHermesOpen, hermesLoading, hermesTask, setHermesTask, startHermes, hermesSteps, hermesAnswer, setHermesAnswer, setHermesSteps, showToast, username }) {
   if (!hermesOpen) return null;
   return (
     <div className="modal-overlay" onClick={() => { if (!hermesLoading) setHermesOpen(false); }}>
@@ -201,9 +203,10 @@ export function HermesModal({ hermesOpen, setHermesOpen, hermesLoading, hermesTa
             <div style={{ background: "var(--bg3)", border: "1px solid rgba(139,124,255,0.2)", borderRadius: 12, padding: 16, maxHeight: 340, overflowY: "auto" }}>
               <HermesReportView text={hermesAnswer} />
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
               <button onClick={() => { setHermesAnswer(""); setHermesSteps([]); }} style={{ flex: 1, padding: "9px", background: "transparent", border: "1px solid var(--border2)", borderRadius: 10, color: "var(--text-mid)", fontFamily: "var(--mono)", fontSize: 9, cursor: "pointer", letterSpacing: 1 }}>NEW INVESTIGATION</button>
               <button onClick={() => { navigator.clipboard.writeText(hermesAnswer); showToast("Report copied"); }} style={{ flex: 1, padding: "9px", background: "var(--purple-dim)", border: "1px solid var(--purple)", borderRadius: 10, color: "var(--purple)", fontFamily: "var(--mono)", fontSize: 9, cursor: "pointer", letterSpacing: 1 }}>COPY</button>
+              <SaveToDocumentButton username={username} content={hermesAnswer} sourceQuery={hermesTask} />
             </div>
           </div>
         )}

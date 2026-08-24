@@ -39,7 +39,11 @@ if ROOT_DIR not in sys.path:
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000"])
+CORS(
+    app,
+    resources={r"/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}},
+    supports_credentials=True,
+)
 
 # JWT Config
 app.config["JWT_SECRET_KEY"] = "soc-copilot-secret-key-2024"
@@ -98,6 +102,18 @@ def init_db():
     print("SQLite database ready — users.db")
 
 init_db()
+
+# Documents blueprint (Hermes report save / PDF export / email share).
+# Guarded so the app still boots if the module isn't present yet -- without
+# this registration the /api/documents/* routes don't exist at all, and the
+# browser surfaces that as a CORS preflight failure rather than a 404,
+# which is misleading to debug.
+try:
+    from hermes_documents import documents_bp
+    app.register_blueprint(documents_bp, url_prefix="/api/documents")
+    print("Documents blueprint registered — /api/documents/* available")
+except ImportError as e:
+    print(f"Documents blueprint not loaded: {e}")
 # ─────────────────────────────────────────────────────────────────────────────
 
 # langchain_ollama.OllamaEmbeddings was not honoring an explicit base_url on
@@ -1247,7 +1263,16 @@ def hermes_agent():
         result = run_hermes_agent(task, model=model)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Print the full traceback to the Flask console -- without this, a
+        # failure here surfaces to the browser as a bare 500 with no way to
+        # tell whether it was an import error, a missing Ollama model, or a
+        # tool failure inside the agent.
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": f"{type(e).__name__}: {e}",
+            "hint": "Check the Flask console for the full traceback.",
+        }), 500
 
 
 @app.route('/cve-lookup', methods=['GET'])
