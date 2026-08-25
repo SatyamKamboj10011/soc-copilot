@@ -912,11 +912,8 @@ def health():
         ok, err = _ping_with_timeout(lambda: get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping"), 8)
         cloud_status = "ok" if ok else f"offline — {err}"
 
-    try:
-        vectorstore.get(limit=1)
-        chroma_status = "ok"
-    except Exception as e:
-        chroma_status = f"offline — {str(e)[:60]}"
+    ok, err = _ping_with_timeout(lambda: vectorstore.get(limit=1), 5)
+    chroma_status = "ok" if ok else f"offline — {err}"
 
     # A working LLM path is either local Ollama OR (when deployed) a
     # reachable cloud model -- local being down is expected and fine on a
@@ -1914,11 +1911,7 @@ def _compliance_context():
     cloud_ok = None
     if DEPLOYED:
         cloud_ok, _ = _ping_with_timeout(lambda: get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping"), 8)
-    try:
-        vectorstore.get(limit=1)
-        chroma_ok = True
-    except Exception:
-        chroma_ok = False
+    chroma_ok, _ = _ping_with_timeout(lambda: vectorstore.get(limit=1), 5)
 
     conn = get_db()
     machines = conn.execute("SELECT * FROM sentinel_machines").fetchall()
