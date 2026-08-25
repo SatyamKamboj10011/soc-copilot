@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase"; // adjust path if this file isn't in src/ root — same import App.js/History.js use
 
-const BACKEND_BASE = "http://localhost:5000";
+const BACKEND_BASE = "https://soc-copilot.onrender.com";
 /* ==================== Icons ==================== */
 
 const Icon = {

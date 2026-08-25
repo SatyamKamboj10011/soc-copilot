@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-const FLASK_URL = "http://localhost:5000";
+const FLASK_URL = "https://soc-copilot.onrender.com";
 
 /**
  * Docked SIRA presence card in the sidebar. Reacts automatically to

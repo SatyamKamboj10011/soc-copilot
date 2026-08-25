@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 
-const FLASK_URL = "http://localhost:5000";
+const FLASK_URL = "https://soc-copilot.onrender.com";
 const HermesContext = createContext(null);
 
 function makeCaseId() {
