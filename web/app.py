@@ -883,16 +883,29 @@ def _ping_with_timeout(fn, timeout_seconds=5):
     specifically -- WEB_CONCURRENCY=1 means a single gunicorn worker, so one
     stuck request blocks every other request too, which is what was causing
     /health itself to 502: the ping never actually errored, it just never
-    returned, so nothing else could be served either."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(fn)
-        try:
-            future.result(timeout=timeout_seconds)
-            return True, None
-        except concurrent.futures.TimeoutError:
-            return False, "timed out"
-        except Exception as e:
-            return False, str(e)[:60]
+    returned, so nothing else could be served either.
+
+    Deliberately NOT using `with ThreadPoolExecutor(...) as executor:` here.
+    That context manager calls shutdown(wait=True) on exit -- including
+    when exiting via a caught TimeoutError -- which blocks until the
+    background task actually finishes regardless of the timeout already
+    having been handled. That silently defeated the whole point of this
+    function: it would catch the timeout, then immediately re-block on
+    cleanup waiting for the same hung call. shutdown(wait=False) below is
+    what actually lets this function return promptly.
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fn)
+    try:
+        future.result(timeout=timeout_seconds)
+        result = (True, None)
+    except concurrent.futures.TimeoutError:
+        result = (False, "timed out")
+    except Exception as e:
+        result = (False, str(e)[:60])
+    finally:
+        executor.shutdown(wait=False)
+    return result
 
 
 @app.route('/health', methods=['GET'])
