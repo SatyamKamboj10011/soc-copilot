@@ -325,14 +325,40 @@ def format_ts(ts):
     return ts
 
 
-# Load once at startup — not inside the route
-kokoro_model = Kokoro("kokoro-v0_19.onnx", "voices.bin")
+# Kokoro was previously loaded eagerly at module level, which meant its two
+# model files (kokoro-v0_19.onnx, voices.bin -- too large to commit to Git,
+# correctly gitignored) being absent on a fresh deploy crashed the ENTIRE
+# app at import time, before gunicorn could even start -- every route died,
+# not just voice. Loading lazily on first actual use means a deploy without
+# these files still runs everything else fine; only /sira-speak and
+# /sira-face-speak degrade to a clear 503 instead of taking the whole
+# backend down.
+_kokoro_model = None
+_kokoro_load_error = None
+
+
+def get_kokoro_model():
+    global _kokoro_model, _kokoro_load_error
+    if _kokoro_model is not None:
+        return _kokoro_model
+    if _kokoro_load_error is not None:
+        raise _kokoro_load_error
+    try:
+        _kokoro_model = Kokoro("kokoro-v0_19.onnx", "voices.bin")
+        return _kokoro_model
+    except Exception as e:
+        _kokoro_load_error = e
+        raise
 
 @app.route("/sira-speak", methods=["POST"])
 def sira_speak():
     text = request.json.get("text", "")
     if not text:
         return jsonify({"error": "no text"}), 400
+    try:
+        kokoro_model = get_kokoro_model()
+    except Exception as e:
+        return jsonify({"error": f"Voice model unavailable: {e}"}), 503
     try:
         samples, sample_rate = kokoro_model.create(
             text=text[:500],
@@ -371,6 +397,11 @@ def sira_face_speak():
     request_id = uuid.uuid4().hex[:8]
     audio_path = os.path.join(WAV2LIP_DIR, f"temp_audio_{request_id}.wav")
     video_path = os.path.join(WAV2LIP_DIR, f"temp_output_{request_id}.mp4")
+
+    try:
+        kokoro_model = get_kokoro_model()
+    except Exception as e:
+        return jsonify({"error": f"Voice model unavailable: {e}"}), 503
 
     try:
         samples, sample_rate = kokoro_model.create(
