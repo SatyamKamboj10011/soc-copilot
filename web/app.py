@@ -39,9 +39,29 @@ if ROOT_DIR not in sys.path:
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = Flask(__name__)
+
+# ── Deployment config ────────────────────────────────────────────────────
+# DEPLOYED gates defaults and failure-recovery behaviour ONLY -- every model
+# option (local Ollama variants and cloud) stays selectable everywhere,
+# always. Setting DEPLOYED=true on Render doesn't remove sira-model or
+# nous-hermes2 from the UI -- it just means "if nothing local is actually
+# reachable, recover to a cloud model instead of hard-failing" and "when
+# the frontend hasn't specified a model, default to one that will actually
+# work here." Running locally with DEPLOYED unset (the default) behaves
+# exactly as before: everything defaults to local Ollama, no fallback logic
+# ever triggers.
+DEPLOYED = os.getenv("DEPLOYED", "false").strip().lower() in ("1", "true", "yes")
+DEFAULT_CLOUD_MODEL = os.getenv("DEFAULT_CLOUD_MODEL", "groq")
+
+# Comma-separated list, e.g. "https://soc-copilot.vercel.app,http://localhost:3000"
+# Falls back to the original localhost-only origins when unset, so local
+# dev needs no env changes at all.
+_default_origins = "http://localhost:3000,http://127.0.0.1:3000"
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
+
 CORS(
     app,
-    resources={r"/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}},
+    resources={r"/*": {"origins": ALLOWED_ORIGINS}},
     supports_credentials=True,
 )
 
@@ -173,14 +193,76 @@ def get_llm(model, api_key=None):
     elif model == "mistral":
         return ChatMistralAI(
             model="mistral-small-latest",
-            mistral_api_key=os.getenv("MISTRAL_API_KEY"),
+            # Was os.getenv(...) only -- silently ignored the "use your own
+            # key" toggle on the frontend regardless of what the user
+            # entered there. Groq and Gemini above already did this
+            # correctly; Mistral just hadn't been updated to match.
+            mistral_api_key=api_key or os.getenv("MISTRAL_API_KEY"),
             temperature=SIRA_TEMPERATURE,
         ), "cloud"
-    else:
-        # sira-model's Modelfile already bakes this in -- set explicitly
-        # too, purely so every branch here reads consistently rather than
-        # leaving a reader to wonder why this one's different.
+    elif model == "ollama":
+        # This is the frontend's literal default selectedModel value.
+        # Locally (DEPLOYED unset) this is sira-model, same as always. On
+        # Render, there's no Ollama server to reach at all -- defaulting to
+        # a cloud model here means a fresh visitor who never touched the
+        # model dropdown still gets a working answer instead of a
+        # connection-refused error.
+        if DEPLOYED:
+            return get_llm(DEFAULT_CLOUD_MODEL, api_key)
         return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
+    else:
+        # Any unrecognised model string -- same deployment-aware default as
+        # the explicit "ollama" branch above, for the same reason.
+        if DEPLOYED:
+            return get_llm(DEFAULT_CLOUD_MODEL, api_key)
+        return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
+
+
+def _is_rate_limit_error(err_msg):
+    m = (err_msg or "").lower()
+    return any(k in m for k in [
+        "rate limit", "rate_limit", "429", "quota",
+        "resourceexhausted", "resource_exhausted", "too many requests",
+    ])
+
+
+def _is_connection_error(err_msg):
+    m = (err_msg or "").lower()
+    return any(k in m for k in [
+        "connection refused", "connecterror", "failed to connect",
+        "max retries exceeded", "connection error", "econnrefused",
+        "could not connect", "connection timed out",
+    ])
+
+
+def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
+    """Runs `prompt` through `model` and returns (answer, model_used,
+    fell_back). Centralises the resilience behaviour so /ask,
+    attacker-profile, what-if, and the compliance health check all get the
+    same protection instead of each having to remember to implement it.
+
+    If `model` resolves to a local Ollama model and the call fails with a
+    connection error (i.e. no Ollama actually running here) while
+    DEPLOYED=true, retries ONCE against DEFAULT_CLOUD_MODEL instead of
+    hard-failing -- so a demo running locally with Ollama up behaves
+    exactly as before (no fallback ever triggers, nothing changes), but the
+    same code deployed on Render recovers automatically instead of
+    breaking for anyone who ends up on a local-model code path. Any other
+    failure (bad API key, genuine rate limit, real bug) is re-raised
+    unchanged so callers keep their existing specific error handling.
+    """
+    llm, llm_type = get_llm(model, api_key)
+    try:
+        result = llm.invoke(prompt)
+        answer = result if llm_type == "local" else result.content
+        return answer, model, False
+    except Exception as e:
+        err_msg = str(e)
+        if allow_fallback and llm_type == "local" and DEPLOYED and _is_connection_error(err_msg):
+            fallback_llm, _ = get_llm(DEFAULT_CLOUD_MODEL, None)
+            answer = fallback_llm.invoke(prompt).content
+            return answer, DEFAULT_CLOUD_MODEL, True
+        raise
 
 
 # eve.json is now genuinely large (growing continuously from real honeypot
@@ -442,8 +524,6 @@ def ask():
     hour_filter = data.get('hour', None)
     history     = data.get('history', [])
 
-    llm, llm_type = get_llm(model, api_key)
-
     # Identity/meta questions ("who are you", "what can you do") aren't
     # about log data at all -- retrieving logs for them just grabs whatever
     # random entries are nearest in the vector index, and the log-analysis
@@ -456,11 +536,20 @@ The analyst asked: "{question}"
 Answer conversationally in 2-4 sentences, describing who you are and what you help with
 (monitoring Suricata/Zeek network traffic, triaging alerts, investigating threats via Hermes).
 Do NOT perform log analysis, cite any IPs, or produce a security report for this message."""
-        if llm_type == "local":
-            identity_answer = llm.invoke(identity_prompt)
-        else:
-            identity_answer = llm.invoke(identity_prompt).content
-        return jsonify({'answer': identity_answer, 'model_used': model})
+        try:
+            identity_answer, used_model, fell_back = _invoke_llm(model, identity_prompt, api_key)
+        except Exception as e:
+            err_msg = str(e)
+            if any(k in err_msg.lower() for k in ["api key", "unauthorized", "401", "invalid_api_key", "authentication"]):
+                return jsonify({"error": "Invalid API key for this provider. Check the key and try again."}), 401
+            if _is_rate_limit_error(err_msg):
+                return jsonify({"error": f"{model} is rate-limited right now. Try a different model."}), 429
+            return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
+        resp = {'answer': identity_answer, 'model_used': used_model}
+        if fell_back:
+            resp['fallback_used'] = True
+            resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
+        return jsonify(resp)
 
     # Retrieval normally only searches the CURRENT question's text -- but a
     # vague follow-up ("what is this IP", "tell me more about that") gives
@@ -649,17 +738,20 @@ Question: {resolved_question}
 Answer naturally. Pick the format that fits. Do not force sections that do not apply."""
 
     try:
-        if llm_type == "local":
-            answer = llm.invoke(prompt)
-        else:
-            answer = llm.invoke(prompt).content
+        answer, used_model, fell_back = _invoke_llm(model, prompt, api_key)
     except Exception as e:
         err_msg = str(e)
         if any(k in err_msg.lower() for k in ["api key", "unauthorized", "401", "invalid_api_key", "authentication"]):
             return jsonify({"error": "Invalid API key for this provider. Check the key and try again."}), 401
+        if _is_rate_limit_error(err_msg):
+            return jsonify({"error": f"{model} is rate-limited right now. Try a different model."}), 429
         return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
 
-    return jsonify({'answer': answer, 'model_used': model})
+    resp = {'answer': answer, 'model_used': used_model}
+    if fell_back:
+        resp['fallback_used'] = True
+        resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
+    return jsonify(resp)
 
 
 @app.route('/logs', methods=['GET'])
@@ -745,17 +837,31 @@ def health():
         ollama_status = "ok"
     except Exception as e:
         ollama_status = f"offline — {str(e)[:60]}"
+    cloud_status = "not checked"
+    if DEPLOYED:
+        try:
+            get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping")
+            cloud_status = "ok"
+        except Exception as e:
+            cloud_status = f"offline — {str(e)[:60]}"
     try:
         vectorstore.get(limit=1)
         chroma_status = "ok"
     except Exception as e:
         chroma_status = f"offline — {str(e)[:60]}"
-    overall = "ok" if ollama_status == "ok" and chroma_status == "ok" else "degraded"
+
+    # A working LLM path is either local Ollama OR (when deployed) a
+    # reachable cloud model -- local being down is expected and fine on a
+    # deployed instance with no Ollama server, as long as cloud works.
+    llm_path_ok = (ollama_status == "ok") or (DEPLOYED and cloud_status == "ok")
+    overall = "ok" if llm_path_ok and chroma_status == "ok" else "degraded"
     return jsonify({
         "status":   overall,
         "flask":    flask_status,
         "ollama":   ollama_status,
+        "cloud":    cloud_status,
         "chromadb": chroma_status,
+        "deployed": DEPLOYED,
     })
 
 
@@ -1170,9 +1276,8 @@ RECOMMENDED BLOCK:
 YES or NO — one sentence justification."""
 
     try:
-        llm = OllamaLLM(model="sira-model")
-        sira_assessment = llm.invoke(prompt)
-    except:
+        sira_assessment, _, _ = _invoke_llm("ollama", prompt)
+    except Exception:
         sira_assessment = "SIRA offline — manual review required"
 
     return jsonify({
@@ -1239,8 +1344,7 @@ LESSON:
 One plain English sentence on what this tells us about our defences."""
 
     try:
-        llm = OllamaLLM(model="sira-model")
-        answer = llm.invoke(prompt)
+        answer, _, _ = _invoke_llm("ollama", prompt)
     except Exception as e:
         answer = f"Error: {str(e)}"
 
@@ -1263,6 +1367,25 @@ def hermes_agent():
         result = run_hermes_agent(task, model=model)
         return jsonify(result)
     except Exception as e:
+        err_msg = str(e)
+        # Same idea as _invoke_llm's fallback, applied here by hand since
+        # run_hermes_agent has its own internal model handling rather than
+        # going through get_llm(). NOTE: this assumes run_hermes_agent
+        # accepts DEFAULT_CLOUD_MODEL's id ("groq" by default) the same way
+        # /ask's models do -- if ai/hermes_agent.py resolves model names
+        # differently internally, this retry will just fail too and you'll
+        # see the ORIGINAL error below (never masked), which is the signal
+        # to share that file so this can be wired in properly.
+        if DEPLOYED and _is_connection_error(err_msg):
+            try:
+                from ai.hermes_agent import run_hermes_agent as _retry
+                result = _retry(task, model=DEFAULT_CLOUD_MODEL)
+                result["fallback_used"] = True
+                result["fallback_note"] = f"{model} wasn't reachable here, ran with {DEFAULT_CLOUD_MODEL} instead"
+                return jsonify(result)
+            except Exception:
+                pass  # fall through to the original error below
+
         # Print the full traceback to the Flask console -- without this, a
         # failure here surfaces to the browser as a bare 500 with no way to
         # tell whether it was an import error, a missing Ollama model, or a
@@ -1721,6 +1844,13 @@ def _compliance_context():
         ollama_ok = True
     except Exception:
         ollama_ok = False
+    cloud_ok = None
+    if DEPLOYED:
+        try:
+            get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping")
+            cloud_ok = True
+        except Exception:
+            cloud_ok = False
     try:
         vectorstore.get(limit=1)
         chroma_ok = True
@@ -1755,6 +1885,7 @@ def _compliance_context():
         "unique_ips": unique_ips,
         "critical_alerts": critical_alerts,
         "ollama_ok": ollama_ok,
+        "cloud_ok": cloud_ok,
         "chroma_ok": chroma_ok,
         "machine_count": len(machines),
         "stale_machines": stale_machines,
@@ -1781,8 +1912,11 @@ def _evaluate_controls(ctx):
          "description": "Distinct attacking source IPs remain below the risk threshold.",
          "status": status(ctx["unique_ips"] < 20, ctx["unique_ips"] < 50)},
         {"id": "AVAIL-01", "category": "availability", "name": "AI Assistant Availability",
-         "description": "SIRA's local LLM and vector store are reachable.",
-         "status": status(ctx["ollama_ok"] and ctx["chroma_ok"], ctx["ollama_ok"] or ctx["chroma_ok"])},
+         "description": "SIRA's LLM (local or cloud) and vector store are reachable.",
+         "status": status(
+             (ctx["ollama_ok"] or ctx["cloud_ok"] is True) and ctx["chroma_ok"],
+             ctx["ollama_ok"] or ctx["cloud_ok"] is True or ctx["chroma_ok"],
+         )},
         {"id": "AVAIL-02", "category": "availability", "name": "Endpoint Heartbeat Coverage",
          "description": "Registered Sentinel endpoints have checked in within the last 15 minutes.",
          "status": status(ctx["machine_count"] > 0 and ctx["stale_machines"] == 0,
@@ -1910,6 +2044,40 @@ def compliance_trend():
     return jsonify(series)
 
 
+_honeypot_sync_started = False
+
+
+def _maybe_start_honeypot_sync():
+    """Starts the honeypot sync thread exactly once, however this process
+    was launched. Two different launch paths need two different guards:
+
+    - Gunicorn (Render's typical production launch) IMPORTS this module --
+      it never runs the `if __name__ == '__main__':` block below at all, so
+      the sync thread must start here, at true module level, guarded only
+      by "has this process already started it" (no Werkzeug reloader is
+      involved in this path, so there's no double-start risk to guard
+      against).
+    - `python app.py` locally uses Flask's debug reloader, which re-execs
+      this entire file in a child process with WERKZEUG_RUN_MAIN=true --
+      starting unconditionally at module level would run this in BOTH the
+      parent watcher process and the child, which is the exact double-sync
+      bug already documented below. That path keeps its own explicit
+      WERKZEUG_RUN_MAIN check inside __main__.
+    """
+    global _honeypot_sync_started
+    if _honeypot_sync_started:
+        return
+    _honeypot_sync_started = True
+    from ai.honeypot_log_sync import start_background_sync
+    start_background_sync()
+
+
+if __name__ != '__main__':
+    # Being imported, not run as a script -- this is the gunicorn/production
+    # path. Start immediately; see docstring above for why this is safe.
+    _maybe_start_honeypot_sync()
+
+
 if __name__ == '__main__':
     # Pull Suricata/Zeek logs from the public honeypot VM automatically,
     # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
@@ -1918,8 +2086,7 @@ if __name__ == '__main__':
     # stops the sync thread from being started twice (once in the reloader's
     # parent watcher process, once in the child) when debug=True.
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        from ai.honeypot_log_sync import start_background_sync
-        start_background_sync()
+        _maybe_start_honeypot_sync()
 
     # NOTE: debug=True's reloader watches every file under the project tree
     # recursively -- this originally caused two separate problems:
