@@ -41,6 +41,16 @@ LOCAL_CONN_LOG = os.path.join(LOCAL_LOGS_DIR, "conn.log")
 
 POLL_INTERVAL_SECONDS = 15
 
+# app.py's load_logs() only ever keeps the most recent MAX_CACHED_EVENTS
+# (5000) anyway -- pulling a multi-week, 100+MB history on every cold start
+# is pure waste, and on a constrained host (Render free tier) risks either
+# a very slow first sync or genuine memory pressure from buffering the
+# whole remaining chunk in one read() call. On a true cold start (no local
+# file at all yet), pull only the last INITIAL_PULL_BYTES instead of
+# everything from byte 0. Comfortably covers 5000 JSON lines at a generous
+# average line size, with real headroom.
+INITIAL_PULL_BYTES = 8 * 1024 * 1024  # 8MB
+
 # Tracks the last-seen remote file size per path, across polls, so we can
 # skip re-downloading a file that hasn't changed.
 _last_sizes = {}
@@ -79,6 +89,7 @@ def _sync_once(sftp):
         # so restarting the script doesn't re-download everything it
         # already has, or duplicate bytes it's already synced.
         last_size = _last_sizes.get(remote_path)
+        is_cold_start = last_size is None and not os.path.exists(local_path)
         if last_size is None:
             last_size = os.path.getsize(local_path) if os.path.exists(local_path) else 0
 
@@ -96,6 +107,35 @@ def _sync_once(sftp):
                 print(f"[honeypot_log_sync] {os.path.basename(remote_path)} was rotated on the honeypot (was {last_size} bytes, now {remote_size}) -- re-fetching fresh")
                 with sftp.open(remote_path, "rb") as rf, open(local_path, "wb") as lf:
                     lf.write(rf.read())
+            elif is_cold_start and (remote_size - last_size) > INITIAL_PULL_BYTES:
+                # True cold start (no local file at all) AND the remote file
+                # is large enough that pulling the whole thing would be slow
+                # and mostly wasted -- only load_logs()'s most recent 5000
+                # events matter anyway. Seek near the end and pull just the
+                # tail instead of the entire multi-week history.
+                start_offset = remote_size - INITIAL_PULL_BYTES
+                print(f"[honeypot_log_sync] cold start with a large remote file ({remote_size} bytes) -- pulling only the last {INITIAL_PULL_BYTES} bytes instead of the full history")
+                with sftp.open(remote_path, "rb") as rf:
+                    rf.seek(start_offset)
+                    new_data = rf.read(INITIAL_PULL_BYTES)
+                # The first line of this chunk is very likely a partial JSON
+                # line (we seeked mid-file, not at a line boundary) -- drop
+                # everything up to and including the first newline so
+                # load_logs() doesn't have to silently discard a broken
+                # first line itself.
+                first_newline = new_data.find(b"\n")
+                if first_newline != -1:
+                    new_data = new_data[first_newline + 1:]
+                with open(local_path, "wb") as lf:
+                    lf.write(new_data)
+                # Record the REAL remote size, not just what we wrote, so
+                # the next poll correctly resumes from here via the normal
+                # incremental-append path below rather than re-triggering
+                # this cold-start branch.
+                _last_sizes[remote_path] = remote_size
+                added = len(new_data)
+                print(f"[honeypot_log_sync] pulled {os.path.basename(remote_path)} tail (+{added} bytes)")
+                continue
             else:
                 # Normal case: fetch only the bytes appended since the last
                 # poll and append them locally, instead of re-downloading
