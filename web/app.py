@@ -860,21 +860,45 @@ def stats():
     })
 
 
+import concurrent.futures
+
+
+def _ping_with_timeout(fn, timeout_seconds=5):
+    """Runs fn() with a hard wall-clock timeout, so a slow or hanging
+    provider call (an unreachable local Ollama, a slow cloud API) can never
+    block a request indefinitely. This matters a lot on Render's free tier
+    specifically -- WEB_CONCURRENCY=1 means a single gunicorn worker, so one
+    stuck request blocks every other request too, which is what was causing
+    /health itself to 502: the ping never actually errored, it just never
+    returned, so nothing else could be served either."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(fn)
+        try:
+            future.result(timeout=timeout_seconds)
+            return True, None
+        except concurrent.futures.TimeoutError:
+            return False, "timed out"
+        except Exception as e:
+            return False, str(e)[:60]
+
+
 @app.route('/health', methods=['GET'])
 def health():
     flask_status = "ok"
-    try:
-        OllamaLLM(model="sira-model").invoke("ping")
-        ollama_status = "ok"
-    except Exception as e:
-        ollama_status = f"offline — {str(e)[:60]}"
+    if DEPLOYED:
+        # No point pinging local Ollama when we already know there's no
+        # Ollama server on this box -- skip it rather than risk any delay,
+        # however small, on the one worker Render's free tier gives us.
+        ollama_status = "skipped (DEPLOYED=true)"
+    else:
+        ok, err = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 5)
+        ollama_status = "ok" if ok else f"offline — {err}"
+
     cloud_status = "not checked"
     if DEPLOYED:
-        try:
-            get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping")
-            cloud_status = "ok"
-        except Exception as e:
-            cloud_status = f"offline — {str(e)[:60]}"
+        ok, err = _ping_with_timeout(lambda: get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping"), 8)
+        cloud_status = "ok" if ok else f"offline — {err}"
+
     try:
         vectorstore.get(limit=1)
         chroma_status = "ok"
@@ -1870,18 +1894,13 @@ def _compliance_context():
     unique_ips = len(set(l.get('src_ip') for l in logs if l.get('src_ip')))
     critical_alerts = sum(1 for l in alert_events if l.get('alert', {}).get('severity') == 1)
 
-    try:
-        OllamaLLM(model="sira-model").invoke("ping")
-        ollama_ok = True
-    except Exception:
+    if DEPLOYED:
         ollama_ok = False
+    else:
+        ollama_ok, _ = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 5)
     cloud_ok = None
     if DEPLOYED:
-        try:
-            get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping")
-            cloud_ok = True
-        except Exception:
-            cloud_ok = False
+        cloud_ok, _ = _ping_with_timeout(lambda: get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping"), 8)
     try:
         vectorstore.get(limit=1)
         chroma_ok = True
