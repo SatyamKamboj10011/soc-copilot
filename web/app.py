@@ -65,6 +65,19 @@ CORS(
     supports_credentials=True,
 )
 
+# Render's platform-level health check hits "/" by default to decide
+# whether this instance is healthy enough to receive traffic -- without a
+# real route here, that check got a 404, Render marked the whole service
+# unhealthy, and refused to route ANY external request to it at all
+# (regardless of the actual URL someone was trying to visit) -- which
+# looked identical to every request 502ing, even though gunicorn and the
+# app itself were completely fine underneath. This single route was the
+# actual fix for that, not a code hang anywhere else.
+@app.route('/', methods=['GET', 'HEAD'])
+def root():
+    return jsonify({"service": "soc-copilot-backend", "status": "running"}), 200
+
+
 # JWT Config
 app.config["JWT_SECRET_KEY"] = "soc-copilot-secret-key-2024"
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
