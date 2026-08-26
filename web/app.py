@@ -165,6 +165,22 @@ vectorstore = Chroma(
 retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
 
+_KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral"}
+
+
+def _safe_cloud_default():
+    """Returns DEFAULT_CLOUD_MODEL only if it's one of the three explicit
+    cloud branches below -- otherwise falls back to "groq" instead. Without
+    this, a typo/whitespace/wrong-case value in the DEFAULT_CLOUD_MODEL env
+    var (e.g. "Mistral" instead of "mistral") would make get_llm()'s
+    DEPLOYED fallback call itself with that same non-matching string over
+    and over, forever -- a genuine infinite recursion this project hit in
+    testing, not a hypothetical. Every path through this function is now
+    guaranteed to land on a real terminal branch within one extra call."""
+    value = (DEFAULT_CLOUD_MODEL or "").strip()
+    return value if value in _KNOWN_CLOUD_MODELS else "groq"
+
+
 def get_llm(model, api_key=None):
     # sira-model's own Modelfile bakes in temperature=0.4 for controlled,
     # grounded output -- every other model here was previously falling back
@@ -221,13 +237,13 @@ def get_llm(model, api_key=None):
         # model dropdown still gets a working answer instead of a
         # connection-refused error.
         if DEPLOYED:
-            return get_llm(DEFAULT_CLOUD_MODEL, api_key)
+            return get_llm(_safe_cloud_default(), api_key)
         return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
     else:
         # Any unrecognised model string -- same deployment-aware default as
         # the explicit "ollama" branch above, for the same reason.
         if DEPLOYED:
-            return get_llm(DEFAULT_CLOUD_MODEL, api_key)
+            return get_llm(_safe_cloud_default(), api_key)
         return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
 
 
@@ -614,49 +630,60 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     # resolved version instead of the raw, possibly-ambiguous original.
     resolved_question = _rewrite_followup_question(question, history)
 
-    docs = retriever.invoke(resolved_question)
-    if last_ai_text:
-        # Supplement with a query that includes what was just discussed,
-        # so vague follow-ups can still land on the right log entries.
-        followup_docs = retriever.invoke(f"{last_ai_text[:400]} {resolved_question}")
-        docs = followup_docs + docs
+    def _do_retrieval():
+        docs = retriever.invoke(resolved_question)
+        if last_ai_text:
+            # Supplement with a query that includes what was just discussed,
+            # so vague follow-ups can still land on the right log entries.
+            followup_docs = retriever.invoke(f"{last_ai_text[:400]} {resolved_question}")
+            docs = followup_docs + docs
 
-    if date_filter:
-        docs = [d for d in docs if d.metadata.get('date') == date_filter]
-    if hour_filter:
-        docs = [d for d in docs if d.metadata.get('hour') == hour_filter]
-    if not docs:
-        docs = retriever.invoke(question)
+        if date_filter:
+            docs = [d for d in docs if d.metadata.get('date') == date_filter]
+        if hour_filter:
+            docs = [d for d in docs if d.metadata.get('hour') == hour_filter]
+        if not docs:
+            docs = retriever.invoke(question)
 
-# Boost alert docs to top — always prioritise real alerts over flow/dns
-    alert_docs = [d for d in docs if d.metadata.get('event_type') == 'alert']
-    other_docs  = [d for d in docs if d.metadata.get('event_type') != 'alert']
-    docs = alert_docs + other_docs
+        # Boost alert docs to top — always prioritise real alerts over flow/dns
+        alert_docs = [d for d in docs if d.metadata.get('event_type') == 'alert']
+        other_docs = [d for d in docs if d.metadata.get('event_type') != 'alert']
+        docs = alert_docs + other_docs
 
-# If question contains an IP, fetch extra targeted logs for that IP. If the
-# CURRENT question doesn't name one explicitly -- e.g. "what is this IP",
-# referring back to something already discussed -- fall back to any IP
-# mentioned in the most recent AI response, instead of finding nothing.
-    ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', resolved_question)
-    if not ip_match and last_ai_text:
-        ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', last_ai_text)
-    if ip_match:
-        extra_docs = []
-        for ip in ip_match:
-            ip_docs = retriever.invoke(f"src_ip {ip} alert")
-            extra_docs += [d for d in ip_docs if
-                           d.metadata.get('src_ip') == ip or
-                           d.metadata.get('dest_ip') == ip]
-        docs = extra_docs + docs
+        # If question contains an IP, fetch extra targeted logs for that IP. If the
+        # CURRENT question doesn't name one explicitly -- e.g. "what is this IP",
+        # referring back to something already discussed -- fall back to any IP
+        # mentioned in the most recent AI response, instead of finding nothing.
+        ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', resolved_question)
+        if not ip_match and last_ai_text:
+            ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', last_ai_text)
+        if ip_match:
+            extra_docs = []
+            for ip in ip_match:
+                ip_docs = retriever.invoke(f"src_ip {ip} alert")
+                extra_docs += [d for d in ip_docs if
+                               d.metadata.get('src_ip') == ip or
+                               d.metadata.get('dest_ip') == ip]
+            docs = extra_docs + docs
 
-# Deduplicate while preserving order
-    seen = set()
-    unique_docs = []
-    for d in docs:
-        if d.page_content not in seen:
-           seen.add(d.page_content)
-           unique_docs.append(d)
-    docs = unique_docs[:15]
+        # Deduplicate while preserving order
+        seen = set()
+        unique_docs = []
+        for d in docs:
+            if d.page_content not in seen:
+                seen.add(d.page_content)
+                unique_docs.append(d)
+        return unique_docs[:15]
+
+    # Bounded at 15s total for the whole retrieval sequence (up to 4
+    # retriever.invoke() calls chained together above) -- without this, an
+    # unreachable embeddings backend (e.g. DEPLOYED=true with no Ollama for
+    # nomic-embed-text) would hang here the same way /health used to hang,
+    # taking the single gunicorn worker down with it. On timeout/failure,
+    # docs degrades to [] -- the prompt below already instructs the model to
+    # say plainly when it has no relevant log data, so an empty context
+    # produces an honest "not available" answer instead of a crash.
+    docs = _call_with_timeout(_do_retrieval, 15, default=[])
 
     context = "\n\n".join([d.page_content for d in docs])
     context = re.sub(
@@ -908,6 +935,23 @@ def _ping_with_timeout(fn, timeout_seconds=5):
     return result
 
 
+def _call_with_timeout(fn, timeout_seconds, default=None):
+    """Same bounded-execution idea as _ping_with_timeout, but returns fn()'s
+    actual return value (or `default` on timeout/error) instead of a bool.
+    Used for retrieval calls, where a caller needs the docs list itself --
+    not just whether the call succeeded -- and where the right behaviour on
+    failure is graceful degradation (answer with no log context, note that
+    plainly) rather than treating it as a hard error."""
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fn)
+    try:
+        return future.result(timeout=timeout_seconds)
+    except Exception:
+        return default
+    finally:
+        executor.shutdown(wait=False)
+
+
 @app.route('/health', methods=['GET'])
 def health():
     flask_status = "ok"
@@ -1143,7 +1187,7 @@ def ask_all():
     data = request.json
     question = data.get('question', '')
 
-    docs = retriever.invoke(question)
+    docs = _call_with_timeout(lambda: retriever.invoke(question), 15, default=[])
     alert_docs = [d for d in docs if d.metadata.get('event_type') == 'alert']
     other_docs  = [d for d in docs if d.metadata.get('event_type') != 'alert']
     docs = (alert_docs + other_docs)[:10]
@@ -1323,7 +1367,7 @@ def attacker_profile(ip):
     ports = list(set(str(e.get('dest_port', '')) for e in events if e.get('dest_port')))
 
     # 6. Ask SIRA to profile the attacker
-    docs = retriever.invoke(f"attacks from {ip}")
+    docs = _call_with_timeout(lambda: retriever.invoke(f"attacks from {ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
     prompt = f"""You are SIRA — speak like JARVIS from Iron Man. Calm, authoritative, precise. Address the analyst as Sir occasionally. Based on the log data, create a threat actor profile for IP {ip}.
 Log context:
@@ -1388,7 +1432,7 @@ def what_if():
     src_ip = data.get('src_ip', '')
     dest_ip = data.get('dest_ip', '')
 
-    docs = retriever.invoke(f"{alert_signature} {src_ip}")
+    docs = _call_with_timeout(lambda: retriever.invoke(f"{alert_signature} {src_ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
 
     prompt = f"""You are SIRA. Respond like JARVIS — calm, authoritative, precise. Address the analyst as Sir occasionally."
