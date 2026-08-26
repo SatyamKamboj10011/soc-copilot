@@ -21,13 +21,6 @@ const RANGE_OPTIONS = [
   { key: "all", label: "All time", hours: null },
 ];
 
-/* Color communicates status only — never decoration. Same 3-state scale everywhere. */
-function statusColor(score) {
-  if (score >= 80) return "var(--green)";
-  if (score > 0) return "var(--orange)";
-  return "var(--red)";
-}
-
 function timeAgo(iso) {
   if (!iso) return null;
   const diffMs = Date.now() - new Date(iso).getTime();
