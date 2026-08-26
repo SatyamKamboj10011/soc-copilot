@@ -1,7 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useScroll, useSpring, useTransform } from "framer-motion";
-import FAQ from "./Faq";
 import { SplineScene } from "./components/ui/splite";
 
 const fadeUp = {

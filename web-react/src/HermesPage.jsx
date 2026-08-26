@@ -63,7 +63,7 @@ function parseHermesReport(text) {
     const start = text.indexOf(cur);
     if (start === -1) continue;
     const end = next ? text.indexOf(next) : text.length;
-    sections[cur] = text.slice(start + cur.length, end !== -1 ? end : undefined).replace(/^[\s:\-]+/, "").trim();
+    sections[cur] = text.slice(start + cur.length, end !== -1 ? end : undefined).replace(/^[\s:-]+/, "").trim();
   }
   return sections;
 }

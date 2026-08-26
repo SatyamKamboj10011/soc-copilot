@@ -97,7 +97,7 @@ function parseReport(text) {
   found.forEach((s, i) => {
     const start = s.idx + s.name.length;
     const end = i + 1 < found.length ? found[i + 1].idx : text.length;
-    const body = text.slice(start, end).replace(/^[\s:\-]+/, "").trim();
+    const body = text.slice(start, end).replace(/^[\s:-]+/, "").trim();
     if (body) sections.push({ name: s.name, body });
   });
   return sections;

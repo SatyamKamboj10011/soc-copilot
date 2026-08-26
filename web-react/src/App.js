@@ -421,7 +421,7 @@ function SiraMessage({ text, modelChip }) {
     const startIdx = text.indexOf(current);
     if (startIdx === -1) continue;
     const endIdx = next ? text.indexOf(next) : text.length;
-    sections[current] = text.slice(startIdx + current.length, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
+    sections[current] = text.slice(startIdx + current.length, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:-]+/, "").trim();
   }
   const riskText = sections["RISK ASSESSMENT"] || "";
   const riskLevel = /CRITICAL/i.test(riskText) ? "critical" : /HIGH/i.test(riskText) ? "high" : /MEDIUM/i.test(riskText) ? "medium" : /LOW/i.test(riskText) ? "low" : "medium";

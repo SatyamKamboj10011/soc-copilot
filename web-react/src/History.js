@@ -6,7 +6,6 @@ import {
   where,
   orderBy,
   getDocs,
-  deleteDoc,
   doc,
   writeBatch,
 } from "firebase/firestore";
@@ -58,7 +57,7 @@ function parseSiraResponse(text) {
     if (startIdx === -1) continue;
     const contentStart = startIdx + current.length + 1;
     const endIdx = next ? text.indexOf(next + ":") : text.length;
-    const content = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s\-]+/, "").trim();
+    const content = text.slice(contentStart, endIdx !== -1 ? endIdx : undefined).replace(/^[\s-]+/, "").trim();
     result.push({ heading: current, content });
   }
   return result.length > 0 ? result : null;
