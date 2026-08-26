@@ -5,7 +5,47 @@ import ipaddress
 import requests
 from langchain_ollama import OllamaLLM
 
-FLASK_URL = "http://localhost:5000"
+# Was hardcoded to port 5000 -- fine locally (python app.py always binds
+# 5000), but on Render gunicorn binds to $PORT (observed as 10000, and
+# platform-assigned dynamically in general), so every tool call in this
+# file was silently trying to reach a port nothing was listening on. Since
+# each tool catches its own connection failure and reports it as that
+# step's result rather than crashing, this degraded silently rather than
+# erroring loudly -- Hermes investigations on Render were very likely
+# running with NO real tool data at all until this was fixed, not just the
+# final report-writing step.
+FLASK_URL = os.getenv("HERMES_FLASK_URL", f"http://127.0.0.1:{os.getenv('PORT', '5000')}")
+
+# ── Deployment-aware report model ───────────────────────────────────────
+# Mirrors web/app.py's DEPLOYED-aware fallback in get_llm(), duplicated
+# here (rather than imported) to keep this module self-contained and avoid
+# a circular import back into the Flask app (app.py imports run_hermes_agent
+# from here, at call time inside the route handler). On Render, model names
+# like "nous-hermes2" or "phi4-mini" from the frontend's performance-tier
+# picker don't exist -- there is no cloud-capable Hermes model option
+# exposed in the UI at all today -- so DEPLOYED=true always routes the
+# final report-writing step to a cloud model instead, regardless of which
+# Ollama-only name was requested.
+DEPLOYED = os.getenv("DEPLOYED", "false").strip().lower() in ("1", "true", "yes")
+DEFAULT_CLOUD_MODEL = os.getenv("DEFAULT_CLOUD_MODEL", "groq")
+_KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral"}
+
+
+def _get_report_llm(model):
+    """Returns (llm, is_cloud) for the final report-writing step."""
+    if DEPLOYED and model not in _KNOWN_CLOUD_MODELS:
+        cloud_model = DEFAULT_CLOUD_MODEL if DEFAULT_CLOUD_MODEL in _KNOWN_CLOUD_MODELS else "groq"
+        if cloud_model == "groq":
+            from langchain_groq import ChatGroq
+            return ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0.3), True
+        elif cloud_model == "gemini":
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0.3), True
+        elif cloud_model == "mistral":
+            from langchain_mistralai import ChatMistralAI
+            return ChatMistralAI(model="mistral-small-latest", mistral_api_key=os.getenv("MISTRAL_API_KEY"), temperature=0.3), True
+    return OllamaLLM(model=model, temperature=0.3, num_predict=2048), False
+
 
 # IPs that are internal infrastructure, not external attackers, even though
 # they can rack up huge raw event counts (Azure's platform/metadata
@@ -290,7 +330,10 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
     # the report-writing step when the user's hardware doesn't comfortably
     # fit nous-hermes2 (10.7B, ~6.1GB). Defaults to nous-hermes2 so any
     # existing caller that doesn't pass a model keeps today's behaviour.
-    llm = OllamaLLM(model=model, temperature=0.3, num_predict=2048)
+    # _get_report_llm additionally routes to a cloud model instead when
+    # DEPLOYED=true, regardless of which Ollama-only name was requested --
+    # see its docstring above.
+    llm, is_cloud = _get_report_llm(model)
 
     steps = []
 
@@ -383,9 +426,9 @@ def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
         steps.append({"step": 7, "tool": "correlate_zeek", "input": target_ip, "result": zeek_result, "status": "done"})
 
     # Step 9 — Generate final report with Hermes
-    print("Step 9: Generating investigation report with Nous Hermes2...")
+    print("Step 9: Generating investigation report...")
 
-    prompt = f"""You are SIRA — Security Incident Response Assistant powered by Nous Hermes2.
+    prompt = f"""You are SIRA — Security Incident Response Assistant.
 You have completed an autonomous investigation. Here are the results:
 
 TASK: {task}
@@ -450,12 +493,13 @@ RECOMMENDED ACTIONS:
 Write clearly for a junior SOC analyst."""
 
     try:
-        final_answer = llm.invoke(prompt)
+        result = llm.invoke(prompt)
+        final_answer = result.content if is_cloud else result
     except Exception as e:
         # The report-writing model failed (model not pulled, Ollama not
-        # running, out of memory on a large model, etc). Return the steps
-        # that did complete plus a readable reason, rather than throwing and
-        # producing a bare 500 with no detail for the user.
+        # running, out of memory on a large model, bad cloud API key, etc).
+        # Return the steps that did complete plus a readable reason, rather
+        # than throwing and producing a bare 500 with no detail for the user.
         final_answer = (
             f"Report generation failed using model '{model}': {type(e).__name__}: {e}\n\n"
             f"The investigation steps above completed successfully — only the final "
