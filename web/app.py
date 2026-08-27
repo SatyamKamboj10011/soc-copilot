@@ -166,14 +166,26 @@ except ImportError as e:
 # /upload) before retrieval will return meaningful results again.
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
-
-vectorstore = Chroma(
-    persist_directory="../ai/chroma_db",
-    embedding_function=embeddings
-)
-
-retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+# Same lesson learned from Kokoro crashing the whole app at import time --
+# GEMINI_API_KEY being missing/wrong should NOT take down every route,
+# just the ones that need retrieval. Every retriever.invoke() call in this
+# file already runs inside _call_with_timeout/_ping_with_timeout, which
+# catch ANY exception -- including the AttributeError from calling
+# .invoke() on retriever=None below -- and degrade gracefully (empty docs,
+# "offline" health status) instead of propagating. So the only fix needed
+# here is: don't let construction failure kill the process.
+try:
+    embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+    vectorstore = Chroma(
+        persist_directory="../ai/chroma_db",
+        embedding_function=embeddings
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+except Exception as e:
+    print(f"[STARTUP] Embeddings/ChromaDB unavailable, retrieval will degrade gracefully: {e}")
+    embeddings = None
+    vectorstore = None
+    retriever = None
 
 
 _KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral"}
