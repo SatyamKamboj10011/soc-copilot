@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-
+import SiraAvatar3D from "./SiraAvatar3D";
 const FLASK_URL = "https://soc-copilot.onrender.com";
 
 export default function SiraVoice({ isOpen, onClose }) {
@@ -233,17 +233,13 @@ export default function SiraVoice({ isOpen, onClose }) {
         </div>
 
         <div style={{ position: "relative", background: "#060A11", height: 280, overflow: "hidden" }}>
-          <video
-            ref={videoRef}
-            playsInline
-            poster="/sira_face.jpg"
-            style={{
-              position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-              width: 180, height: 180, borderRadius: "50%", objectFit: "cover",
-              filter: speaking ? "brightness(1.05) saturate(1.15)" : generating ? "brightness(0.85) saturate(0.7) blur(0.5px)" : "brightness(0.9) saturate(0.9)",
-              transition: "filter 0.2s", zIndex: 1
-            }}
-          />
+          <video ref={videoRef} style={{ display: "none" }} />
+<div style={{
+  position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+  width: 180, height: 180, zIndex: 1,
+}}>
+  <SiraAvatar3D analyserRef={analyserRef} speaking={speaking} />
+</div>
           <canvas ref={canvasRef} width={520} height={280} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 2 }} />
 
           <div style={{ position: "absolute", top: 14, left: 18, zIndex: 3, fontFamily: "'IBM Plex Mono',monospace" }}>
