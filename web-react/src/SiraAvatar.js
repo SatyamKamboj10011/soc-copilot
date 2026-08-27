@@ -66,11 +66,18 @@ const SiraAvatar = forwardRef(function SiraAvatar({ onOpenFullView }, ref) {
     returnToIdle();
     setStatus("generating"); // returnToIdle resets to standby -- re-assert
     try {
-      const res = await fetch(`${FLASK_URL}/sira-face-speak`, {
+      // Was /sira-face-speak (Kokoro -> Wav2Lip video pipeline) -- Wav2Lip
+      // is out of scope for this deployment (Windows-only venv path, heavy
+      // compute), so that endpoint always fails silently here. /sira-speak
+      // is the plain edge-tts audio endpoint, which actually works. The
+      // <video> element below still plays this fine as audio -- it just
+      // shows the static poster image instead of lip-synced video, which
+      // is the accepted trade-off for having real working voice at all.
+      const res = await fetch(`${FLASK_URL}/sira-speak`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.substring(0, 500) }),
       });
-      if (!res.ok) throw new Error("face-speak failed");
+      if (!res.ok) throw new Error("speak failed");
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       if (currentUrlRef.current) URL.revokeObjectURL(currentUrlRef.current);

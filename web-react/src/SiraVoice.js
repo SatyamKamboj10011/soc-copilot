@@ -123,11 +123,17 @@ export default function SiraVoice({ isOpen, onClose }) {
   const speak = async (text) => {
     setGenerating(true);
     try {
-      const res = await fetch(`${FLASK_URL}/sira-face-speak`, {
+      // Was /sira-face-speak (Kokoro -> Wav2Lip video pipeline) -- Wav2Lip
+      // is out of scope for this deployment (Windows-only venv path, heavy
+      // compute), so that endpoint always failed silently here. /sira-speak
+      // is the plain edge-tts audio endpoint, which actually works. The
+      // <video> element still plays this fine as audio -- it just shows
+      // the static poster image instead of lip-synced video.
+      const res = await fetch(`${FLASK_URL}/sira-speak`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.substring(0, 500) })
       });
-      if (!res.ok) throw new Error("face-speak request failed");
+      if (!res.ok) throw new Error("speak request failed");
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
 
