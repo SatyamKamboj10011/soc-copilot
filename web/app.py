@@ -24,10 +24,12 @@ from dotenv import load_dotenv
 import os
 import sys
 
-# for agentic voice
-import numpy as np
-import soundfile as sf
-from kokoro_onnx import Kokoro
+# Voice: edge-tts (Microsoft Edge's speech API, zero local model files,
+# zero GPU/RAM overhead) -- replaces Kokoro, which needed two large model
+# files that don't exist on any deploy target and forced a whole Docker
+# detour just to host them. See get_speech_audio() below.
+import asyncio
+import edge_tts
 
 ROOT_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
@@ -149,13 +151,22 @@ except ImportError as e:
     print(f"Documents blueprint not loaded: {e}")
 # ─────────────────────────────────────────────────────────────────────────────
 
-# langchain_ollama.OllamaEmbeddings was not honoring an explicit base_url on
-# this machine -- it kept targeting a stray non-standard local port instead
-# of 127.0.0.1:11434 regardless of what was passed in. DirectOllamaEmbeddings
-# bypasses it and talks to the ollama package directly (confirmed working).
-from ai.ollama_embeddings import DirectOllamaEmbeddings
+# Was DirectOllamaEmbeddings, pointed at a local Ollama server -- that
+# meant retrieval could never work on any platform without Ollama running
+# in-container, which is exactly the infrastructure problem this project
+# spent a long time trying to solve (Docker + Ollama-for-embeddings-only
+# on Render/HF Spaces/etc). GoogleGenerativeAIEmbeddings needs none of
+# that: it's a REST API call, reuses the GEMINI_API_KEY already configured
+# for ChatGoogleGenerativeAI, and langchain-google-genai is already a
+# dependency. Zero new infrastructure.
+#
+# IMPORTANT: this is a different embedding space than nomic-embed-text --
+# any existing ChromaDB collection built with the old embeddings is now
+# stale and must be rebuilt (re-run rag_setup.py, or trigger a rebuild via
+# /upload) before retrieval will return meaningful results again.
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-embeddings = DirectOllamaEmbeddings(model="nomic-embed-text", host="http://127.0.0.1:11434")
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 
 vectorstore = Chroma(
     persist_directory="../ai/chroma_db",
@@ -354,30 +365,26 @@ def format_ts(ts):
     return ts
 
 
-# Kokoro was previously loaded eagerly at module level, which meant its two
-# model files (kokoro-v0_19.onnx, voices.bin -- too large to commit to Git,
-# correctly gitignored) being absent on a fresh deploy crashed the ENTIRE
-# app at import time, before gunicorn could even start -- every route died,
-# not just voice. Loading lazily on first actual use means a deploy without
-# these files still runs everything else fine; only /sira-speak and
-# /sira-face-speak degrade to a clear 503 instead of taking the whole
-# backend down.
-_kokoro_model = None
-_kokoro_load_error = None
+# edge-tts needs no model files and no lazy-loading dance -- it's just an
+# async HTTP call to Microsoft's Edge speech service. This one helper is
+# used by both /sira-speak and /sira-face-speak's audio-generation step.
+async def _synthesize_speech(text, voice="en-GB-RyanNeural"):
+    """Returns raw MP3 bytes. en-GB-RyanNeural chosen for the same calm,
+    precise JARVIS-like quality the prompts already ask the LLM for --
+    swap the voice name for any other edge-tts voice if you want a
+    different one (run `edge-tts --list-voices` to see all options)."""
+    communicate = edge_tts.Communicate(text, voice)
+    audio_bytes = bytearray()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_bytes.extend(chunk["data"])
+    return bytes(audio_bytes)
 
 
-def get_kokoro_model():
-    global _kokoro_model, _kokoro_load_error
-    if _kokoro_model is not None:
-        return _kokoro_model
-    if _kokoro_load_error is not None:
-        raise _kokoro_load_error
-    try:
-        _kokoro_model = Kokoro("kokoro-v0_19.onnx", "voices.bin")
-        return _kokoro_model
-    except Exception as e:
-        _kokoro_load_error = e
-        raise
+def get_speech_audio(text):
+    """Sync wrapper -- Flask routes are sync, edge-tts's API is async."""
+    return asyncio.run(_synthesize_speech(text))
+
 
 @app.route("/sira-speak", methods=["POST"])
 def sira_speak():
@@ -385,25 +392,14 @@ def sira_speak():
     if not text:
         return jsonify({"error": "no text"}), 400
     try:
-        kokoro_model = get_kokoro_model()
-    except Exception as e:
-        return jsonify({"error": f"Voice model unavailable: {e}"}), 503
-    try:
-        samples, sample_rate = kokoro_model.create(
-            text=text[:500],
-            voice="am_adam",   # calm female — change to "am_adam" for male JARVIS voice
-            speed=0.88,
-            lang="en-us"
-        )
-        buf = io.BytesIO()
-        sf.write(buf, samples, sample_rate, format="WAV")
-        buf.seek(0)
-        return Response(buf.read(), mimetype="audio/wav")
+        audio_bytes = get_speech_audio(text[:500])
+        return Response(audio_bytes, mimetype="audio/mpeg")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ── SIRA FACE: Kokoro TTS -> Wav2Lip -> synced video ────────────────────────
+
+# ── SIRA FACE: edge-tts -> Wav2Lip -> synced video ────────────────────────
 import subprocess
 import uuid
 
@@ -416,8 +412,15 @@ WAV2LIP_FACE = os.path.join(WAV2LIP_DIR, 'sira_face.jpg')
 @app.route('/sira-face-speak', methods=['POST'])
 def sira_face_speak():
     """
-    Text -> Kokoro TTS -> Wav2Lip (runs in its own Python 3.10 venv,
-    separate from Flask's interpreter) -> synced video, returned directly.
+    Text -> edge-tts -> Wav2Lip (runs in its own Python 3.10 venv, separate
+    from Flask's interpreter) -> synced video, returned directly.
+
+    NOTE: Wav2Lip itself remains out of scope for deployment (Windows-only
+    venv path, heavy compute, large checkpoint file) -- this fix only
+    replaces the audio-generation step so this route fails cleanly with
+    its existing error handling below instead of crashing on a missing
+    get_kokoro_model(). Making Wav2Lip itself work on a deploy target is a
+    separate, bigger task.
     """
     text = request.json.get("text", "")
     if not text:
@@ -428,18 +431,9 @@ def sira_face_speak():
     video_path = os.path.join(WAV2LIP_DIR, f"temp_output_{request_id}.mp4")
 
     try:
-        kokoro_model = get_kokoro_model()
-    except Exception as e:
-        return jsonify({"error": f"Voice model unavailable: {e}"}), 503
-
-    try:
-        samples, sample_rate = kokoro_model.create(
-            text=text[:500],
-            voice="am_adam",
-            speed=0.88,
-            lang="en-us",
-        )
-        sf.write(audio_path, samples, sample_rate)
+        audio_bytes = get_speech_audio(text[:500])
+        with open(audio_path, "wb") as f:
+            f.write(audio_bytes)
 
         result = subprocess.run(
             [
