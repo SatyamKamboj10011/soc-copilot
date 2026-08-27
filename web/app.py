@@ -380,8 +380,8 @@ def format_ts(ts):
 # edge-tts needs no model files and no lazy-loading dance -- it's just an
 # async HTTP call to Microsoft's Edge speech service. This one helper is
 # used by both /sira-speak and /sira-face-speak's audio-generation step.
-async def _synthesize_speech(text, voice="en-US-ChristopherNeural"):
-    """Returns raw MP3 bytes. en-US-ChristopherNeural chosen for the same calm,
+async def _synthesize_speech(text, voice="en-GB-ThomasNeural"):
+    """Returns raw MP3 bytes. en-GB-RyanNeural chosen for the same calm,
     precise JARVIS-like quality the prompts already ask the LLM for --
     swap the voice name for any other edge-tts voice if you want a
     different one (run `edge-tts --list-voices` to see all options)."""
