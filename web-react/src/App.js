@@ -13,7 +13,7 @@ import SiraAvatar from "./SiraAvatar";
 import { HermesProvider, HermesNavBadge } from "./HermesContext";
 import { HermesPage } from "./HermesPage";
 
-const FLASK_URL = "http://localhost:5000";
+const FLASK_URL = "https://soc-copilot.onrender.com";
 
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",
