@@ -1135,7 +1135,7 @@ try {
   const data = await res.json();
   if (!res.ok) { const err = new Error(data.error || `Request failed (${res.status})`); err.status = res.status; throw err; }
   setMessages(prev=>[...prev,{role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
-  siraAvatarRef.current?.speak(cleanForVoice(data.answer));
+  siraAvatarRef.current?.speak(data.spoken_summary || cleanForVoice(data.answer));
   try {
     await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"ai",message:data.answer,model_used:selectedModel,created_at:serverTimestamp()});
     await setDoc(doc(db,"soc_sessions",sessionId),{updated_at:serverTimestamp(),message_count:increment(1)},{merge:true});

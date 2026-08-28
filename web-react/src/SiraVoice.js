@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import SiraAvatar3D from "./SiraAvatar3D";
+
 const FLASK_URL = "https://soc-copilot.onrender.com";
 
 export default function SiraVoice({ isOpen, onClose }) {
@@ -131,7 +131,7 @@ export default function SiraVoice({ isOpen, onClose }) {
       // the static poster image instead of lip-synced video.
       const res = await fetch(`${FLASK_URL}/sira-speak`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.substring(0, 500) })
+        body: JSON.stringify({ text: text.substring(0, 500), voice: localStorage.getItem("sira_voice") || undefined })
       });
       if (!res.ok) throw new Error("speak request failed");
       const blob = await res.blob();
@@ -170,7 +170,11 @@ export default function SiraVoice({ isOpen, onClose }) {
       });
       const data = await res.json();
       const answer = data.answer || "No response.";
-      const clean  = answer
+      // Was a hard 400-char cut that could land mid-word -- now uses the
+      // same real spoken_summary the backend generates specifically for
+      // voice, same as the main chat interface. Falls back to a light
+      // cleanup only if a model dropped the SPOKEN_SUMMARY instruction.
+      const clean = data.spoken_summary || answer
         .replace(/SUMMARY:|THREAT DETAILS:|WHAT THIS MEANS:|RISK ASSESSMENT:|RECOMMENDED ACTIONS:/g, "")
         .replace(/\n+/g, " ").trim().substring(0, 400);
       setResponse(answer);
@@ -233,13 +237,17 @@ export default function SiraVoice({ isOpen, onClose }) {
         </div>
 
         <div style={{ position: "relative", background: "#060A11", height: 280, overflow: "hidden" }}>
-          <video ref={videoRef} style={{ display: "none" }} />
-<div style={{
-  position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-  width: 180, height: 180, zIndex: 1,
-}}>
-  <SiraAvatar3D analyserRef={analyserRef} speaking={speaking} />
-</div>
+          <video
+            ref={videoRef}
+            playsInline
+            poster="/sira_face.jpg"
+            style={{
+              position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+              width: 180, height: 180, borderRadius: "50%", objectFit: "cover",
+              filter: speaking ? "brightness(1.05) saturate(1.15)" : generating ? "brightness(0.85) saturate(0.7) blur(0.5px)" : "brightness(0.9) saturate(0.9)",
+              transition: "filter 0.2s", zIndex: 1
+            }}
+          />
           <canvas ref={canvasRef} width={520} height={280} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 2 }} />
 
           <div style={{ position: "absolute", top: 14, left: 18, zIndex: 3, fontFamily: "'IBM Plex Mono',monospace" }}>

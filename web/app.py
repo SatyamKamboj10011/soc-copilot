@@ -578,6 +578,23 @@ def me():
 
 # ── EXISTING ENDPOINTS ───────────────────────────────────────────────────────
 
+def _extract_spoken_summary(text):
+    """Splits SPOKEN_SUMMARY: (always the last line, per the prompt) out of
+    the model's response. Returns (report_text_without_it, spoken_summary).
+    If the model didn't include one -- smaller/simpler models sometimes
+    drop instructions near the end of a long prompt -- spoken_summary is
+    "" and the caller falls back to the old trimmed-report behaviour."""
+    if not text:
+        return text, ""
+    marker = "SPOKEN_SUMMARY:"
+    idx = text.rfind(marker)
+    if idx == -1:
+        return text, ""
+    report = text[:idx].rstrip()
+    spoken = text[idx + len(marker):].strip()
+    return report, spoken
+
+
 def _rewrite_followup_question(question, history):
     """Turns a vague follow-up ("what is this IP", "the second one", "compare
     that to the one before") into ONE fully self-contained question, using
@@ -644,7 +661,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
             if _is_rate_limit_error(err_msg):
                 return jsonify({"error": f"{model} is rate-limited right now. Try a different model."}), 429
             return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
-        resp = {'answer': identity_answer, 'model_used': used_model}
+        resp = {'answer': identity_answer, 'model_used': used_model, 'spoken_summary': identity_answer}
         if fell_back:
             resp['fallback_used'] = True
             resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
@@ -750,7 +767,9 @@ Log Data:
 
 Question: {resolved_question}
 
-Remember: only use facts from the log data above. Answer clearly and concisely."""
+Remember: only use facts from the log data above. Answer clearly and concisely.
+
+After your answer, add one final line starting with SPOKEN_SUMMARY: followed by 1-2 short sentences that say the same thing as if you were talking to {honorific} out loud -- plain conversational language, no bullet points, no technical formatting, don't just re-read the answer above. Address {honorific} naturally once."""
     else:
         prompt = f"""You are SIRA — Security Incident Response Assistant.
 Speak exactly like JARVIS from Iron Man. Calm, authoritative, precise.
@@ -845,7 +864,9 @@ Log Data:
 
 Question: {resolved_question}
 
-Answer naturally. Pick the format that fits. Do not force sections that do not apply."""
+Answer naturally. Pick the format that fits. Do not force sections that do not apply.
+
+After everything above, add one final line starting with exactly SPOKEN_SUMMARY: followed by 1-2 short sentences that say the same thing as if you were speaking it out loud to {honorific} -- plain conversational language, no bullet points, no section headers, no re-reading the report above word for word, no repeating every IP/timestamp. Address {honorific} naturally once. This is the ONLY part of your response that will actually be spoken aloud -- the rest is read on screen."""
 
     try:
         answer, used_model, fell_back = _invoke_llm(model, prompt, api_key)
@@ -857,7 +878,13 @@ Answer naturally. Pick the format that fits. Do not force sections that do not a
             return jsonify({"error": f"{model} is rate-limited right now. Try a different model."}), 429
         return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
 
-    resp = {'answer': answer, 'model_used': used_model}
+    # Split the model's own natural spoken summary out of the written
+    # report -- the frontend uses this for voice instead of trimming down
+    # the structured report text, which always sounded like a report being
+    # read aloud no matter how it was cleaned up.
+    answer, spoken_summary = _extract_spoken_summary(answer)
+
+    resp = {'answer': answer, 'model_used': used_model, 'spoken_summary': spoken_summary}
     if fell_back:
         resp['fallback_used'] = True
         resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
