@@ -23,6 +23,13 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
  */
 export default function SiraAvatar3D({ analyserRef, speaking, style }) {
   const mountRef = useRef(null);
+  // The render loop below is created once (mount-time useEffect with empty
+  // deps, since re-creating the whole Three.js scene on every speaking
+  // change would be wasteful and wrong). That means a plain closure over
+  // the `speaking` PROP would freeze at whatever it was at mount time --
+  // this ref is what lets the loop see the current value every frame instead.
+  const speakingRef = useRef(speaking);
+  useEffect(() => { speakingRef.current = speaking; }, [speaking]);
   const rafRef = useRef(null);
   const jawTargetsRef = useRef([]); // [{mesh, index}] -- every mesh with a jawOpen morph target
   const blinkTargetsRef = useRef([]); // same shape, for eyeBlinkLeft/Right
@@ -129,7 +136,7 @@ export default function SiraAvatar3D({ analyserRef, speaking, style }) {
 
       // ── Jaw: real amplitude from the live analyser while speaking ──
       let targetJaw = 0;
-      if (speaking && analyserRef?.current) {
+      if (speakingRef.current && analyserRef?.current) {
         analyserRef.current.getByteFrequencyData(freqData);
         const avg = freqData.reduce((a, b) => a + b, 0) / freqData.length;
         // Compress to a natural-looking open range -- full 0-255 mapped

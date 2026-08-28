@@ -6,14 +6,14 @@ import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
 import { InvestigationPage } from "./InvestigationPage";
 import { db } from "./firebase";
-import { collection, doc, setDoc, addDoc, serverTimestamp, increment } from "firebase/firestore";
+import { collection, doc, setDoc, addDoc, getDoc, serverTimestamp, increment } from "firebase/firestore";
 
 import SiraVoice from "./SiraVoice";
 import SiraAvatar from "./SiraAvatar";
 import { HermesProvider, HermesNavBadge } from "./HermesContext";
 import { HermesPage } from "./HermesPage";
 
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "http://localhost:5000";
 
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",
@@ -421,7 +421,7 @@ function SiraMessage({ text, modelChip }) {
     const startIdx = text.indexOf(current);
     if (startIdx === -1) continue;
     const endIdx = next ? text.indexOf(next) : text.length;
-    sections[current] = text.slice(startIdx + current.length, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:\-]+/, "").trim();
+    sections[current] = text.slice(startIdx + current.length, endIdx !== -1 ? endIdx : undefined).replace(/^[\s:-]+/, "").trim();
   }
   const riskText = sections["RISK ASSESSMENT"] || "";
   const riskLevel = /CRITICAL/i.test(riskText) ? "critical" : /HIGH/i.test(riskText) ? "high" : /MEDIUM/i.test(riskText) ? "medium" : /LOW/i.test(riskText) ? "low" : "medium";
@@ -727,6 +727,25 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
 export default function App() {
   const [selectedModel, setSelectedModel] = useState("ollama");
   const [modelOptions, setModelOptions]   = useState([]);
+  const [voiceOptions, setVoiceOptions]   = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem("sira_voice") || "");
+  useEffect(() => {
+    // Same pattern as /models -- single source of truth fetched from the
+    // backend instead of a hardcoded list, so it can never silently drift
+    // out of sync with what edge-tts actually has configured server-side.
+    fetch(`${FLASK_URL}/voices`).then(r=>r.json()).then(data => {
+      setVoiceOptions(data);
+      if (!localStorage.getItem("sira_voice")) {
+        const def = data.find(v => v.default) || data[0];
+        if (def) { setSelectedVoice(def.id); localStorage.setItem("sira_voice", def.id); }
+      }
+    }).catch(()=>{});
+  }, []);
+  const handleVoiceChange = (e) => {
+    const val = e.target.value;
+    setSelectedVoice(val);
+    localStorage.setItem("sira_voice", val);
+  };
   useEffect(() => {
     // Single source of truth is now Flask's /models endpoint (see app.py) --
     // this replaces a hardcoded array that had silently drifted out of sync
@@ -913,22 +932,74 @@ const [sessionId, setSessionId] = useState(() => {
     loadLastSession();
   }, []); // eslint-disable-line
 
+  const [honorific, setHonorific] = useState(null); // null = not yet resolved from Firestore
+  const [showHonorificPrompt, setShowHonorificPrompt] = useState(false);
+
   useEffect(() => {
+    const loadHonorific = async () => {
+      try {
+        const snap = await getDoc(doc(db, "user_preferences", username));
+        if (snap.exists() && snap.data().honorific) {
+          setHonorific(snap.data().honorific);
+        } else {
+          setShowHonorificPrompt(true);
+        }
+      } catch (e) {
+        console.error("Honorific load error:", e);
+        setHonorific("Sir"); // fail safe to a sensible default rather than block forever
+      }
+    };
+    loadHonorific();
+  }, []); // eslint-disable-line
+
+  const chooseHonorific = async (choice) => {
+    setHonorific(choice);
+    setShowHonorificPrompt(false);
+    try {
+      await setDoc(doc(db, "user_preferences", username), { honorific: choice, updated_at: serverTimestamp() }, { merge: true });
+    } catch (e) {
+      console.error("Honorific save error:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (!honorific) return; // wait until we actually know how to address them
     if (voicePlayed.current) return;
     voicePlayed.current = true;
-    const timer = setTimeout(async () => {
+
+    const speakBoot = async () => {
+      // Poll /stats briefly instead of one fixed-delay fetch -- on a cold
+      // start, honeypot sync may not have populated any events yet, and a
+      // single early fetch could genuinely return 0, making SIRA announce
+      // "I have loaded 0 security events" -- sounds broken, not just early.
+      // Retry for up to ~9s before falling back to honest phrasing that
+      // doesn't claim a specific count.
+      let statsData = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        try {
+          const data = await fetch(`${FLASK_URL}/stats`).then(r => r.json());
+          if ((data.total_events || 0) > 0) { statsData = data; break; }
+          if (attempt === 0) statsData = data;
+        } catch {}
+        await new Promise(res => setTimeout(res, 1500));
+      }
+
+      const hasRealData = statsData && (statsData.total_events || 0) > 0;
+      const text = hasRealData
+        ? `SIRA online, ${honorific}. All systems operational. I have loaded ${statsData.total_events.toLocaleString()} security events, with ${statsData.alert_count || 0} active alerts from ${statsData.unique_ips || 0} unique IP addresses. Standing by for your instructions.`
+        : `SIRA online, ${honorific}. All systems operational. Security event data is still syncing in — I'll have the full picture shortly. Standing by for your instructions.`;
+
       try {
-        const statsData = await fetch(`${FLASK_URL}/stats`).then(r=>r.json());
-        const text = `SIRA online. All systems operational. I have loaded ${(statsData.total_events||0).toLocaleString()} security events. ${statsData.alert_count||0} active alerts detected from ${statsData.unique_ips||0} unique IP addresses. Standing by for your instructions.`;
-        const blob = await fetch(`${FLASK_URL}/sira-speak`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})}).then(r=>r.blob());
-        const url  = URL.createObjectURL(blob);
+        const blob = await fetch(`${FLASK_URL}/sira-speak`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) }).then(r => r.blob());
+        const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audio.onended = () => URL.revokeObjectURL(url);
         audio.play();
       } catch {}
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, []);
+    };
+
+    speakBoot();
+  }, [honorific]); // eslint-disable-line
 
   useEffect(() => { if (isAtBottom.current) { scrollToBottom(false); } else { setUnreadCount(prev=>prev+1); } }, [messages, loading]); // eslint-disable-line
 
@@ -998,6 +1069,50 @@ const [sessionId, setSessionId] = useState(() => {
     showToast(`API key saved for ${modelObj.chip}`);
   };
 
+  // Turns a structured written report into something that sounds like a
+  // person talking, not a document being read aloud. The old version just
+  // stripped section-header words and hard-cut at 300 characters (often
+  // mid-sentence); this also removes markdown bullets/bold and numbered-
+  // list markers, and truncates at the nearest sentence boundary so it
+  // never cuts off awkwardly.
+  const cleanForVoice = (text) => {
+    if (!text) return "";
+    let clean = text
+      .replace(/\b(SUMMARY|THREAT DETAILS|WHAT THIS MEANS|RISK ASSESSMENT|RECOMMENDED ACTIONS|OVERVIEW|TOP THREATS|PATTERNS DETECTED|PRIORITY ACTIONS|SITUATION|IMMEDIATE ACTIONS|TODAY|THIS WEEK|ENDPOINT SECURITY|PROPOSED ACTIONS|RISK LEVEL|CVE IMPACT)\s*:/gi, "")
+      .replace(/\*\*/g, "").replace(/\*/g, "")
+      .replace(/^\s*\d+\.\s*/gm, "")
+      .replace(/^\s*[-•]\s*/gm, "")
+      .replace(/\n+/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    const MAX = 350;
+    if (clean.length > MAX) {
+      const cut = clean.slice(0, MAX);
+      const lastSentenceEnd = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+      clean = lastSentenceEnd > 100 ? cut.slice(0, lastSentenceEnd + 1) : cut + "...";
+    }
+    return clean;
+  };
+
+  const [micListening, setMicListening] = useState(false);
+  const startMicInput = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showToast("Voice input needs Chrome or Edge"); return; }
+    const rec = new SR();
+    rec.lang = "en-US";
+    setMicListening(true);
+    rec.onresult = (e) => {
+      const t = e.results[0][0].transcript;
+      setInput(t);
+      setMicListening(false);
+      sendMessage(t);
+    };
+    rec.onerror = () => setMicListening(false);
+    rec.onend = () => setMicListening(false);
+    rec.start();
+  };
+
   const sendMessage = async (text) => {
     const q = (text||input).trim();
     if (!q || loading || charCount > MAX_CHARS) return;
@@ -1016,14 +1131,11 @@ try {
   const useOwn = localStorage.getItem(`sira_use_own_key_${selectedModel}`) === "true";
   const storedKey = localStorage.getItem(`sira_api_key_${selectedModel}`);
   const apiKeyToSend = (useOwn && storedKey) ? storedKey : undefined;
-  const res = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory,...(apiKeyToSend && {api_key:apiKeyToSend})})});
+  const res = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory,honorific:honorific||"Sir",...(apiKeyToSend && {api_key:apiKeyToSend})})});
   const data = await res.json();
   if (!res.ok) { const err = new Error(data.error || `Request failed (${res.status})`); err.status = res.status; throw err; }
   setMessages(prev=>[...prev,{role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
-  const cleanForVoice = (data.answer || "")
-    .replace(/SUMMARY:|THREAT DETAILS:|WHAT THIS MEANS:|RISK ASSESSMENT:|RECOMMENDED ACTIONS:|OVERVIEW:|TOP THREATS:|PATTERNS DETECTED:|PRIORITY ACTIONS:|SITUATION:|IMMEDIATE ACTIONS:|TODAY:|THIS WEEK:/g, "")
-    .replace(/\n+/g, " ").trim().substring(0, 300);
-  siraAvatarRef.current?.speak(cleanForVoice);
+  siraAvatarRef.current?.speak(cleanForVoice(data.answer));
   try {
     await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"ai",message:data.answer,model_used:selectedModel,created_at:serverTimestamp()});
     await setDoc(doc(db,"soc_sessions",sessionId),{updated_at:serverTimestamp(),message_count:increment(1)},{merge:true});
@@ -1121,6 +1233,19 @@ setLoading(false);
                 setShowResumePrompt(false);
               }} style={{flex:1,padding:"12px",background:"linear-gradient(135deg,var(--accent),var(--accent2))",border:"none",borderRadius:10,color:"var(--bg)",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:"pointer",textTransform:"uppercase"}}>↩ RESUME SESSION</button>
               <button onClick={()=>{setShowResumePrompt(false);showToast("Starting fresh");}} style={{flex:1,padding:"12px",background:"transparent",border:"1px solid var(--border2)",borderRadius:10,color:"var(--text-mid)",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:"pointer",textTransform:"uppercase"}}>+ NEW SESSION</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHonorificPrompt && (
+        <div className="modal-overlay">
+          <div className="modal" style={{width:420}} onClick={e=>e.stopPropagation()}>
+            <div className="modal-title">One quick thing</div>
+            <div className="modal-sub">HOW SHOULD SIRA ADDRESS YOU?</div>
+            <div style={{display:"flex",gap:10,marginTop:8}}>
+              <button onClick={()=>chooseHonorific("Sir")} style={{flex:1,padding:"14px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:10,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:12,fontWeight:700,letterSpacing:1,cursor:"pointer"}}>SIR</button>
+              <button onClick={()=>chooseHonorific("Ma'am")} style={{flex:1,padding:"14px",background:"var(--purple-dim)",border:"1px solid var(--purple)",borderRadius:10,color:"var(--purple)",fontFamily:"var(--mono)",fontSize:12,fontWeight:700,letterSpacing:1,cursor:"pointer"}}>MA'AM</button>
             </div>
           </div>
         </div>
@@ -1256,6 +1381,14 @@ setLoading(false);
                 </div>
               </div>
             )}
+
+            {/* ── SIRA Voice — edge-tts voice picker, fetched from /voices ── */}
+            <div className="section-label">SIRA Voice</div>
+            <div className="model-select-wrap">
+              <select className="model-select" value={selectedVoice} onChange={handleVoiceChange}>
+                {voiceOptions.map(v=><option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </div>
 
             {/* ── Performance Mode — hardware-based tier picker ────────────
                 Sets BOTH SIRA's model (via selectedModel, reusing the
@@ -1510,6 +1643,17 @@ setLoading(false);
             <div className="quick-btns">{QUICK_QUESTIONS.map((q,i)=>(<button key={i} className="qbtn" onClick={()=>sendMessage(q)}>{q}</button>))}</div>
             <div className="input-row">
               <input className="chat-input" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMessage()} placeholder="Ask SIRA about your logs..." maxLength={MAX_CHARS+50}/>
+              <button
+                onClick={startMicInput}
+                disabled={micListening}
+                title={micListening ? "Listening..." : "Voice input"}
+                style={{
+                  padding: "0 16px", background: micListening ? "var(--purple-dim)" : "var(--bg3)",
+                  border: `1px solid ${micListening ? "var(--purple)" : "var(--border2)"}`, borderRadius: 12,
+                  color: micListening ? "var(--purple)" : "var(--text-mid)", cursor: micListening ? "default" : "pointer",
+                  fontFamily: "var(--mono)", fontSize: 13, flexShrink: 0,
+                }}
+              >{micListening ? "◎" : "🎙"}</button>
               <button className="send-btn" onClick={()=>sendMessage()} disabled={loading||charCount>MAX_CHARS}>SEND ▶</button>
             </div>
             <div className="input-meta"><span className={`char-counter ${charClass}`}>{charCount>0?`${charCount} / ${MAX_CHARS}${charCount>MAX_CHARS?" — TOO LONG":""}`:`MAX ${MAX_CHARS} CHARS`}</span></div>

@@ -380,12 +380,35 @@ def format_ts(ts):
 # edge-tts needs no model files and no lazy-loading dance -- it's just an
 # async HTTP call to Microsoft's Edge speech service. This one helper is
 # used by both /sira-speak and /sira-face-speak's audio-generation step.
-async def _synthesize_speech(text, voice="en-GB-ThomasNeural"):
-    """Returns raw MP3 bytes. en-GB-RyanNeural chosen for the same calm,
-    precise JARVIS-like quality the prompts already ask the LLM for --
-    swap the voice name for any other edge-tts voice if you want a
-    different one (run `edge-tts --list-voices` to see all options)."""
-    communicate = edge_tts.Communicate(text, voice)
+DEFAULT_VOICE = "en-GB-ThomasNeural"
+# A calmer, more deliberate default delivery -- edge-tts's default rate
+# reads slightly quick/casual for an assistant persona. Small, non-extreme
+# adjustments in both directions: unlike a specific ElevenLabs voice
+# clone, this doesn't change WHICH voice you're hearing, only its pacing
+# and register -- the actual transferable lever available here.
+DEFAULT_RATE = "-8%"
+DEFAULT_PITCH = "-3Hz"
+
+# Only voices actually confirmed working (tested via `edge-tts --write-media`)
+# go in this list -- a guessed name that doesn't exist raises
+# edge_tts.exceptions.NoAudioReceived, learned the hard way. Expand this
+# once you've run `edge-tts --list-voices` and confirmed more names.
+KNOWN_VOICES = [
+    {"id": "en-GB-ThomasNeural", "label": "Thomas (British, calm)", "default": True},
+    {"id": "en-GB-RyanNeural",   "label": "Ryan (British, precise)", "default": False},
+]
+
+
+async def _synthesize_speech(text, voice=None, rate=None, pitch=None):
+    """Returns raw MP3 bytes. rate/pitch accept edge-tts's format, e.g.
+    "-8%" and "-3Hz" -- defaults tuned for a calmer, more deliberate
+    delivery than edge-tts's out-of-the-box pacing."""
+    communicate = edge_tts.Communicate(
+        text,
+        voice or DEFAULT_VOICE,
+        rate=rate or DEFAULT_RATE,
+        pitch=pitch or DEFAULT_PITCH,
+    )
     audio_bytes = bytearray()
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
@@ -393,18 +416,26 @@ async def _synthesize_speech(text, voice="en-GB-ThomasNeural"):
     return bytes(audio_bytes)
 
 
-def get_speech_audio(text):
+def get_speech_audio(text, voice=None, rate=None, pitch=None):
     """Sync wrapper -- Flask routes are sync, edge-tts's API is async."""
-    return asyncio.run(_synthesize_speech(text))
+    return asyncio.run(_synthesize_speech(text, voice=voice, rate=rate, pitch=pitch))
+
+
+@app.route("/voices", methods=["GET"])
+def get_voices():
+    return jsonify(KNOWN_VOICES)
 
 
 @app.route("/sira-speak", methods=["POST"])
 def sira_speak():
     text = request.json.get("text", "")
+    voice = request.json.get("voice") or DEFAULT_VOICE
+    rate = request.json.get("rate")   # None -> get_speech_audio falls back to DEFAULT_RATE
+    pitch = request.json.get("pitch") # None -> falls back to DEFAULT_PITCH
     if not text:
         return jsonify({"error": "no text"}), 400
     try:
-        audio_bytes = get_speech_audio(text[:500])
+        audio_bytes = get_speech_audio(text[:500], voice=voice, rate=rate, pitch=pitch)
         return Response(audio_bytes, mimetype="audio/mpeg")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -435,6 +466,7 @@ def sira_face_speak():
     separate, bigger task.
     """
     text = request.json.get("text", "")
+    voice = request.json.get("voice") or DEFAULT_VOICE
     if not text:
         return jsonify({"error": "no text"}), 400
 
@@ -443,7 +475,7 @@ def sira_face_speak():
     video_path = os.path.join(WAV2LIP_DIR, f"temp_output_{request_id}.mp4")
 
     try:
-        audio_bytes = get_speech_audio(text[:500])
+        audio_bytes = get_speech_audio(text[:500], voice=voice)
         with open(audio_path, "wb") as f:
             f.write(audio_bytes)
 
@@ -589,6 +621,7 @@ def ask():
     date_filter = data.get('date', None)
     hour_filter = data.get('hour', None)
     history     = data.get('history', [])
+    honorific   = (data.get('honorific') or 'Sir').strip()
 
     # Identity/meta questions ("who are you", "what can you do") aren't
     # about log data at all -- retrieving logs for them just grabs whatever
@@ -597,7 +630,7 @@ def ask():
     # about them. Answer these directly instead, with no retrieval.
     if re.search(r'\b(who are you|what are you|what is sira|introduce yourself|what can you do|how do you work|tell me about yourself)\b', question, re.IGNORECASE):
         identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
-Speak like JARVIS from Iron Man: calm, precise, address the analyst as "Sir" occasionally.
+Speak like JARVIS from Iron Man: calm, precise, address the analyst as "{honorific}" occasionally.
 The analyst asked: "{question}"
 Answer conversationally in 2-4 sentences, describing who you are and what you help with
 (monitoring Suricata/Zeek network traffic, triaging alerts, investigating threats via Hermes).
@@ -721,7 +754,7 @@ Remember: only use facts from the log data above. Answer clearly and concisely."
     else:
         prompt = f"""You are SIRA — Security Incident Response Assistant.
 Speak exactly like JARVIS from Iron Man. Calm, authoritative, precise.
-Address the analyst as "Sir" occasionally.
+Address the analyst as "{honorific}" occasionally.
 Never ramble. Lead with the most critical information first.
 Be definitive — never say "I think" or "maybe".
 Short sentences. Maximum impact per word.
@@ -1344,6 +1377,7 @@ def rustinel_alerts():
 @app.route('/attacker-profile/<ip>', methods=['GET'])
 def attacker_profile(ip):
     import requests as req
+    honorific = (request.args.get('honorific') or 'Sir').strip()
 
     # 1. Get all suricata events for this IP
     logs = load_logs()
@@ -1375,7 +1409,7 @@ def attacker_profile(ip):
     # 6. Ask SIRA to profile the attacker
     docs = _call_with_timeout(lambda: retriever.invoke(f"attacks from {ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
-    prompt = f"""You are SIRA — speak like JARVIS from Iron Man. Calm, authoritative, precise. Address the analyst as Sir occasionally. Based on the log data, create a threat actor profile for IP {ip}.
+    prompt = f"""You are SIRA — speak like JARVIS from Iron Man. Calm, authoritative, precise. Address the analyst as {honorific} occasionally. Based on the log data, create a threat actor profile for IP {ip}.
 Log context:
 {context}
 
@@ -1437,11 +1471,12 @@ def what_if():
     alert_signature = data.get('signature', '')
     src_ip = data.get('src_ip', '')
     dest_ip = data.get('dest_ip', '')
+    honorific = (data.get('honorific') or 'Sir').strip()
 
     docs = _call_with_timeout(lambda: retriever.invoke(f"{alert_signature} {src_ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
 
-    prompt = f"""You are SIRA. Respond like JARVIS — calm, authoritative, precise. Address the analyst as Sir occasionally."
+    prompt = f"""You are SIRA. Respond like JARVIS — calm, authoritative, precise. Address the analyst as {honorific} occasionally."
 
 Alert: {alert_signature}
 Attacker IP: {src_ip}
