@@ -1,30 +1,35 @@
 import os
-
-# Set BEFORE any langchain_ollama/ollama imports -- if any part of that import
-# chain reads OLLAMA_HOST at import time rather than fresh on every call, an
-# override placed after the import (as this used to be) arrives too late and
-# whatever the system/Ollama desktop app had already set (observed: a
-# different random port on every run) wins instead.
-os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
-
+import time
 import datetime
 import json
 import shutil
 import argparse
 import chromadb
 from langchain_core.documents import Document
-from ollama_embeddings import DirectOllamaEmbeddings
 
-# The single source of truth for where Ollama actually lives. Passed
-# explicitly to OllamaEmbeddings below (not just left to the env var) so the
-# connection can't be silently hijacked by anything else on the system that
-# also sets OLLAMA_HOST -- explicit constructor args are evaluated fresh at
-# call time, not cached at import time.
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+# Was DirectOllamaEmbeddings, pointed at a local Ollama server -- this
+# script has its OWN embeddings instantiation, separate from app.py's, so
+# switching app.py to Gemini embeddings alone didn't fix this file. Both
+# now need to agree on the same embedding space, or ChromaDB ends up with
+# vectors from one provider being queried by another -- which doesn't
+# error, it just returns nonsense-similar results that look like real hits.
+# That's exactly what caused a fabricated answer citing a documentation-
+# placeholder IP (203.0.113.5) instead of saying "no data available."
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 USEFUL_TYPES = {"alert", "dns", "http", "tls", "flow"}
 MAX_EVENTS   = 5000
+
+# Gemini's embedding API is rate-limited by tokens-per-minute (generous --
+# 10M/min on the free tier) rather than a strict request count the way chat
+# models are, but the exact per-call batch size limit isn't clearly
+# documented. Rather than trust embed_documents() to chunk ~5100 texts
+# safely on its own, this batches explicitly and predictably -- same
+# reasoning that already moved this script away from from_documents()
+# once before (see the comment further down).
+EMBED_BATCH = 100
+EMBED_BATCH_DELAY_SECONDS = 1  # small pause between batches, safety margin
 
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
@@ -191,8 +196,8 @@ print("\nSample chunk:")
 print(docs[0].page_content)
 print()
 
-print(f"Building ChromaDB (Ollama at {OLLAMA_BASE_URL})...")
-embeddings = DirectOllamaEmbeddings(model="nomic-embed-text", host=OLLAMA_BASE_URL)
+print("Building ChromaDB (Gemini embeddings)...")
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 
 # NOTE: this used to call langchain_chroma's Chroma.from_documents(), which
 # was silently re-invoking embeddings.embed_documents() on the FULL document
@@ -201,16 +206,24 @@ embeddings = DirectOllamaEmbeddings(model="nomic-embed-text", host=OLLAMA_BASE_U
 # between). from_documents() internally batches and writes through several
 # layers of langchain_chroma/chromadb that were not behaving predictably in
 # this environment. Rather than chase that further, this now computes
-# embeddings exactly once ourselves (the batching in DirectOllamaEmbeddings
-# is already proven to complete cleanly on its own) and writes them straight
-# into chromadb's own client in a single, plain, bounded loop -- no
-# framework retry logic left that can loop silently.
+# embeddings exactly once ourselves, explicitly batched (see EMBED_BATCH
+# above -- same reasoning applied to the Gemini switch: don't trust an
+# unverified internal batching behaviour with ~5100 texts in one call) and
+# writes them straight into chromadb's own client in a single, plain,
+# bounded loop -- no framework retry logic left that can loop silently.
 texts     = [d.page_content for d in docs]
 metadatas = [d.metadata for d in docs]
 ids       = [str(i) for i in range(len(docs))]
 
-print(f"Computing embeddings for {len(texts)} documents (single pass)...")
-vectors = embeddings.embed_documents(texts)
+print(f"Computing embeddings for {len(texts)} documents (batches of {EMBED_BATCH})...")
+vectors = []
+for start in range(0, len(texts), EMBED_BATCH):
+    end = min(start + EMBED_BATCH, len(texts))
+    batch_vectors = embeddings.embed_documents(texts[start:end])
+    vectors.extend(batch_vectors)
+    print(f"[embeddings] computed {end}/{len(texts)}")
+    if end < len(texts):
+        time.sleep(EMBED_BATCH_DELAY_SECONDS)
 print(f"Computed {len(vectors)} embeddings.")
 
 client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
