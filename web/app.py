@@ -14,6 +14,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+import time
 import uuid
 from langgraph.func import task
 from werkzeug.utils import secure_filename
@@ -1171,6 +1173,41 @@ def correlate_ip():
     })
 
 
+def _run_rag_rebuild():
+    """Runs rag_setup.py against whatever's currently in logs/eve.json --
+    shared by /upload (after it overwrites that file), the manual
+    /rebuild-index endpoint (no overwrite, indexes the live honeypot-synced
+    data as-is), and the automatic background rebuild loop below. Raises on
+    failure -- callers decide how to report that (HTTP error vs a log line
+    from a background thread)."""
+    rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
+    ai_dir = os.path.join(os.path.dirname(__file__), '..', 'ai')
+    subprocess.run([sys.executable, rag_script], timeout=180, check=True, cwd=ai_dir)
+
+
+@app.route('/rebuild-index', methods=['POST'])
+def rebuild_index():
+    """Rebuilds ChromaDB from whatever's currently in logs/eve.json -- the
+    live honeypot-synced data -- WITHOUT requiring a file upload and
+    without overwriting that file the way /upload does. This is the
+    endpoint to hit when you just want the index to reflect current real
+    honeypot activity, not a manually-provided snapshot."""
+    eve_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
+    if not os.path.exists(eve_path) or os.path.getsize(eve_path) == 0:
+        return jsonify({"error": "logs/eve.json doesn't exist or is empty yet -- honeypot sync may not have pulled data yet. Check /health or wait a moment and retry."}), 409
+    try:
+        _run_rag_rebuild()
+        new_logs = load_logs()
+        return jsonify({
+            "message": "ChromaDB rebuilt from live honeypot data",
+            "events_loaded": len(new_logs)
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "ChromaDB rebuild timed out"}), 500
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
+
+
 @app.route('/upload', methods=['POST'])
 def upload():
     os.environ['OLLAMA_HOST'] = 'http://127.0.0.1:11434'
@@ -1196,11 +1233,7 @@ def upload():
     file.save(save_path)
 
     try:
-        # rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
-        # subprocess.run(['python', rag_script], timeout=120, check=True)
-        rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
-        ai_dir = os.path.join(os.path.dirname(__file__), '..', 'ai')
-        subprocess.run([sys.executable, rag_script], timeout=120, check=True, cwd=ai_dir)
+        _run_rag_rebuild()
         new_logs = load_logs()
         return jsonify({
             "message": f"{save_as} uploaded and ChromaDB rebuilt successfully",
@@ -2225,6 +2258,56 @@ def compliance_trend():
     return jsonify(series)
 
 
+_index_rebuild_started = False
+
+
+def _index_rebuild_loop():
+    """Waits for honeypot sync to have pulled real data, does an initial
+    ChromaDB rebuild, then re-rebuilds periodically so the index reflects
+    new attack traffic over time rather than staying frozen at whatever
+    existed the moment this process started. Runs entirely in a background
+    thread -- never blocks Flask from serving requests, and every retrieval
+    call already degrades gracefully (empty docs, not a crash) via
+    _call_with_timeout while a rebuild is in progress or hasn't happened yet.
+    """
+    eve_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
+
+    # Wait for honeypot sync's first real pull rather than racing it --
+    # rebuilding against a file that doesn't exist yet just fails and
+    # wastes the attempt. Retries for up to 5 minutes before giving up on
+    # the INITIAL rebuild (periodic re-attempts below will keep trying).
+    for _ in range(30):
+        if os.path.exists(eve_path) and os.path.getsize(eve_path) > 0:
+            break
+        time.sleep(10)
+
+    REBUILD_INTERVAL_SECONDS = 2 * 60 * 60  # re-index every 2 hours
+    while True:
+        try:
+            if os.path.exists(eve_path) and os.path.getsize(eve_path) > 0:
+                print("[index_rebuild] starting ChromaDB rebuild from live honeypot data...")
+                _run_rag_rebuild()
+                print("[index_rebuild] rebuild complete")
+            else:
+                print("[index_rebuild] logs/eve.json still not available -- skipping this cycle")
+        except Exception as e:
+            print(f"[index_rebuild] rebuild failed: {e} -- will retry next cycle")
+        time.sleep(REBUILD_INTERVAL_SECONDS)
+
+
+def _maybe_start_index_rebuild():
+    """Same one-process-only guard pattern as _maybe_start_honeypot_sync --
+    see that function's docstring for why gunicorn vs `python app.py`
+    need different guards."""
+    global _index_rebuild_started
+    if _index_rebuild_started:
+        return
+    _index_rebuild_started = True
+    thread = threading.Thread(target=_index_rebuild_loop, daemon=True, name="chromadb-index-rebuild")
+    thread.start()
+    print("[index_rebuild] background rebuild thread started")
+
+
 _honeypot_sync_started = False
 
 
@@ -2257,6 +2340,7 @@ if __name__ != '__main__':
     # Being imported, not run as a script -- this is the gunicorn/production
     # path. Start immediately; see docstring above for why this is safe.
     _maybe_start_honeypot_sync()
+    _maybe_start_index_rebuild()
 
 
 if __name__ == '__main__':
@@ -2268,6 +2352,7 @@ if __name__ == '__main__':
     # parent watcher process, once in the child) when debug=True.
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         _maybe_start_honeypot_sync()
+        _maybe_start_index_rebuild()
 
     # NOTE: debug=True's reloader watches every file under the project tree
     # recursively -- this originally caused two separate problems:
