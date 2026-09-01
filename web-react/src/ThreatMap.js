@@ -3,6 +3,12 @@ import { MapContainer, TileLayer, CircleMarker, Popup, Polyline } from "react-le
  
 const FLASK_URL = "https://soc-copilot.onrender.com";
 const NZ_COORDS = [-36.8485, 174.7633]; // Auckland — your server location
+// CARTO's raster basemaps now require a free API key (added their side
+// this week, mid-migration to vector tiles). Read from an env var rather
+// than hardcoded -- set REACT_APP_CARTO_API_KEY in Vercel's environment
+// variables, then trigger a redeploy so Create React App bakes it into
+// the build (these are build-time, not runtime, env vars).
+const CARTO_API_KEY = process.env.REACT_APP_CARTO_API_KEY || "";
  
 export default function ThreatMap() {
   const [attackers, setAttackers] = useState([]);
@@ -49,11 +55,11 @@ export default function ThreatMap() {
         zoom={2}
         style={{ width: "100%", height: "100%", background: "#0A0A0C" }}
         zoomControl={false}
-        attributionControl={false}
+        attributionControl={true}
 >
 <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution=""
+          url={`https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`}
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>'
         />
  
         {/* Auckland server marker */}
