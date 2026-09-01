@@ -639,6 +639,19 @@ function RustinelPanel() {
 
 function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView }) {
   const canvasRef = useRef(null);
+  const [attentionItems, setAttentionItems] = useState([]);
+  const [attentionLoading, setAttentionLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${FLASK_URL}/attention-items`)
+      .then(r => r.json())
+      .then(data => setAttentionItems(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setAttentionLoading(false));
+  }, []);
+
+  const PRIORITY_COLORS = { high: "#E15554", medium: "#F0A857", low: "#6B7280" };
+
   const alertEvents = alerts.filter(a => a.event_type === "alert");
   const total = alertEvents.length;
 
@@ -684,6 +697,29 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
   return (
     <div style={{ width: "100%", height: "100%", background: "transparent", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
       <SiraAvatar ref={siraAvatarRef} onOpenFullView={onOpenFullView} />
+
+      <div className="section-label" style={{ padding: 0, marginBottom: 12 }}>Needs Attention</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 22 }}>
+        {attentionLoading && (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)" }}>Loading...</div>
+        )}
+        {!attentionLoading && attentionItems.length === 0 && (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)" }}>Nothing flagged right now</div>
+        )}
+        {attentionItems.map((item, i) => (
+          <div key={i} style={{
+            display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 10px",
+            borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.03)",
+            borderLeft: `2px solid ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.low}`,
+          }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", marginTop: 4, flexShrink: 0, background: PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.low }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: "var(--sans)", fontSize: 11, color: "var(--text)", lineHeight: 1.4 }}>{item.title}</div>
+              {item.detail && <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginTop: 2 }}>{item.detail}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
 
       <div className="section-label" style={{ padding: 0, marginBottom: 16 }}>Threat Summary</div>
 

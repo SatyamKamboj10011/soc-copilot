@@ -167,6 +167,9 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [viewMode, setViewMode] = useState("raw"); // "raw" | "grouped"
+  const [groupedRows, setGroupedRows] = useState([]);
+  const [groupedLoading, setGroupedLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [searching, setSearching] = useState(false);
@@ -174,15 +177,20 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
   const [selected, setSelected] = useState(null);
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [timeline, setTimeline] = useState(null);
   const [whatIf, setWhatIf] = useState(null);
   const [whatIfLoading, setWhatIfLoading] = useState(false);
   const searchDebounce = useRef(null);
 
   const loadProfile = async (ip) => {
-    setProfileLoading(true); setProfile(null);
+    setProfileLoading(true); setProfile(null); setTimeline(null);
     try { const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}`); setProfile(await res.json()); }
     catch { setProfile({ error: "Failed to load profile" }); }
     setProfileLoading(false);
+    // Separate try/catch -- a timeline failure shouldn't take down the
+    // whole profile view, which already loaded fine above.
+    try { const tRes = await fetch(`${FLASK_URL}/attacker-timeline/${ip}`); setTimeline(await tRes.json()); }
+    catch { setTimeline(null); }
   };
 
   const runWhatIf = async (log) => {
@@ -242,6 +250,16 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
     return () => clearTimeout(searchDebounce.current);
   }, [search]); // eslint-disable-line
 
+  useEffect(() => {
+    if (viewMode !== "grouped" || groupedRows.length > 0) return; // fetch once, not on every toggle
+    setGroupedLoading(true);
+    fetch(`${FLASK_URL}/logs/grouped-mitre`)
+      .then(r => r.json())
+      .then(data => setGroupedRows(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setGroupedLoading(false));
+  }, [viewMode]); // eslint-disable-line
+
   const loadMore = () => { setLoadingMore(true); fetchPage(search.trim(), offset, true); };
   const hasMore = offset < total;
   const visibleRows = typeFilter === "all" ? rows : rows.filter(r => r.event_type === typeFilter);
@@ -282,40 +300,83 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
         >⬇ EXPORT CSV</button>
       </div>
 
-      <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
         {["all", "alert", "dns", "http", "tls", "flow"].map(f => (
           <button key={f} onClick={() => setTypeFilter(f)} style={filterChipStyle(f === typeFilter)}>{f}</button>
         ))}
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => setViewMode(v => v === "raw" ? "grouped" : "raw")}
+          style={{
+            padding: "0 12px", height: 26, background: viewMode === "grouped" ? "var(--accent-dim, rgba(41,211,255,0.12))" : "var(--bg3, rgba(255,255,255,0.03))",
+            border: `1px solid ${viewMode === "grouped" ? "var(--accent, #29D3FF)" : "var(--border2, rgba(255,255,255,0.08))"}`, borderRadius: 8,
+            color: viewMode === "grouped" ? "var(--accent, #29D3FF)" : "var(--text-mid, #8FA3B5)", cursor: "pointer",
+            fontFamily: "var(--mono, monospace)", fontSize: 9, letterSpacing: 1,
+          }}
+        >{viewMode === "raw" ? "☰ RAW LOGS" : "⊞ GROUPED + MITRE"}</button>
       </div>
 
       <div style={consoleFrameStyle}>
-        <div style={consoleHeaderRowStyle}>
-          <span style={{ width: 54 }}>TYPE</span>
-          <span style={{ width: 74 }}>TIME</span>
-          <span style={{ width: 150 }}>SOURCE</span>
-          <span style={{ width: 150 }}>DEST</span>
-          <span style={{ flex: 1 }}>DETAIL</span>
-        </div>
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          {visibleRows.map((l, i) => (
-            <div key={i} onClick={() => setSelected(l)} style={consoleRowStyle}>
-              <span style={{ width: 54, color: TYPE_COLOR[l.event_type], fontWeight: 700 }}>{l.event_type?.substring(0, 4).toUpperCase()}</span>
-              <span style={{ width: 74, color: "var(--text-dim, #5A5A62)" }}>{l.timestamp?.substring(11, 19)}</span>
-              <span style={{ width: 150, color: "var(--accent, #29D3FF)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.src_ip}</span>
-              <span style={{ width: 150, color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.dest_ip}</span>
-              <span style={{ flex: 1, color: "var(--text-dim, #5A5A62)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailFor(l)}</span>
+        {viewMode === "grouped" ? (
+          <>
+            <div style={consoleHeaderRowStyle}>
+              <span style={{ width: 60 }}>COUNT</span>
+              <span style={{ width: 150 }}>SOURCE</span>
+              <span style={{ width: 150 }}>DEST</span>
+              <span style={{ width: 110 }}>MITRE</span>
+              <span style={{ flex: 1 }}>SIGNATURE</span>
             </div>
-          ))}
-          {visibleRows.length === 0 && !searching && (
-            <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>
-              {search.trim() ? "No matching events found" : "No events loaded"}
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {groupedLoading && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>Loading grouped alerts...</div>
+              )}
+              {!groupedLoading && groupedRows.map((g, i) => (
+                <div key={i} style={consoleRowStyle}>
+                  <span style={{ width: 60, color: "var(--accent, #29D3FF)", fontWeight: 700 }}>×{g.count}</span>
+                  <span style={{ width: 150, color: "var(--accent, #29D3FF)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.src_ip}</span>
+                  <span style={{ width: 150, color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.dest_ip}</span>
+                  <span style={{ width: 110, color: g.mitre ? "var(--orange, #F0A857)" : "var(--text-dim, #5A5A62)", fontSize: 9 }}>
+                    {g.mitre ? g.mitre.technique_id : "—"}
+                  </span>
+                  <span style={{ flex: 1, color: "var(--text-dim, #5A5A62)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.signature}</span>
+                </div>
+              ))}
+              {!groupedLoading && groupedRows.length === 0 && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>No alerts to group yet</div>
+              )}
             </div>
-          )}
-        </div>
-        {hasMore && rows.length > 0 && (
-          <button onClick={loadMore} disabled={loadingMore} style={loadMoreBtnStyle}>
-            {loadingMore ? "LOADING..." : `LOAD MORE (${rows.length} of ${total})`}
-          </button>
+          </>
+        ) : (
+          <>
+            <div style={consoleHeaderRowStyle}>
+              <span style={{ width: 54 }}>TYPE</span>
+              <span style={{ width: 74 }}>TIME</span>
+              <span style={{ width: 150 }}>SOURCE</span>
+              <span style={{ width: 150 }}>DEST</span>
+              <span style={{ flex: 1 }}>DETAIL</span>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {visibleRows.map((l, i) => (
+                <div key={i} onClick={() => setSelected(l)} style={consoleRowStyle}>
+                  <span style={{ width: 54, color: TYPE_COLOR[l.event_type], fontWeight: 700 }}>{l.event_type?.substring(0, 4).toUpperCase()}</span>
+                  <span style={{ width: 74, color: "var(--text-dim, #5A5A62)" }}>{l.timestamp?.substring(11, 19)}</span>
+                  <span style={{ width: 150, color: "var(--accent, #29D3FF)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.src_ip}</span>
+                  <span style={{ width: 150, color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.dest_ip}</span>
+                  <span style={{ flex: 1, color: "var(--text-dim, #5A5A62)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailFor(l)}</span>
+                </div>
+              ))}
+              {visibleRows.length === 0 && !searching && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>
+                  {search.trim() ? "No matching events found" : "No events loaded"}
+                </div>
+              )}
+            </div>
+            {hasMore && rows.length > 0 && (
+              <button onClick={loadMore} disabled={loadingMore} style={loadMoreBtnStyle}>
+                {loadingMore ? "LOADING..." : `LOAD MORE (${rows.length} of ${total})`}
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -361,6 +422,29 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
                   <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 1.5, marginBottom: 12 }}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
                   <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{profile.sira_assessment}</div>
                 </div>
+
+                {timeline && timeline.timeline && timeline.timeline.length > 0 && (
+                  <div style={{ marginTop: 16, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 10, padding: 16 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 1.5, marginBottom: 12 }}>
+                      ⏱ EVENT TIMELINE — {timeline.total_events} TOTAL EVENTS
+                    </div>
+                    <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                      {timeline.timeline.map((e, i) => (
+                        <div key={i} style={{
+                          display: "flex", gap: 10, alignItems: "baseline", padding: "6px 8px",
+                          borderRadius: 6, background: e.event_type === "alert" ? "var(--red-dim)" : "rgba(255,255,255,0.02)",
+                          fontFamily: "var(--mono)", fontSize: 10,
+                        }}>
+                          <span style={{ color: "var(--text-dim)", flexShrink: 0, width: 62 }}>{e.timestamp?.substring(11, 19)}</span>
+                          <span style={{ color: TYPE_COLOR[e.event_type] || "var(--text-mid)", fontWeight: 700, flexShrink: 0, width: 44 }}>{e.event_type?.substring(0, 4).toUpperCase()}</span>
+                          <span style={{ color: "var(--text-mid)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {e.signature || e.query || e.hostname || `${e.src_ip} → ${e.dest_ip}:${e.dest_port}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <button className="ask-sira-btn" style={{ marginTop: 16 }} onClick={() => { onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`); setProfile(null); }}>⬡ ASK SIRA FOR FULL ANALYSIS</button>
               </>
             )}
