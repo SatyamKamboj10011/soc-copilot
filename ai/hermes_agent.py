@@ -2,19 +2,48 @@ import os
 import re
 import json
 import ipaddress
-import requests
 from langchain_ollama import OllamaLLM
 
-# Was hardcoded to port 5000 -- fine locally (python app.py always binds
-# 5000), but on Render gunicorn binds to $PORT (observed as 10000, and
-# platform-assigned dynamically in general), so every tool call in this
-# file was silently trying to reach a port nothing was listening on. Since
-# each tool catches its own connection failure and reports it as that
-# step's result rather than crashing, this degraded silently rather than
-# erroring loudly -- Hermes investigations on Render were very likely
-# running with NO real tool data at all until this was fixed, not just the
-# final report-writing step.
-FLASK_URL = os.getenv("HERMES_FLASK_URL", f"http://127.0.0.1:{os.getenv('PORT', '5000')}")
+# Every tool below used to make a REAL HTTP request back to this exact
+# same Flask process (requests.get(f"{FLASK_URL}/...")). With
+# WEB_CONCURRENCY=1 (Render's default), that's a guaranteed deadlock: the
+# single worker handling the outer /hermes-agent request can never also
+# answer its own inner self-call, since there's no second worker free to
+# do it. Confirmed by direct evidence during testing -- every single tool
+# failed with "Read timed out" connecting to 127.0.0.1:$PORT, every time,
+# meaning Hermes had likely never actually retrieved real data on the
+# deployed single-worker instance at all.
+#
+# The fix: Flask's own test client dispatches a route IN-PROCESS,
+# synchronously, in the current thread -- it never touches a real socket
+# or the gunicorn worker pool at all, so it works correctly regardless of
+# worker count. set_flask_client() is called once from app.py's
+# /hermes-agent route, right before invoking run_hermes_agent().
+_flask_client = None
+
+
+def set_flask_client(client):
+    global _flask_client
+    _flask_client = client
+
+
+def _local_get(path, params=None, timeout=None):
+    """In-process GET via Flask's test client. timeout is accepted but
+    unused -- kept as a parameter so call sites didn't all need editing --
+    an in-process call has no network layer to time out on."""
+    resp = _flask_client.get(path, query_string=params)
+    try:
+        return resp.get_json()
+    except Exception:
+        return None
+
+
+def _local_post(path, json_body=None, timeout=None):
+    resp = _flask_client.post(path, json=json_body)
+    try:
+        return resp.get_json(), resp.status_code
+    except Exception:
+        return None, resp.status_code
 
 # ── Deployment-aware report model ───────────────────────────────────────
 # Mirrors web/app.py's DEPLOYED-aware fallback in get_llm(), duplicated
@@ -75,8 +104,7 @@ def _is_internal_or_platform_ip(ip: str) -> bool:
 def search_logs(query: str) -> str:
     """Search Suricata logs by IP address or alert signature."""
     try:
-        res = requests.get(f"{FLASK_URL}/search", params={"q": query}, timeout=10)
-        data = res.json()
+        data = _local_get("/search", params={"q": query})
         if not data:
             return f"No logs found for query: {query}"
         summary = []
@@ -93,8 +121,7 @@ def _search_logs_raw(query: str, limit: int = 100):
     formatted string -- used internally to pick a real signature for the
     CVE lookup rather than guessing at a generic phrase."""
     try:
-        res = requests.get(f"{FLASK_URL}/search", params={"q": query}, timeout=10)
-        data = res.json()
+        data = _local_get("/search", params={"q": query})
         return data if isinstance(data, list) else []
     except Exception:
         return []
@@ -104,8 +131,7 @@ def check_reputation(ip: str) -> str:
     """Check IP reputation on AbuseIPDB."""
     try:
         ip = ip.strip()
-        res = requests.get(f"{FLASK_URL}/reputation/{ip}", timeout=10)
-        data = res.json()
+        data = _local_get(f"/reputation/{ip}")
         return (f"IP {ip} reputation:\n"
                 f"- Abuse Score: {data.get('score')}%\n"
                 f"- Malicious: {data.get('malicious')}\n"
@@ -120,8 +146,7 @@ def _check_reputation_raw(ip: str):
     of a formatted string -- used internally to decide whether there's
     real enough evidence to PROPOSE an action, not just describe one."""
     try:
-        res = requests.get(f"{FLASK_URL}/reputation/{ip.strip()}", timeout=10)
-        return res.json()
+        return _local_get(f"/reputation/{ip.strip()}") or {}
     except Exception:
         return {}
 
@@ -136,11 +161,10 @@ def propose_action(action_type: str, target: str, reason: str, machine_id: str =
         body = {"action_type": action_type, "target": target, "reason": reason}
         if machine_id:
             body["machine_id"] = machine_id
-        res = requests.post(f"{FLASK_URL}/propose-action", json=body, timeout=10)
-        data = res.json()
-        if res.status_code == 201:
+        data, status_code = _local_post("/propose-action", json_body=body)
+        if status_code == 201:
             return f"Proposed action #{data.get('id')}: {action_type} on {target} -- awaiting human approval."
-        return f"Failed to propose action: {data.get('error', 'unknown error')}"
+        return f"Failed to propose action: {(data or {}).get('error', 'unknown error')}"
     except Exception as e:
         return f"Failed to propose action: {str(e)}"
 
@@ -148,9 +172,7 @@ def propose_action(action_type: str, target: str, reason: str, machine_id: str =
 def lookup_cve(signature: str) -> str:
     """Look up CVEs related to an attack signature from NVD database."""
     try:
-        res = requests.get(f"{FLASK_URL}/cve-lookup",
-                          params={"signature": signature}, timeout=15)
-        data = res.json()
+        data = _local_get("/cve-lookup", params={"signature": signature})
         if not data.get('results'):
             return f"No CVEs found for: {signature}"
         result = f"CVEs related to '{data.get('search_term')}':\n"
@@ -167,9 +189,7 @@ def correlate_zeek(ip: str) -> str:
     """Correlate Suricata alerts with Zeek connection logs for an IP."""
     try:
         ip = ip.strip()
-        res = requests.get(f"{FLASK_URL}/correlate/ip",
-                          params={"ip": ip}, timeout=10)
-        data = res.json()
+        data = _local_get("/correlate/ip", params={"ip": ip})
         result = (f"Zeek correlation for {ip}:\n"
                  f"- Suricata events: {data.get('total_suricata', 0)}\n"
                  f"- Zeek connections: {data.get('total_zeek', 0)}\n")
@@ -190,8 +210,7 @@ def check_endpoint_activity(machine_id: str = "") -> str:
     describe YOUR OWN monitored machines, not attacker traffic."""
     try:
         if machine_id:
-            res = requests.get(f"{FLASK_URL}/machine/{machine_id}", timeout=10)
-            data = res.json()
+            data = _local_get(f"/machine/{machine_id}")
             if not data:
                 result = f"No Sentinel data found for machine '{machine_id}'.\n"
             else:
@@ -206,8 +225,7 @@ def check_endpoint_activity(machine_id: str = "") -> str:
                     for s in suspicious[:5]:
                         result += f"  - {s.get('remote', 'unknown')}\n"
         else:
-            res = requests.get(f"{FLASK_URL}/machines", timeout=10)
-            data = res.json()
+            data = _local_get("/machines")
             if not data:
                 result = "No Sentinel endpoints currently registered.\n"
             else:
@@ -220,8 +238,7 @@ def check_endpoint_activity(machine_id: str = "") -> str:
         # a genuinely richer source than the connection-heuristic check
         # above, when available.
         try:
-            rres = requests.get(f"{FLASK_URL}/rustinel-alerts", params={"limit": 5}, timeout=5)
-            rustinel_alerts = rres.json()
+            rustinel_alerts = _local_get("/rustinel-alerts", params={"limit": 5})
         except Exception:
             rustinel_alerts = []
 
@@ -240,8 +257,7 @@ def check_endpoint_activity(machine_id: str = "") -> str:
 def get_stats(query: str = "") -> str:
     """Get overall network statistics — total events, alerts, unique IPs."""
     try:
-        res = requests.get(f"{FLASK_URL}/stats", timeout=10)
-        data = res.json()
+        data = _local_get("/stats")
         breakdown = data.get('event_breakdown', {})
         top_ips = data.get('top_source_ips', [])
         result = (f"Network Statistics:\n"
@@ -260,8 +276,7 @@ def _fetch_top_ips_raw(limit: int = 5):
     pick a real, non-internal IP to investigate, instead of a hardcoded
     placeholder."""
     try:
-        res = requests.get(f"{FLASK_URL}/top-ips", params={"limit": limit}, timeout=10)
-        data = res.json()
+        data = _local_get("/top-ips", params={"limit": limit})
         return data if isinstance(data, list) else []
     except Exception:
         return []
@@ -439,7 +454,7 @@ NETWORK STATISTICS:
 TOP ATTACKING IPs:
 {ips_result}
 
-SENTINEL ENDPOINT ACTIVITY:
+SENTINEL ENDPOINT ACTIVITY (this project's own custom-built endpoint monitoring agent -- unrelated to Microsoft's product of the same name):
 {endpoint_result}
 
 LOG SEARCH RESULTS for {target_ip or "(no external target identified)"}:
@@ -460,7 +475,7 @@ ZEEK CORRELATION for {target_ip or "(no external target identified)"}:
 STRICT GROUNDING RULES — follow these exactly:
 - Only reference IP addresses, CVE identifiers, signatures, endpoint names, and figures that appear explicitly in the tool results above. Never invent or assume an IP, CVE, vulnerability, or endpoint not listed above.
 - Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure traffic, not external attackers -- even if they show a very high event count. Do not describe activity from these IPs as unauthorized access, an intrusion, or an attack.
-- Sentinel endpoint activity is a SEPARATE data source from the honeypot's network logs -- it describes your own monitored machines, not attacker traffic. Do not conflate a flagged endpoint (Sentinel's connection heuristic, or a real Rustinel Sigma/YARA/IOC detection) with a network-level attacker finding, or vice versa.
+- "Sentinel" here refers ONLY to this project's own custom endpoint monitoring agent -- never describe it using Microsoft Sentinel's product terminology, features, or capabilities (it is a completely different, unrelated tool that happens to share a name). Sentinel endpoint activity is also a SEPARATE data source from the honeypot's network logs -- it describes your own monitored machines, not attacker traffic. Do not conflate a flagged endpoint (Sentinel's connection heuristic, or a real Rustinel Sigma/YARA/IOC detection) with a network-level attacker finding, or vice versa.
 - Rustinel detections are real, rule-based findings (Sigma/YARA/IOC) -- if none are present, say "no Rustinel alerts" rather than inventing one, same as any other tool result.
 - If no external attacker, no relevant CVE, or no flagged endpoint was found in the results above, say so plainly instead of filling the gap with a plausible-sounding but unverified claim.
 - You NEVER execute anything yourself -- you only PROPOSE actions, which require explicit human approval in the dashboard before anything happens. Never write as if an action has already been taken; the PROPOSED ACTION RESULT above tells you exactly what state it's actually in.

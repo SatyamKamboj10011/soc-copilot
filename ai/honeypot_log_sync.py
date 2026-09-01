@@ -68,7 +68,23 @@ sync_status = {
     "last_pull_at": None,
     "last_pull_bytes": 0,
     "last_error": None,
+    "currently_active": False,  # True only while an actual connect/pull attempt is in flight right now
+    "recent_events": [],        # last 15 real events: {"at": iso, "type": "connected"|"pulled"|"error"|"rotated", "detail": str}
 }
+
+MAX_RECENT_EVENTS = 15
+
+
+def _log_sync_event(event_type, detail):
+    """Appends a real event to the recent-activity log, trimmed to the
+    last MAX_RECENT_EVENTS. Every call site is a genuine event that
+    actually happened -- nothing here is simulated for display purposes."""
+    sync_status["recent_events"].append({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "type": event_type,
+        "detail": detail,
+    })
+    sync_status["recent_events"] = sync_status["recent_events"][-MAX_RECENT_EVENTS:]
 
 
 def _connect():
@@ -169,8 +185,10 @@ def _sync_once(sftp):
             _last_sizes[remote_path] = remote_size
             sync_status["last_pull_at"] = datetime.now(timezone.utc).isoformat()
             sync_status["last_pull_bytes"] = added
+            _log_sync_event("pulled", f"{os.path.basename(remote_path)} +{added} bytes")
             print(f"[honeypot_log_sync] pulled {os.path.basename(remote_path)} (+{added} bytes, {remote_size} total)")
         except Exception as e:
+            _log_sync_event("error", f"transfer failed for {os.path.basename(remote_path)}: {str(e)[:100]}")
             print(f"[honeypot_log_sync] transfer failed for {remote_path}: {e}")
 
 
@@ -178,6 +196,7 @@ def _run_loop():
     client = None
     sftp = None
     while True:
+        sync_status["currently_active"] = True
         try:
             if client is None:
                 client = _connect()
@@ -186,11 +205,13 @@ def _run_loop():
                 sync_status["connected"] = True
                 sync_status["last_connected_at"] = datetime.now(timezone.utc).isoformat()
                 sync_status["last_error"] = None
+                _log_sync_event("connected", f"to {HONEYPOT_HOST}")
             _sync_once(sftp)
         except Exception as e:
             print(f"[honeypot_log_sync] connection error: {e} -- reconnecting next cycle")
             sync_status["connected"] = False
             sync_status["last_error"] = str(e)[:200]
+            _log_sync_event("error", f"connection: {str(e)[:100]}")
             try:
                 if client:
                     client.close()
@@ -198,6 +219,7 @@ def _run_loop():
                 pass
             client = None
             sftp = None
+        sync_status["currently_active"] = False
         time.sleep(POLL_INTERVAL_SECONDS)
 
 

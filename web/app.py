@@ -660,11 +660,42 @@ Rewritten question:"""
 
 _ask_request_count = 0
 
+# Real activity feed for the chat stage, same pattern as sync/rebuild above.
+# currently_processing is genuinely accurate (not an approximation) given
+# WEB_CONCURRENCY=1 -- this single process only ever handles one request
+# at a time regardless, so a simple flag correctly reflects reality.
+ask_activity = {
+    "currently_processing": False,
+    "recent_requests": [],  # last 15 real requests: {"at": iso, "question_preview": str, "model_requested": str, "outcome": str}
+}
+MAX_ASK_EVENTS = 15
+
+
+def _log_ask_event(question, model, outcome):
+    ask_activity["recent_requests"].append({
+        "at": datetime.utcnow().isoformat() + "Z",
+        "question_preview": (question or "")[:80],
+        "model_requested": model,
+        "outcome": outcome,
+    })
+    ask_activity["recent_requests"] = ask_activity["recent_requests"][-MAX_ASK_EVENTS:]
+
+
+@app.after_request
+def _clear_ask_processing_flag(response):
+    # Runs after EVERY response, not just /ask -- cheap no-op for other
+    # routes, but guarantees currently_processing resets even if /ask
+    # exits through a path that didn't explicitly log completion.
+    if request.path == '/ask':
+        ask_activity["currently_processing"] = False
+    return response
+
 
 @app.route('/ask', methods=['POST'])
 def ask():
     global _ask_request_count
     _ask_request_count += 1
+    ask_activity["currently_processing"] = True
     data        = request.json
     question    = data.get('question', '')
     model       = data.get('model', 'ollama')
@@ -673,6 +704,7 @@ def ask():
     hour_filter = data.get('hour', None)
     history     = data.get('history', [])
     honorific   = (data.get('honorific') or 'Sir').strip()
+    _log_ask_event(question, model, "received")
 
     # Identity/meta questions ("who are you", "what can you do") aren't
     # about log data at all -- retrieving logs for them just grabs whatever
@@ -696,6 +728,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
                 return jsonify({"error": f"{model} is rate-limited right now. Try a different model."}), 429
             return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
         resp = {'answer': identity_answer, 'model_used': used_model, 'spoken_summary': identity_answer}
+        _log_ask_event(question, model, f"answered (identity) via {used_model}")
         if fell_back:
             resp['fallback_used'] = True
             resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
@@ -747,27 +780,35 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
         ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', resolved_question)
         if not ip_match and last_ai_text:
             ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', last_ai_text)
-        # Tracks IPs the question specifically asked about that have ZERO
-        # exact metadata matches anywhere in the real data -- this is a
-        # precise, code-verified signal (not a guess) that gets injected
-        # into the prompt as a hard constraint below. Confirmed by direct
-        # evidence: an LLM was given real (but irrelevant-to-that-IP)
-        # similarity-matched context and fabricated a detailed report
-        # about an IP that /search independently confirmed doesn't exist
-        # anywhere in the logs -- generic top-K similarity results alone
-        # don't stop that, since they always return SOMETHING regardless
-        # of whether it's actually relevant to the specific IP asked about.
+        # Verified directly against load_logs() -- the raw data -- instead
+        # of semantic search. Two real bugs this fixes: (1) the old query
+        # ("src_ip {ip} alert") was biased toward alert-type documents
+        # specifically, causing false "no data" results for real IPs whose
+        # traffic is mostly flow/http/dns rather than alerts (confirmed:
+        # 10.0.0.4 has 4,435 real events but very few of them alerts).
+        # (2) this no longer depends on ChromaDB/embeddings being
+        # reachable at all for the common case of "tell me about IP X" --
+        # it works directly off the same raw log file /stats and /logs
+        # already read, so IP-specific questions stay grounded even during
+        # a ChromaDB outage like the one this project hit during testing.
         confirmed_no_data_ips = []
         if ip_match:
+            all_logs = load_logs()
             extra_docs = []
             for ip in ip_match:
-                ip_docs = retriever.invoke(f"src_ip {ip} alert")
-                matched = [d for d in ip_docs if
-                           d.metadata.get('src_ip') == ip or
-                           d.metadata.get('dest_ip') == ip]
-                if not matched:
+                real_events = [l for l in all_logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
+                if not real_events:
                     confirmed_no_data_ips.append(ip)
-                extra_docs += matched
+                    continue
+                # Build real text snippets directly from the matched raw
+                # events -- same shape of information the LLM would have
+                # gotten from ChromaDB, just sourced without needing it.
+                for e in real_events[:10]:
+                    text = f"Event: {e.get('event_type','unknown')} | Time: {e.get('timestamp','unknown')}\nSource: {e.get('src_ip','')}:{e.get('src_port','?')} → Destination: {e.get('dest_ip','')}:{e.get('dest_port','?')}"
+                    if e.get('event_type') == 'alert':
+                        alert = e.get('alert', {})
+                        text += f"\nAlert: {alert.get('signature','unknown')} | Severity: {alert.get('severity','?')} | Category: {alert.get('category','?')}"
+                    extra_docs.append(type('Doc', (), {'page_content': text, 'metadata': {'src_ip': e.get('src_ip',''), 'dest_ip': e.get('dest_ip',''), 'event_type': e.get('event_type','')}})())
             docs = extra_docs + docs
 
         # Deduplicate while preserving order
@@ -951,6 +992,7 @@ After everything above, add one final line starting with exactly SPOKEN_SUMMARY:
     answer, spoken_summary = _extract_spoken_summary(answer)
 
     resp = {'answer': answer, 'model_used': used_model, 'spoken_summary': spoken_summary}
+    _log_ask_event(question, model, f"answered via {used_model}" + (" (fallback)" if fell_back else ""))
     if fell_back:
         resp['fallback_used'] = True
         resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
@@ -1541,10 +1583,34 @@ def _run_rag_rebuild():
     /rebuild-index endpoint (no overwrite, indexes the live honeypot-synced
     data as-is), and the automatic background rebuild loop below. Raises on
     failure -- callers decide how to report that (HTTP error vs a log line
-    from a background thread)."""
+    from a background thread).
+
+    Captures the child process's real stdout/stderr and includes the last
+    part of it in the raised exception -- subprocess.run(..., check=True)
+    alone only gives a generic "exit status 1" message with no indication
+    of what rag_setup.py itself actually failed on, which made a real
+    embeddings-API failure invisible in both /pipeline-status and Render's
+    logs until this was added."""
     rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
     ai_dir = os.path.join(os.path.dirname(__file__), '..', 'ai')
-    subprocess.run([sys.executable, rag_script], timeout=180, check=True, cwd=ai_dir)
+    result = subprocess.run(
+        [sys.executable, rag_script], timeout=180,
+        cwd=ai_dir, capture_output=True, text=True,
+    )
+    # Always print the child's own output to Render's log stream, pass or
+    # fail -- this is what "[embeddings] computed N/N" progress lines and
+    # any real traceback actually look like, previously invisible.
+    if result.stdout:
+        print(f"[rag_setup stdout]\n{result.stdout}")
+    if result.stderr:
+        print(f"[rag_setup stderr]\n{result.stderr}")
+    if result.returncode != 0:
+        # The real traceback is almost always the last few lines of
+        # stderr -- surfacing that directly in the exception message means
+        # it shows up in index_rebuild_status["last_error"] via
+        # /pipeline-status too, not just buried in the full log stream.
+        tail = (result.stderr or result.stdout or "").strip().splitlines()[-8:]
+        raise RuntimeError(f"rag_setup.py exited {result.returncode}: " + " | ".join(tail))
 
 
 @app.route('/rebuild-index', methods=['POST'])
@@ -1566,7 +1632,9 @@ def rebuild_index():
         })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "ChromaDB rebuild timed out"}), 500
-    except subprocess.CalledProcessError as e:
+    except RuntimeError as e:
+        # Now includes the real tail of rag_setup.py's own stderr, not
+        # just a generic "exit status 1" -- the actual root cause.
         return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
 
 
@@ -1575,23 +1643,32 @@ def pipeline_status():
     """Every value here is real, live state -- not a mock-up. Honeypot
     sync status comes from honeypot_log_sync's own module-level dict,
     updated at actual connection/pull events in that background thread.
-    Index rebuild status is the same pattern, local to this module.
-    Event/request counts come directly from load_logs() and a real
-    request counter. Built specifically to back an honest pipeline
+    Index rebuild status and chat activity are the same pattern, local to
+    this module. Event/request counts come directly from load_logs() and
+    real activity logs. Built specifically to back an honest pipeline
     visualization, not a static diagram with invented activity."""
     try:
         from ai.honeypot_log_sync import sync_status as honeypot_sync_status
     except Exception:
-        honeypot_sync_status = {"connected": False, "last_connected_at": None, "last_pull_at": None, "last_pull_bytes": 0, "last_error": "module not loaded"}
+        honeypot_sync_status = {"connected": False, "last_connected_at": None, "last_pull_at": None, "last_pull_bytes": 0, "last_error": "module not loaded", "currently_active": False, "recent_events": []}
 
     logs = load_logs()
     chroma_ok, _ = _ping_with_timeout(lambda: vectorstore.get(limit=1), 5) if vectorstore else (False, "not configured")
 
+    # Real breakdown of what's actually indexed right now -- directly from
+    # the same logs the rest of the app serves, not a separate estimate.
+    event_breakdown = {}
+    for l in logs:
+        et = l.get('event_type', 'unknown')
+        event_breakdown[et] = event_breakdown.get(et, 0) + 1
+
     return jsonify({
         "honeypot_sync": honeypot_sync_status,
         "index_rebuild": index_rebuild_status,
+        "chat_activity": ask_activity,
         "chromadb_reachable": chroma_ok,
         "current_indexed_events": len(logs),
+        "current_event_breakdown": event_breakdown,
         "total_ask_requests_served": _ask_request_count,
         "deployed": DEPLOYED,
     })
@@ -1630,7 +1707,9 @@ def upload():
         })
     except subprocess.TimeoutExpired:
         return jsonify({"error": "ChromaDB rebuild timed out"}), 500
-    except subprocess.CalledProcessError as e:
+    except RuntimeError as e:
+        # Now includes the real tail of rag_setup.py's own stderr, not
+        # just a generic "exit status 1" -- the actual root cause.
         return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
 
 
@@ -2013,7 +2092,8 @@ def hermes_agent():
         return jsonify({"error": "No task provided"}), 400
 
     try:
-        from ai.hermes_agent import run_hermes_agent
+        from ai.hermes_agent import run_hermes_agent, set_flask_client
+        set_flask_client(app.test_client())
         result = run_hermes_agent(task, model=model)
         return jsonify(result)
     except Exception as e:
@@ -2028,7 +2108,8 @@ def hermes_agent():
         # to share that file so this can be wired in properly.
         if DEPLOYED and _is_connection_error(err_msg):
             try:
-                from ai.hermes_agent import run_hermes_agent as _retry
+                from ai.hermes_agent import run_hermes_agent as _retry, set_flask_client as _set_client_retry
+                _set_client_retry(app.test_client())
                 result = _retry(task, model=DEFAULT_CLOUD_MODEL)
                 result["fallback_used"] = True
                 result["fallback_note"] = f"{model} wasn't reachable here, ran with {DEFAULT_CLOUD_MODEL} instead"
@@ -2720,7 +2801,19 @@ index_rebuild_status = {
     "last_rebuilt_at": None,
     "last_event_count": None,
     "last_error": None,
+    "recent_events": [],  # last 15 real rebuild events: {"at": iso, "type": "started"|"completed"|"error", "detail": str}
 }
+
+MAX_REBUILD_EVENTS = 15
+
+
+def _log_rebuild_event(event_type, detail):
+    index_rebuild_status["recent_events"].append({
+        "at": datetime.utcnow().isoformat() + "Z",
+        "type": event_type,
+        "detail": detail,
+    })
+    index_rebuild_status["recent_events"] = index_rebuild_status["recent_events"][-MAX_REBUILD_EVENTS:]
 
 
 def _index_rebuild_loop():
@@ -2749,17 +2842,20 @@ def _index_rebuild_loop():
             if os.path.exists(eve_path) and os.path.getsize(eve_path) > 0:
                 print("[index_rebuild] starting ChromaDB rebuild from live honeypot data...")
                 index_rebuild_status["in_progress"] = True
+                _log_rebuild_event("started", "rebuild from logs/eve.json")
                 _run_rag_rebuild()
                 index_rebuild_status["in_progress"] = False
                 index_rebuild_status["last_rebuilt_at"] = datetime.utcnow().isoformat() + "Z"
                 index_rebuild_status["last_event_count"] = len(load_logs())
                 index_rebuild_status["last_error"] = None
+                _log_rebuild_event("completed", f"{index_rebuild_status['last_event_count']} events indexed")
                 print("[index_rebuild] rebuild complete")
             else:
                 print("[index_rebuild] logs/eve.json still not available -- skipping this cycle")
         except Exception as e:
             index_rebuild_status["in_progress"] = False
             index_rebuild_status["last_error"] = str(e)[:200]
+            _log_rebuild_event("error", str(e)[:150])
             print(f"[index_rebuild] rebuild failed: {e} -- will retry next cycle")
         time.sleep(REBUILD_INTERVAL_SECONDS)
 

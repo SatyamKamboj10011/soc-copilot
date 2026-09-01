@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
 import { InvestigationPage } from "./InvestigationPage";
-import PipelineStatus from "./PipelineStatusPage";
+import PipelineStatus from "./PipelineStatus";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, getDoc, serverTimestamp, increment } from "firebase/firestore";
 
@@ -1365,7 +1365,7 @@ setLoading(false);
                 <div className="ndot" style={{background: pendingActions.length>0 ? "var(--purple)" : "var(--text-dim)", boxShadow: pendingActions.length>0 ? "0 0 6px var(--purple)" : "none", animation: pendingActions.length>0 ? "blink 1.4s infinite" : "none"}}/>
                 {pendingActions.length} PENDING
               </div>
-              <div className="status-pill"><div className={`ndot ${health?.ollama==="ok"?"ndot-cyan":"ndot-red"}`}/>AI {health?.ollama==="ok"?"READY":"OFFLINE"}</div>
+              <div className="status-pill"><div className={`ndot ${(health?.ollama==="ok"||health?.cloud==="ok")?"ndot-cyan":"ndot-red"}`}/>AI {(health?.ollama==="ok"||health?.cloud==="ok")?"READY":"OFFLINE"}</div>
             </div>
             <div className="nav-time"><NavClock/></div>
             <div className="user-pill"><div className="user-avatar">{username[0].toUpperCase()}</div>{username.toUpperCase()}</div>
