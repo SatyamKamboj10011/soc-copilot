@@ -23,6 +23,7 @@ import os
 import sys
 import time
 import threading
+from datetime import datetime, timezone
 
 import paramiko
 
@@ -54,6 +55,20 @@ INITIAL_PULL_BYTES = 8 * 1024 * 1024  # 8MB
 # Tracks the last-seen remote file size per path, across polls, so we can
 # skip re-downloading a file that hasn't changed.
 _last_sizes = {}
+
+# Real, live status -- updated at every actual connection attempt and
+# every actual pull, not simulated. app.py imports this directly (same
+# process, different thread -- simple dict reads/writes are safe enough
+# here under the GIL for a status display, no lock needed) to expose
+# genuine sync state via /pipeline-status, instead of a visualization
+# with nothing real behind it.
+sync_status = {
+    "connected": False,
+    "last_connected_at": None,
+    "last_pull_at": None,
+    "last_pull_bytes": 0,
+    "last_error": None,
+}
 
 
 def _connect():
@@ -134,6 +149,8 @@ def _sync_once(sftp):
                 # this cold-start branch.
                 _last_sizes[remote_path] = remote_size
                 added = len(new_data)
+                sync_status["last_pull_at"] = datetime.now(timezone.utc).isoformat()
+                sync_status["last_pull_bytes"] = added
                 print(f"[honeypot_log_sync] pulled {os.path.basename(remote_path)} tail (+{added} bytes)")
                 continue
             else:
@@ -150,6 +167,8 @@ def _sync_once(sftp):
 
             added = remote_size - last_size
             _last_sizes[remote_path] = remote_size
+            sync_status["last_pull_at"] = datetime.now(timezone.utc).isoformat()
+            sync_status["last_pull_bytes"] = added
             print(f"[honeypot_log_sync] pulled {os.path.basename(remote_path)} (+{added} bytes, {remote_size} total)")
         except Exception as e:
             print(f"[honeypot_log_sync] transfer failed for {remote_path}: {e}")
@@ -164,9 +183,14 @@ def _run_loop():
                 client = _connect()
                 sftp = client.open_sftp()
                 print(f"[honeypot_log_sync] connected to {HONEYPOT_HOST}")
+                sync_status["connected"] = True
+                sync_status["last_connected_at"] = datetime.now(timezone.utc).isoformat()
+                sync_status["last_error"] = None
             _sync_once(sftp)
         except Exception as e:
             print(f"[honeypot_log_sync] connection error: {e} -- reconnecting next cycle")
+            sync_status["connected"] = False
+            sync_status["last_error"] = str(e)[:200]
             try:
                 if client:
                     client.close()

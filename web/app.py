@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import threading
 import time
+import requests
 import uuid
 from langgraph.func import task
 from werkzeug.utils import secure_filename
@@ -289,21 +290,30 @@ def _is_connection_error(err_msg):
     ])
 
 
+_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral"]
+
+
 def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
     """Runs `prompt` through `model` and returns (answer, model_used,
     fell_back). Centralises the resilience behaviour so /ask,
     attacker-profile, what-if, and the compliance health check all get the
     same protection instead of each having to remember to implement it.
 
-    If `model` resolves to a local Ollama model and the call fails with a
-    connection error (i.e. no Ollama actually running here) while
-    DEPLOYED=true, retries ONCE against DEFAULT_CLOUD_MODEL instead of
-    hard-failing -- so a demo running locally with Ollama up behaves
-    exactly as before (no fallback ever triggers, nothing changes), but the
-    same code deployed on Render recovers automatically instead of
-    breaking for anyone who ends up on a local-model code path. Any other
-    failure (bad API key, genuine rate limit, real bug) is re-raised
-    unchanged so callers keep their existing specific error handling.
+    On a connection error (no local Ollama running) or a genuine rate-limit
+    error, cycles through ALL free cloud providers in priority order
+    (groq -> gemini -> mistral, skipping whichever one just failed) instead
+    of giving up after one fallback attempt. This is what makes "free with
+    no limit barrier" actually true in practice: three independent free
+    tiers being rate-limited at the exact same moment is very unlikely,
+    even though any single one of them can be on its own. A genuinely
+    different failure (bad API key, real bug) is never masked by this loop
+    -- it's re-raised immediately so callers keep their existing specific
+    error handling for that.
+
+    Falls back regardless of whether the ORIGINAL pick was local or cloud
+    -- previously this only triggered for local models, so explicitly
+    picking e.g. Groq and having Groq itself rate-limit produced a hard
+    failure instead of trying another free provider.
     """
     llm, llm_type = get_llm(model, api_key)
     try:
@@ -312,11 +322,28 @@ def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
         return answer, model, False
     except Exception as e:
         err_msg = str(e)
-        if allow_fallback and llm_type == "local" and DEPLOYED and _is_connection_error(err_msg):
-            fallback_llm, _ = get_llm(DEFAULT_CLOUD_MODEL, None)
-            answer = fallback_llm.invoke(prompt).content
-            return answer, DEFAULT_CLOUD_MODEL, True
-        raise
+        should_try_fallback = allow_fallback and DEPLOYED and (_is_connection_error(err_msg) or _is_rate_limit_error(err_msg))
+        if not should_try_fallback:
+            raise
+
+        candidates = [DEFAULT_CLOUD_MODEL] + [p for p in _CLOUD_PROVIDER_PRIORITY if p != DEFAULT_CLOUD_MODEL]
+        candidates = [c for c in candidates if c != model]  # don't retry the one that just failed
+
+        for candidate in candidates:
+            try:
+                # Never pass the original api_key to a fallback provider --
+                # a key for Mistral isn't valid for Groq/Gemini. Fallback
+                # attempts always use the server's own free-tier key.
+                fallback_llm, _ = get_llm(candidate, None)
+                answer = fallback_llm.invoke(prompt).content
+                return answer, candidate, True
+            except Exception as fallback_err:
+                fallback_msg = str(fallback_err)
+                if _is_connection_error(fallback_msg) or _is_rate_limit_error(fallback_msg):
+                    continue  # this one's also down/limited -- try the next
+                raise  # a genuinely different error -- surface it, don't mask it
+
+        raise  # every free provider was down or rate-limited
 
 
 # eve.json is now genuinely large (growing continuously from real honeypot
@@ -631,8 +658,13 @@ Rewritten question:"""
         return question
 
 
+_ask_request_count = 0
+
+
 @app.route('/ask', methods=['POST'])
 def ask():
+    global _ask_request_count
+    _ask_request_count += 1
     data        = request.json
     question    = data.get('question', '')
     model       = data.get('model', 'ollama')
@@ -715,13 +747,27 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
         ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', resolved_question)
         if not ip_match and last_ai_text:
             ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', last_ai_text)
+        # Tracks IPs the question specifically asked about that have ZERO
+        # exact metadata matches anywhere in the real data -- this is a
+        # precise, code-verified signal (not a guess) that gets injected
+        # into the prompt as a hard constraint below. Confirmed by direct
+        # evidence: an LLM was given real (but irrelevant-to-that-IP)
+        # similarity-matched context and fabricated a detailed report
+        # about an IP that /search independently confirmed doesn't exist
+        # anywhere in the logs -- generic top-K similarity results alone
+        # don't stop that, since they always return SOMETHING regardless
+        # of whether it's actually relevant to the specific IP asked about.
+        confirmed_no_data_ips = []
         if ip_match:
             extra_docs = []
             for ip in ip_match:
                 ip_docs = retriever.invoke(f"src_ip {ip} alert")
-                extra_docs += [d for d in ip_docs if
-                               d.metadata.get('src_ip') == ip or
-                               d.metadata.get('dest_ip') == ip]
+                matched = [d for d in ip_docs if
+                           d.metadata.get('src_ip') == ip or
+                           d.metadata.get('dest_ip') == ip]
+                if not matched:
+                    confirmed_no_data_ips.append(ip)
+                extra_docs += matched
             docs = extra_docs + docs
 
         # Deduplicate while preserving order
@@ -731,7 +777,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
             if d.page_content not in seen:
                 seen.add(d.page_content)
                 unique_docs.append(d)
-        return unique_docs[:15]
+        return unique_docs[:15], confirmed_no_data_ips
 
     # Bounded at 15s total for the whole retrieval sequence (up to 4
     # retriever.invoke() calls chained together above) -- without this, an
@@ -741,7 +787,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     # docs degrades to [] -- the prompt below already instructs the model to
     # say plainly when it has no relevant log data, so an empty context
     # produces an honest "not available" answer instead of a crash.
-    docs = _call_with_timeout(_do_retrieval, 15, default=[])
+    docs, confirmed_no_data_ips = _call_with_timeout(_do_retrieval, 15, default=([], []))
 
     context = "\n\n".join([d.page_content for d in docs])
     context = re.sub(
@@ -761,13 +807,30 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     # follow.
     SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama_llama32"}
 
+    # Hard, code-verified constraint -- not a soft instruction. These IPs
+    # were specifically named in the question and confirmed (via exact
+    # metadata match against the real data, not a guess) to have ZERO
+    # matching log entries. Confirmed necessary by direct evidence: a
+    # model given real-but-irrelevant similarity-matched context still
+    # fabricated a detailed report about an IP that genuinely doesn't
+    # exist anywhere in the logs. This block is deliberately blunt and
+    # repeated (both before and after the log data) since a single
+    # mention earlier in a long prompt has already been shown to get lost.
+    no_data_warning = ""
+    if confirmed_no_data_ips:
+        ip_list = ", ".join(confirmed_no_data_ips)
+        no_data_warning = f"""
+
+CONFIRMED: {ip_list} does NOT appear anywhere in the actual log data below. This was verified directly against the real data, not assumed. You MUST NOT describe any alerts, activity, signatures, ports, or timestamps for {ip_list} -- doing so would be fabrication, not analysis. Your answer must state plainly that no log data exists for {ip_list}, even if you have general knowledge about this IP from elsewhere -- that outside knowledge is NOT this deployment's log data and must not be presented as if it were."""
+
     if model in SIMPLE_PROMPT_MODELS:
-        prompt = f"""You are SIRA, a security assistant. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If the log data below does not answer the question, say so plainly.
+        prompt = f"""You are SIRA, a security assistant. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If the log data below does not answer the question, say so plainly.{no_data_warning}
 
 Log Data:
 {context}
 
 Question: {resolved_question}
+{no_data_warning}
 
 Remember: only use facts from the log data above. Answer clearly and concisely.
 
@@ -779,6 +842,7 @@ Address the analyst as "{honorific}" occasionally.
 Never ramble. Lead with the most critical information first.
 Be definitive — never say "I think" or "maybe".
 Short sentences. Maximum impact per word.
+{no_data_warning}
 
 STRICT RULES:
 - Only use facts from the log data below — never invent details
@@ -897,6 +961,121 @@ After everything above, add one final line starting with exactly SPOKEN_SUMMARY:
 def get_logs():
     logs = load_logs()
     return jsonify(logs[:50])
+
+
+@app.route('/logs/grouped', methods=['GET'])
+def get_logs_grouped():
+    """Collapses repeated identical alerts (same signature, same src_ip,
+    same dest_ip) into one row with a real count and a real first/last-seen
+    time range, instead of listing every single occurrence separately.
+    This is how real SOC tools handle alert fatigue -- 200 identical
+    brute-force attempts from the same IP is one thing to review, not 200
+    rows to scroll past. Every count/timestamp here comes directly from
+    actual log entries; nothing is estimated or invented."""
+    logs = load_logs()
+    groups = {}
+    for l in logs:
+        if l.get('event_type') != 'alert':
+            continue
+        alert = l.get('alert', {})
+        sig = alert.get('signature', 'unknown')
+        src = l.get('src_ip', '')
+        dst = l.get('dest_ip', '')
+        key = (sig, src, dst)
+        ts = l.get('timestamp', '')
+
+        if key not in groups:
+            groups[key] = {
+                "signature": sig,
+                "src_ip": src,
+                "dest_ip": dst,
+                "category": alert.get('category', ''),
+                "severity": alert.get('severity', ''),
+                "count": 0,
+                "first_seen": ts,
+                "last_seen": ts,
+            }
+        g = groups[key]
+        g["count"] += 1
+        if ts:
+            if not g["first_seen"] or ts < g["first_seen"]:
+                g["first_seen"] = ts
+            if not g["last_seen"] or ts > g["last_seen"]:
+                g["last_seen"] = ts
+
+    result = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+    return jsonify(result[:100])
+
+
+# Deliberately small and conservative -- only patterns genuinely
+# well-established enough to state with confidence. Matched against
+# Suricata's own real alert.category / signature text, never invented.
+# Anything that doesn't clearly match one of these returns no mapping at
+# all rather than guessing at a technique ID.
+_MITRE_CATEGORY_PATTERNS = [
+    (["scan", "reconnaissance"], "T1595", "Active Scanning"),
+    (["brute force", "brute-force", "credential"], "T1110", "Brute Force"),
+    (["web application attack", "sql injection", "xss", "cross site"], "T1190", "Exploit Public-Facing Application"),
+    (["trojan", "malware", "ingress tool"], "T1105", "Ingress Tool Transfer"),
+    (["denial of service", " dos ", "ddos"], "T1499", "Endpoint Denial of Service"),
+    (["administrator privilege", "privilege escalation", "priv esc"], "T1068", "Exploitation for Privilege Escalation"),
+    (["command and control", "c2 ", "c&c"], "T1071", "Application Layer Protocol"),
+]
+
+
+def _map_to_mitre(signature, category):
+    """Returns {technique_id, technique_name} or None if nothing matched
+    confidently. Matches against the REAL signature + category text of the
+    alert -- never assigns a technique the text doesn't actually support."""
+    haystack = f"{signature} {category}".lower()
+    for keywords, technique_id, technique_name in _MITRE_CATEGORY_PATTERNS:
+        if any(kw in haystack for kw in keywords):
+            return {"technique_id": technique_id, "technique_name": technique_name}
+    return None
+
+
+@app.route('/logs/grouped-mitre', methods=['GET'])
+def get_logs_grouped_mitre():
+    """Same grouping as /logs/grouped, with a best-effort MITRE ATT&CK
+    technique attached where the signature/category text confidently
+    supports one. This is a coarse, category-level heuristic -- not a
+    definitive per-CVE attribution -- and entries with no confident match
+    simply have mitre: null rather than a guessed technique."""
+    logs = load_logs()
+    groups = {}
+    for l in logs:
+        if l.get('event_type') != 'alert':
+            continue
+        alert = l.get('alert', {})
+        sig = alert.get('signature', 'unknown')
+        src = l.get('src_ip', '')
+        dst = l.get('dest_ip', '')
+        category = alert.get('category', '')
+        key = (sig, src, dst)
+        ts = l.get('timestamp', '')
+
+        if key not in groups:
+            groups[key] = {
+                "signature": sig,
+                "src_ip": src,
+                "dest_ip": dst,
+                "category": category,
+                "severity": alert.get('severity', ''),
+                "count": 0,
+                "first_seen": ts,
+                "last_seen": ts,
+                "mitre": _map_to_mitre(sig, category),
+            }
+        g = groups[key]
+        g["count"] += 1
+        if ts:
+            if not g["first_seen"] or ts < g["first_seen"]:
+                g["first_seen"] = ts
+            if not g["last_seen"] or ts > g["last_seen"]:
+                g["last_seen"] = ts
+
+    result = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+    return jsonify(result[:100])
 
 
 @app.route('/models', methods=['GET'])
@@ -1096,6 +1275,59 @@ def top_ips():
     return jsonify(result)
 
 
+_geoip_cache = {}
+
+
+def _lookup_geoip(ip):
+    """Free, no-key IP geolocation via ip-api.com. That service allows 45
+    requests/minute per source IP -- caching every result in memory means
+    the same attacker IP (which shows up repeatedly in real traffic) is
+    never looked up twice, keeping actual usage far under that limit even
+    under heavy use. Returns None on any failure -- never invents a
+    location for an IP that couldn't be resolved."""
+    if ip in _geoip_cache:
+        return _geoip_cache[ip]
+    try:
+        resp = requests.get(
+            f"http://ip-api.com/json/{ip}",
+            params={"fields": "status,country,countryCode,city,lat,lon,isp"},
+            timeout=5,
+        )
+        data = resp.json()
+        if data.get("status") == "success":
+            result = {
+                "country": data.get("country"),
+                "country_code": data.get("countryCode"),
+                "city": data.get("city"),
+                "lat": data.get("lat"),
+                "lon": data.get("lon"),
+                "isp": data.get("isp"),
+            }
+        else:
+            result = None
+    except Exception:
+        result = None
+    _geoip_cache[ip] = result
+    return result
+
+
+@app.route('/geoip/top-ips', methods=['GET'])
+def geoip_top_ips():
+    """Top attacker IPs enriched with real geolocation data, for the
+    threat map. Any IP that can't be resolved (lookup failure, private/
+    reserved range, etc.) is simply omitted -- never given a guessed or
+    placeholder location."""
+    logs = load_logs()
+    limit = int(request.args.get('limit', 15))
+    ip_counts = Counter(l.get('src_ip') for l in logs if l.get('src_ip'))
+    result = []
+    for ip, count in ip_counts.most_common(limit):
+        geo = _lookup_geoip(ip)
+        if geo:
+            result.append({"ip": ip, "count": count, **geo})
+    return jsonify(result)
+
+
 @app.route('/zeek-logs', methods=['GET'])
 def zeek_logs():
     zeek_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'conn.log')
@@ -1173,6 +1405,136 @@ def correlate_ip():
     })
 
 
+@app.route('/attention-items', methods=['GET'])
+def attention_items():
+    """Synthesizes existing real data sources into one prioritized list of
+    what actually needs attention right now, instead of requiring someone
+    to check five separate panels. Every item is pulled directly from real
+    data already served elsewhere (top-ips, pending_actions, Sentinel
+    machines) -- nothing here is invented, estimated, or scored by a
+    model; it's straightforward aggregation of real counts and real
+    stored rows."""
+    from ai.hermes_agent import _is_internal_or_platform_ip
+
+    items = []
+
+    # 1. Top external attacker by volume (internal/platform IPs excluded,
+    # same filter Hermes itself uses, imported rather than duplicated)
+    logs = load_logs()
+    ip_counts = Counter(
+        l.get('src_ip') for l in logs
+        if l.get('src_ip') and not _is_internal_or_platform_ip(l.get('src_ip'))
+    )
+    if ip_counts:
+        top_ip, top_count = ip_counts.most_common(1)[0]
+        items.append({
+            "priority": "high",
+            "type": "top_attacker",
+            "title": f"{top_ip} is the top external attacker",
+            "detail": f"{top_count} events in current log window",
+            "ip": top_ip,
+        })
+
+    # 2. Pending actions awaiting human approval
+    try:
+        conn = get_db()
+        pending = conn.execute(
+            "SELECT COUNT(*) AS c FROM pending_actions WHERE status = 'pending'"
+        ).fetchone()
+        conn.close()
+        pending_count = pending['c'] if pending else 0
+        if pending_count > 0:
+            items.append({
+                "priority": "high",
+                "type": "pending_actions",
+                "title": f"{pending_count} action{'s' if pending_count != 1 else ''} awaiting approval",
+                "detail": "Proposed by Hermes, not yet executed",
+            })
+    except Exception:
+        pass  # table may not exist in every deployment state -- don't fail the whole widget over it
+
+    # 3. Flagged Sentinel endpoints
+    try:
+        conn = get_db()
+        flagged = conn.execute(
+            "SELECT COUNT(*) AS c FROM sentinel_machines WHERE alert = 1"
+        ).fetchone()
+        conn.close()
+        flagged_count = flagged['c'] if flagged else 0
+        if flagged_count > 0:
+            items.append({
+                "priority": "medium",
+                "type": "flagged_endpoints",
+                "title": f"{flagged_count} Sentinel endpoint{'s' if flagged_count != 1 else ''} flagged",
+                "detail": "Suspicious outbound connection detected",
+            })
+    except Exception:
+        pass
+
+    # 4. Recent Rustinel EDR detections, if that's running
+    try:
+        rres = requests.get(f"http://127.0.0.1:{os.getenv('PORT', '5000')}/rustinel-alerts", params={"limit": 5}, timeout=3)
+        rustinel_alerts = rres.json()
+        if rustinel_alerts:
+            items.append({
+                "priority": "high",
+                "type": "rustinel_detections",
+                "title": f"{len(rustinel_alerts)} recent Rustinel EDR detection{'s' if len(rustinel_alerts) != 1 else ''}",
+                "detail": rustinel_alerts[0].get('rule_name', '') if rustinel_alerts else "",
+            })
+    except Exception:
+        pass
+
+    # 5. Total alert count, as a baseline item if nothing more specific stood out
+    alert_count = sum(1 for l in logs if l.get('event_type') == 'alert')
+    if alert_count > 0:
+        items.append({
+            "priority": "low",
+            "type": "alert_volume",
+            "title": f"{alert_count} total alerts in current log window",
+            "detail": f"Across {len(ip_counts)} unique external source IPs",
+        })
+
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    items.sort(key=lambda i: priority_order.get(i["priority"], 3))
+    return jsonify(items[:5])
+
+
+@app.route('/attacker-timeline/<ip>', methods=['GET'])
+def attacker_timeline(ip):
+    """Every real log entry involving this IP (as source or destination),
+    sorted chronologically. This is the raw sequence of what actually
+    happened -- no narrative generated, no gaps filled in -- for viewing
+    one attacker's activity as a timeline rather than scattered rows."""
+    logs = load_logs()
+    events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
+    events.sort(key=lambda l: l.get('timestamp', ''))
+
+    timeline = []
+    for e in events:
+        entry = {
+            "timestamp": e.get('timestamp', ''),
+            "event_type": e.get('event_type', ''),
+            "src_ip": e.get('src_ip', ''),
+            "dest_ip": e.get('dest_ip', ''),
+            "dest_port": e.get('dest_port', ''),
+            "proto": e.get('proto', ''),
+        }
+        if e.get('event_type') == 'alert':
+            alert = e.get('alert', {})
+            entry["signature"] = alert.get('signature', '')
+            entry["severity"] = alert.get('severity', '')
+        elif e.get('event_type') == 'dns':
+            entry["query"] = e.get('dns', {}).get('rrname', '')
+        elif e.get('event_type') == 'http':
+            http = e.get('http', {})
+            entry["method"] = http.get('http_method', '')
+            entry["hostname"] = http.get('hostname', '')
+        timeline.append(entry)
+
+    return jsonify({"ip": ip, "total_events": len(timeline), "timeline": timeline[:200]})
+
+
 def _run_rag_rebuild():
     """Runs rag_setup.py against whatever's currently in logs/eve.json --
     shared by /upload (after it overwrites that file), the manual
@@ -1206,6 +1568,33 @@ def rebuild_index():
         return jsonify({"error": "ChromaDB rebuild timed out"}), 500
     except subprocess.CalledProcessError as e:
         return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
+
+
+@app.route('/pipeline-status', methods=['GET'])
+def pipeline_status():
+    """Every value here is real, live state -- not a mock-up. Honeypot
+    sync status comes from honeypot_log_sync's own module-level dict,
+    updated at actual connection/pull events in that background thread.
+    Index rebuild status is the same pattern, local to this module.
+    Event/request counts come directly from load_logs() and a real
+    request counter. Built specifically to back an honest pipeline
+    visualization, not a static diagram with invented activity."""
+    try:
+        from ai.honeypot_log_sync import sync_status as honeypot_sync_status
+    except Exception:
+        honeypot_sync_status = {"connected": False, "last_connected_at": None, "last_pull_at": None, "last_pull_bytes": 0, "last_error": "module not loaded"}
+
+    logs = load_logs()
+    chroma_ok, _ = _ping_with_timeout(lambda: vectorstore.get(limit=1), 5) if vectorstore else (False, "not configured")
+
+    return jsonify({
+        "honeypot_sync": honeypot_sync_status,
+        "index_rebuild": index_rebuild_status,
+        "chromadb_reachable": chroma_ok,
+        "current_indexed_events": len(logs),
+        "total_ask_requests_served": _ask_request_count,
+        "deployed": DEPLOYED,
+    })
 
 
 @app.route('/upload', methods=['POST'])
@@ -1249,7 +1638,16 @@ def upload():
 def export():
     logs = load_logs()
     event_type = request.args.get('type', None)
+    query = request.args.get('q', '').strip()
 
+    if query:
+        # Mirrors /search's exact matching logic -- so exporting after
+        # typing something in the Investigation page's search box exports
+        # precisely those matching rows, not everything.
+        logs = [l for l in logs if
+                query in l.get('src_ip', '') or
+                query in l.get('dest_ip', '') or
+                query in l.get('alert', {}).get('signature', '')]
     if event_type:
         logs = [l for l in logs if l.get('event_type') == event_type]
 
@@ -1469,6 +1867,34 @@ def attacker_profile(ip):
     # 6. Ask SIRA to profile the attacker
     docs = _call_with_timeout(lambda: retriever.invoke(f"attacks from {ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
+
+    # events came from an EXACT match against real logs (src_ip/dest_ip ==
+    # ip), unlike `context` above which is generic semantic search and can
+    # return real-but-irrelevant results even when this specific IP has
+    # nothing. If events is genuinely empty, that's a reliable, verified
+    # signal -- confirmed necessary by direct evidence of a model
+    # fabricating a full report for an IP later confirmed (via /search)
+    # to not exist anywhere in the real data.
+    no_real_data = len(events) == 0
+    no_data_instruction = "" if not no_real_data else f"""
+
+CONFIRMED: {ip} has ZERO real events anywhere in the actual logs -- verified directly, not assumed. Do NOT invent a threat classification, tactics, or danger level for an attacker that has no real recorded activity. Instead respond with exactly:
+
+THREAT ACTOR TYPE:
+No data — {ip} does not appear in current log data.
+
+LIKELY INTENT:
+Cannot be assessed — no recorded activity for this IP.
+
+TACTICS:
+- No real events available to analyse.
+
+DANGER LEVEL:
+UNKNOWN — no basis for a rating without real activity data.
+
+RECOMMENDED BLOCK:
+NO — insufficient evidence to justify blocking an IP with no observed activity."""
+
     prompt = f"""You are SIRA — speak like JARVIS from Iron Man. Calm, authoritative, precise. Address the analyst as {honorific} occasionally. Based on the log data, create a threat actor profile for IP {ip}.
 Log context:
 {context}
@@ -1477,6 +1903,7 @@ Attack signatures seen: {', '.join(signatures[:5]) or 'None'}
 Ports targeted: {', '.join(ports[:10]) or 'Unknown'}
 AbuseIPDB score: {abuse_data.get('abuseConfidenceScore', 'Unknown')}
 Country: {geo.get('country', 'Unknown')}
+{no_data_instruction}
 
 Respond EXACTLY in this format:
 
@@ -1771,6 +2198,22 @@ def _execute_add_suricata_rule(rule_text):
         client.close()
 
 
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+
+
+def _send_webhook_alert(message):
+    """Posts to a Discord webhook if one's configured -- completely
+    optional, silently does nothing if DISCORD_WEBHOOK_URL isn't set.
+    Never raises -- a webhook failure should never break the action it's
+    reporting on."""
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=5)
+    except Exception as e:
+        print(f"[webhook] failed to send alert: {e}")
+
+
 @app.route('/propose-action', methods=['POST'])
 def propose_action():
     """Hermes (or SIRA) calls this to propose an action -- it only ever
@@ -1796,6 +2239,16 @@ def propose_action():
     conn.commit()
     action_id = cur.lastrowid
     conn.close()
+
+    # Real trigger, not an arbitrary threshold: this fires exactly when
+    # Hermes (or SIRA) has genuinely proposed a security action, using the
+    # same real target/reason already stored in the row -- nothing
+    # invented or embellished for the notification.
+    _send_webhook_alert(
+        f"🛡️ **SIRA proposed action #{action_id}**: {action_type} on `{target}`\n{reason}\n"
+        f"Awaiting approval in the dashboard."
+    )
+
     return jsonify({"id": action_id, "status": "pending"}), 201
 
 
@@ -2260,6 +2713,15 @@ def compliance_trend():
 
 _index_rebuild_started = False
 
+# Real, live status -- same pattern as honeypot_log_sync's sync_status,
+# updated at actual rebuild events, not simulated.
+index_rebuild_status = {
+    "in_progress": False,
+    "last_rebuilt_at": None,
+    "last_event_count": None,
+    "last_error": None,
+}
+
 
 def _index_rebuild_loop():
     """Waits for honeypot sync to have pulled real data, does an initial
@@ -2286,11 +2748,18 @@ def _index_rebuild_loop():
         try:
             if os.path.exists(eve_path) and os.path.getsize(eve_path) > 0:
                 print("[index_rebuild] starting ChromaDB rebuild from live honeypot data...")
+                index_rebuild_status["in_progress"] = True
                 _run_rag_rebuild()
+                index_rebuild_status["in_progress"] = False
+                index_rebuild_status["last_rebuilt_at"] = datetime.utcnow().isoformat() + "Z"
+                index_rebuild_status["last_event_count"] = len(load_logs())
+                index_rebuild_status["last_error"] = None
                 print("[index_rebuild] rebuild complete")
             else:
                 print("[index_rebuild] logs/eve.json still not available -- skipping this cycle")
         except Exception as e:
+            index_rebuild_status["in_progress"] = False
+            index_rebuild_status["last_error"] = str(e)[:200]
             print(f"[index_rebuild] rebuild failed: {e} -- will retry next cycle")
         time.sleep(REBUILD_INTERVAL_SECONDS)
 
