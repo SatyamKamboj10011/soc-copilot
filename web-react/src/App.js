@@ -653,19 +653,6 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
 
   const PRIORITY_COLORS = { high: "#E15554", medium: "#F0A857", low: "#6B7280" };
 
-  const [attentionItems, setAttentionItems] = useState([]);
-  const [attentionLoading, setAttentionLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`${FLASK_URL}/attention-items`)
-      .then(r => r.json())
-      .then(data => setAttentionItems(Array.isArray(data) ? data : []))
-      .catch(() => {})
-      .finally(() => setAttentionLoading(false));
-  }, []);
-
-  const PRIORITY_COLORS = { high: "#E15554", medium: "#F0A857", low: "#6B7280" };
-
   const alertEvents = alerts.filter(a => a.event_type === "alert");
   const total = alertEvents.length;
 
@@ -711,29 +698,6 @@ function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView })
   return (
     <div style={{ width: "100%", height: "100%", background: "transparent", overflowY: "auto", padding: 20, boxSizing: "border-box" }}>
       <SiraAvatar ref={siraAvatarRef} onOpenFullView={onOpenFullView} />
-
-      <div className="section-label" style={{ padding: 0, marginBottom: 12 }}>Needs Attention</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 22 }}>
-        {attentionLoading && (
-          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)" }}>Loading...</div>
-        )}
-        {!attentionLoading && attentionItems.length === 0 && (
-          <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)" }}>Nothing flagged right now</div>
-        )}
-        {attentionItems.map((item, i) => (
-          <div key={i} style={{
-            display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 10px",
-            borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.03)",
-            borderLeft: `2px solid ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.low}`,
-          }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", marginTop: 4, flexShrink: 0, background: PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.low }} />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: "var(--sans)", fontSize: 11, color: "var(--text)", lineHeight: 1.4 }}>{item.title}</div>
-              {item.detail && <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", marginTop: 2 }}>{item.detail}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
 
       <div className="section-label" style={{ padding: 0, marginBottom: 12 }}>Needs Attention</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 22 }}>
@@ -1169,20 +1133,6 @@ const [sessionId, setSessionId] = useState(() => {
   };
 
   const [micListening, setMicListening] = useState(false);
-  const [ratings, setRatings] = useState({}); // messageId -> "up" | "down", this session
-
-  const rateMessage = async (messageId, rating, questionText, answerText) => {
-    setRatings(prev => ({ ...prev, [messageId]: rating }));
-    try {
-      await setDoc(doc(db, "message_ratings", messageId), {
-        username, rating, question: questionText || "", answer: (answerText || "").slice(0, 2000),
-        model: selectedModel, rated_at: serverTimestamp(),
-      });
-    } catch (e) {
-      console.error("Rating save error:", e);
-    }
-  };
-
   const [ratings, setRatings] = useState({}); // messageId -> "up" | "down", this session
 
   const rateMessage = async (messageId, rating, questionText, answerText) => {
@@ -1683,22 +1633,6 @@ setLoading(false);
                         <>
                           <span style={{color:"var(--accent)",letterSpacing:1}}>⬡ {m.model}</span>
                           <button className="copy-btn" onClick={()=>{navigator.clipboard.writeText(m.text);showToast("Copied");}}>⊕ COPY</button>
-                          {m.id && (
-                            <>
-                              <button
-                                onClick={()=>rateMessage(m.id,"up",messages[i-1]?.text,m.text)}
-                                disabled={ratings[m.id]==="up"}
-                                title="Good answer"
-                                style={{background:"none",border:"none",cursor:ratings[m.id]==="up"?"default":"pointer",color:ratings[m.id]==="up"?"var(--green,#22D97A)":"var(--text-dim)",fontSize:12,padding:"0 4px",opacity:ratings[m.id]==="up"?1:0.6}}
-                              >👍</button>
-                              <button
-                                onClick={()=>rateMessage(m.id,"down",messages[i-1]?.text,m.text)}
-                                disabled={ratings[m.id]==="down"}
-                                title="Poor answer"
-                                style={{background:"none",border:"none",cursor:ratings[m.id]==="down"?"default":"pointer",color:ratings[m.id]==="down"?"var(--red,#E15554)":"var(--text-dim)",fontSize:12,padding:"0 4px",opacity:ratings[m.id]==="down"?1:0.6}}
-                              >👎</button>
-                            </>
-                          )}
                           {m.id && (
                             <>
                               <button
