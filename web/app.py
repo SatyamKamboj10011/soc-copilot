@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import threading
 import time
+import requests
 import uuid
 from langgraph.func import task
 from werkzeug.utils import secure_filename
@@ -289,21 +290,30 @@ def _is_connection_error(err_msg):
     ])
 
 
+_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral"]
+
+
 def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
     """Runs `prompt` through `model` and returns (answer, model_used,
     fell_back). Centralises the resilience behaviour so /ask,
     attacker-profile, what-if, and the compliance health check all get the
     same protection instead of each having to remember to implement it.
 
-    If `model` resolves to a local Ollama model and the call fails with a
-    connection error (i.e. no Ollama actually running here) while
-    DEPLOYED=true, retries ONCE against DEFAULT_CLOUD_MODEL instead of
-    hard-failing -- so a demo running locally with Ollama up behaves
-    exactly as before (no fallback ever triggers, nothing changes), but the
-    same code deployed on Render recovers automatically instead of
-    breaking for anyone who ends up on a local-model code path. Any other
-    failure (bad API key, genuine rate limit, real bug) is re-raised
-    unchanged so callers keep their existing specific error handling.
+    On a connection error (no local Ollama running) or a genuine rate-limit
+    error, cycles through ALL free cloud providers in priority order
+    (groq -> gemini -> mistral, skipping whichever one just failed) instead
+    of giving up after one fallback attempt. This is what makes "free with
+    no limit barrier" actually true in practice: three independent free
+    tiers being rate-limited at the exact same moment is very unlikely,
+    even though any single one of them can be on its own. A genuinely
+    different failure (bad API key, real bug) is never masked by this loop
+    -- it's re-raised immediately so callers keep their existing specific
+    error handling for that.
+
+    Falls back regardless of whether the ORIGINAL pick was local or cloud
+    -- previously this only triggered for local models, so explicitly
+    picking e.g. Groq and having Groq itself rate-limit produced a hard
+    failure instead of trying another free provider.
     """
     llm, llm_type = get_llm(model, api_key)
     try:
@@ -312,11 +322,28 @@ def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
         return answer, model, False
     except Exception as e:
         err_msg = str(e)
-        if allow_fallback and llm_type == "local" and DEPLOYED and _is_connection_error(err_msg):
-            fallback_llm, _ = get_llm(DEFAULT_CLOUD_MODEL, None)
-            answer = fallback_llm.invoke(prompt).content
-            return answer, DEFAULT_CLOUD_MODEL, True
-        raise
+        should_try_fallback = allow_fallback and DEPLOYED and (_is_connection_error(err_msg) or _is_rate_limit_error(err_msg))
+        if not should_try_fallback:
+            raise
+
+        candidates = [DEFAULT_CLOUD_MODEL] + [p for p in _CLOUD_PROVIDER_PRIORITY if p != DEFAULT_CLOUD_MODEL]
+        candidates = [c for c in candidates if c != model]  # don't retry the one that just failed
+
+        for candidate in candidates:
+            try:
+                # Never pass the original api_key to a fallback provider --
+                # a key for Mistral isn't valid for Groq/Gemini. Fallback
+                # attempts always use the server's own free-tier key.
+                fallback_llm, _ = get_llm(candidate, None)
+                answer = fallback_llm.invoke(prompt).content
+                return answer, candidate, True
+            except Exception as fallback_err:
+                fallback_msg = str(fallback_err)
+                if _is_connection_error(fallback_msg) or _is_rate_limit_error(fallback_msg):
+                    continue  # this one's also down/limited -- try the next
+                raise  # a genuinely different error -- surface it, don't mask it
+
+        raise  # every free provider was down or rate-limited
 
 
 # eve.json is now genuinely large (growing continuously from real honeypot
@@ -899,6 +926,121 @@ def get_logs():
     return jsonify(logs[:50])
 
 
+@app.route('/logs/grouped', methods=['GET'])
+def get_logs_grouped():
+    """Collapses repeated identical alerts (same signature, same src_ip,
+    same dest_ip) into one row with a real count and a real first/last-seen
+    time range, instead of listing every single occurrence separately.
+    This is how real SOC tools handle alert fatigue -- 200 identical
+    brute-force attempts from the same IP is one thing to review, not 200
+    rows to scroll past. Every count/timestamp here comes directly from
+    actual log entries; nothing is estimated or invented."""
+    logs = load_logs()
+    groups = {}
+    for l in logs:
+        if l.get('event_type') != 'alert':
+            continue
+        alert = l.get('alert', {})
+        sig = alert.get('signature', 'unknown')
+        src = l.get('src_ip', '')
+        dst = l.get('dest_ip', '')
+        key = (sig, src, dst)
+        ts = l.get('timestamp', '')
+
+        if key not in groups:
+            groups[key] = {
+                "signature": sig,
+                "src_ip": src,
+                "dest_ip": dst,
+                "category": alert.get('category', ''),
+                "severity": alert.get('severity', ''),
+                "count": 0,
+                "first_seen": ts,
+                "last_seen": ts,
+            }
+        g = groups[key]
+        g["count"] += 1
+        if ts:
+            if not g["first_seen"] or ts < g["first_seen"]:
+                g["first_seen"] = ts
+            if not g["last_seen"] or ts > g["last_seen"]:
+                g["last_seen"] = ts
+
+    result = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+    return jsonify(result[:100])
+
+
+# Deliberately small and conservative -- only patterns genuinely
+# well-established enough to state with confidence. Matched against
+# Suricata's own real alert.category / signature text, never invented.
+# Anything that doesn't clearly match one of these returns no mapping at
+# all rather than guessing at a technique ID.
+_MITRE_CATEGORY_PATTERNS = [
+    (["scan", "reconnaissance"], "T1595", "Active Scanning"),
+    (["brute force", "brute-force", "credential"], "T1110", "Brute Force"),
+    (["web application attack", "sql injection", "xss", "cross site"], "T1190", "Exploit Public-Facing Application"),
+    (["trojan", "malware", "ingress tool"], "T1105", "Ingress Tool Transfer"),
+    (["denial of service", " dos ", "ddos"], "T1499", "Endpoint Denial of Service"),
+    (["administrator privilege", "privilege escalation", "priv esc"], "T1068", "Exploitation for Privilege Escalation"),
+    (["command and control", "c2 ", "c&c"], "T1071", "Application Layer Protocol"),
+]
+
+
+def _map_to_mitre(signature, category):
+    """Returns {technique_id, technique_name} or None if nothing matched
+    confidently. Matches against the REAL signature + category text of the
+    alert -- never assigns a technique the text doesn't actually support."""
+    haystack = f"{signature} {category}".lower()
+    for keywords, technique_id, technique_name in _MITRE_CATEGORY_PATTERNS:
+        if any(kw in haystack for kw in keywords):
+            return {"technique_id": technique_id, "technique_name": technique_name}
+    return None
+
+
+@app.route('/logs/grouped-mitre', methods=['GET'])
+def get_logs_grouped_mitre():
+    """Same grouping as /logs/grouped, with a best-effort MITRE ATT&CK
+    technique attached where the signature/category text confidently
+    supports one. This is a coarse, category-level heuristic -- not a
+    definitive per-CVE attribution -- and entries with no confident match
+    simply have mitre: null rather than a guessed technique."""
+    logs = load_logs()
+    groups = {}
+    for l in logs:
+        if l.get('event_type') != 'alert':
+            continue
+        alert = l.get('alert', {})
+        sig = alert.get('signature', 'unknown')
+        src = l.get('src_ip', '')
+        dst = l.get('dest_ip', '')
+        category = alert.get('category', '')
+        key = (sig, src, dst)
+        ts = l.get('timestamp', '')
+
+        if key not in groups:
+            groups[key] = {
+                "signature": sig,
+                "src_ip": src,
+                "dest_ip": dst,
+                "category": category,
+                "severity": alert.get('severity', ''),
+                "count": 0,
+                "first_seen": ts,
+                "last_seen": ts,
+                "mitre": _map_to_mitre(sig, category),
+            }
+        g = groups[key]
+        g["count"] += 1
+        if ts:
+            if not g["first_seen"] or ts < g["first_seen"]:
+                g["first_seen"] = ts
+            if not g["last_seen"] or ts > g["last_seen"]:
+                g["last_seen"] = ts
+
+    result = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+    return jsonify(result[:100])
+
+
 @app.route('/models', methods=['GET'])
 def get_models():
     # This is the single source of truth for every model's display metadata
@@ -1096,6 +1238,59 @@ def top_ips():
     return jsonify(result)
 
 
+_geoip_cache = {}
+
+
+def _lookup_geoip(ip):
+    """Free, no-key IP geolocation via ip-api.com. That service allows 45
+    requests/minute per source IP -- caching every result in memory means
+    the same attacker IP (which shows up repeatedly in real traffic) is
+    never looked up twice, keeping actual usage far under that limit even
+    under heavy use. Returns None on any failure -- never invents a
+    location for an IP that couldn't be resolved."""
+    if ip in _geoip_cache:
+        return _geoip_cache[ip]
+    try:
+        resp = requests.get(
+            f"http://ip-api.com/json/{ip}",
+            params={"fields": "status,country,countryCode,city,lat,lon,isp"},
+            timeout=5,
+        )
+        data = resp.json()
+        if data.get("status") == "success":
+            result = {
+                "country": data.get("country"),
+                "country_code": data.get("countryCode"),
+                "city": data.get("city"),
+                "lat": data.get("lat"),
+                "lon": data.get("lon"),
+                "isp": data.get("isp"),
+            }
+        else:
+            result = None
+    except Exception:
+        result = None
+    _geoip_cache[ip] = result
+    return result
+
+
+@app.route('/geoip/top-ips', methods=['GET'])
+def geoip_top_ips():
+    """Top attacker IPs enriched with real geolocation data, for the
+    threat map. Any IP that can't be resolved (lookup failure, private/
+    reserved range, etc.) is simply omitted -- never given a guessed or
+    placeholder location."""
+    logs = load_logs()
+    limit = int(request.args.get('limit', 15))
+    ip_counts = Counter(l.get('src_ip') for l in logs if l.get('src_ip'))
+    result = []
+    for ip, count in ip_counts.most_common(limit):
+        geo = _lookup_geoip(ip)
+        if geo:
+            result.append({"ip": ip, "count": count, **geo})
+    return jsonify(result)
+
+
 @app.route('/zeek-logs', methods=['GET'])
 def zeek_logs():
     zeek_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'conn.log')
@@ -1171,6 +1366,136 @@ def correlate_ip():
         "total_suricata": len(suricata_events),
         "total_zeek": len(zeek_events)
     })
+
+
+@app.route('/attention-items', methods=['GET'])
+def attention_items():
+    """Synthesizes existing real data sources into one prioritized list of
+    what actually needs attention right now, instead of requiring someone
+    to check five separate panels. Every item is pulled directly from real
+    data already served elsewhere (top-ips, pending_actions, Sentinel
+    machines) -- nothing here is invented, estimated, or scored by a
+    model; it's straightforward aggregation of real counts and real
+    stored rows."""
+    from ai.hermes_agent import _is_internal_or_platform_ip
+
+    items = []
+
+    # 1. Top external attacker by volume (internal/platform IPs excluded,
+    # same filter Hermes itself uses, imported rather than duplicated)
+    logs = load_logs()
+    ip_counts = Counter(
+        l.get('src_ip') for l in logs
+        if l.get('src_ip') and not _is_internal_or_platform_ip(l.get('src_ip'))
+    )
+    if ip_counts:
+        top_ip, top_count = ip_counts.most_common(1)[0]
+        items.append({
+            "priority": "high",
+            "type": "top_attacker",
+            "title": f"{top_ip} is the top external attacker",
+            "detail": f"{top_count} events in current log window",
+            "ip": top_ip,
+        })
+
+    # 2. Pending actions awaiting human approval
+    try:
+        conn = get_db()
+        pending = conn.execute(
+            "SELECT COUNT(*) AS c FROM pending_actions WHERE status = 'pending'"
+        ).fetchone()
+        conn.close()
+        pending_count = pending['c'] if pending else 0
+        if pending_count > 0:
+            items.append({
+                "priority": "high",
+                "type": "pending_actions",
+                "title": f"{pending_count} action{'s' if pending_count != 1 else ''} awaiting approval",
+                "detail": "Proposed by Hermes, not yet executed",
+            })
+    except Exception:
+        pass  # table may not exist in every deployment state -- don't fail the whole widget over it
+
+    # 3. Flagged Sentinel endpoints
+    try:
+        conn = get_db()
+        flagged = conn.execute(
+            "SELECT COUNT(*) AS c FROM sentinel_machines WHERE alert = 1"
+        ).fetchone()
+        conn.close()
+        flagged_count = flagged['c'] if flagged else 0
+        if flagged_count > 0:
+            items.append({
+                "priority": "medium",
+                "type": "flagged_endpoints",
+                "title": f"{flagged_count} Sentinel endpoint{'s' if flagged_count != 1 else ''} flagged",
+                "detail": "Suspicious outbound connection detected",
+            })
+    except Exception:
+        pass
+
+    # 4. Recent Rustinel EDR detections, if that's running
+    try:
+        rres = requests.get(f"http://127.0.0.1:{os.getenv('PORT', '5000')}/rustinel-alerts", params={"limit": 5}, timeout=3)
+        rustinel_alerts = rres.json()
+        if rustinel_alerts:
+            items.append({
+                "priority": "high",
+                "type": "rustinel_detections",
+                "title": f"{len(rustinel_alerts)} recent Rustinel EDR detection{'s' if len(rustinel_alerts) != 1 else ''}",
+                "detail": rustinel_alerts[0].get('rule_name', '') if rustinel_alerts else "",
+            })
+    except Exception:
+        pass
+
+    # 5. Total alert count, as a baseline item if nothing more specific stood out
+    alert_count = sum(1 for l in logs if l.get('event_type') == 'alert')
+    if alert_count > 0:
+        items.append({
+            "priority": "low",
+            "type": "alert_volume",
+            "title": f"{alert_count} total alerts in current log window",
+            "detail": f"Across {len(ip_counts)} unique external source IPs",
+        })
+
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    items.sort(key=lambda i: priority_order.get(i["priority"], 3))
+    return jsonify(items[:5])
+
+
+@app.route('/attacker-timeline/<ip>', methods=['GET'])
+def attacker_timeline(ip):
+    """Every real log entry involving this IP (as source or destination),
+    sorted chronologically. This is the raw sequence of what actually
+    happened -- no narrative generated, no gaps filled in -- for viewing
+    one attacker's activity as a timeline rather than scattered rows."""
+    logs = load_logs()
+    events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
+    events.sort(key=lambda l: l.get('timestamp', ''))
+
+    timeline = []
+    for e in events:
+        entry = {
+            "timestamp": e.get('timestamp', ''),
+            "event_type": e.get('event_type', ''),
+            "src_ip": e.get('src_ip', ''),
+            "dest_ip": e.get('dest_ip', ''),
+            "dest_port": e.get('dest_port', ''),
+            "proto": e.get('proto', ''),
+        }
+        if e.get('event_type') == 'alert':
+            alert = e.get('alert', {})
+            entry["signature"] = alert.get('signature', '')
+            entry["severity"] = alert.get('severity', '')
+        elif e.get('event_type') == 'dns':
+            entry["query"] = e.get('dns', {}).get('rrname', '')
+        elif e.get('event_type') == 'http':
+            http = e.get('http', {})
+            entry["method"] = http.get('http_method', '')
+            entry["hostname"] = http.get('hostname', '')
+        timeline.append(entry)
+
+    return jsonify({"ip": ip, "total_events": len(timeline), "timeline": timeline[:200]})
 
 
 def _run_rag_rebuild():
@@ -1249,7 +1574,16 @@ def upload():
 def export():
     logs = load_logs()
     event_type = request.args.get('type', None)
+    query = request.args.get('q', '').strip()
 
+    if query:
+        # Mirrors /search's exact matching logic -- so exporting after
+        # typing something in the Investigation page's search box exports
+        # precisely those matching rows, not everything.
+        logs = [l for l in logs if
+                query in l.get('src_ip', '') or
+                query in l.get('dest_ip', '') or
+                query in l.get('alert', {}).get('signature', '')]
     if event_type:
         logs = [l for l in logs if l.get('event_type') == event_type]
 
@@ -1771,6 +2105,22 @@ def _execute_add_suricata_rule(rule_text):
         client.close()
 
 
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+
+
+def _send_webhook_alert(message):
+    """Posts to a Discord webhook if one's configured -- completely
+    optional, silently does nothing if DISCORD_WEBHOOK_URL isn't set.
+    Never raises -- a webhook failure should never break the action it's
+    reporting on."""
+    if not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=5)
+    except Exception as e:
+        print(f"[webhook] failed to send alert: {e}")
+
+
 @app.route('/propose-action', methods=['POST'])
 def propose_action():
     """Hermes (or SIRA) calls this to propose an action -- it only ever
@@ -1796,6 +2146,16 @@ def propose_action():
     conn.commit()
     action_id = cur.lastrowid
     conn.close()
+
+    # Real trigger, not an arbitrary threshold: this fires exactly when
+    # Hermes (or SIRA) has genuinely proposed a security action, using the
+    # same real target/reason already stored in the row -- nothing
+    # invented or embellished for the notification.
+    _send_webhook_alert(
+        f"🛡️ **SIRA proposed action #{action_id}**: {action_type} on `{target}`\n{reason}\n"
+        f"Awaiting approval in the dashboard."
+    )
+
     return jsonify({"id": action_id, "status": "pending"}), 201
 
 

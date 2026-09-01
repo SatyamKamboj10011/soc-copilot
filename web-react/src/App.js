@@ -1096,6 +1096,20 @@ const [sessionId, setSessionId] = useState(() => {
   };
 
   const [micListening, setMicListening] = useState(false);
+  const [ratings, setRatings] = useState({}); // messageId -> "up" | "down", this session
+
+  const rateMessage = async (messageId, rating, questionText, answerText) => {
+    setRatings(prev => ({ ...prev, [messageId]: rating }));
+    try {
+      await setDoc(doc(db, "message_ratings", messageId), {
+        username, rating, question: questionText || "", answer: (answerText || "").slice(0, 2000),
+        model: selectedModel, rated_at: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Rating save error:", e);
+    }
+  };
+
   const startMicInput = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast("Voice input needs Chrome or Edge"); return; }
@@ -1134,7 +1148,8 @@ try {
   const res = await fetch(`${FLASK_URL}/ask`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,model:selectedModel,history:recentHistory,honorific:honorific||"Sir",...(apiKeyToSend && {api_key:apiKeyToSend})})});
   const data = await res.json();
   if (!res.ok) { const err = new Error(data.error || `Request failed (${res.status})`); err.status = res.status; throw err; }
-  setMessages(prev=>[...prev,{role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
+  const aiMessageId = uuidv4();
+  setMessages(prev=>[...prev,{id:aiMessageId,role:"ai",text:data.answer,time:new Date().toLocaleTimeString(),model:modelObj.chip}]);
   siraAvatarRef.current?.speak(data.spoken_summary || cleanForVoice(data.answer));
   try {
     await addDoc(collection(db,"soc_messages"),{username,session_id:sessionId,role:"ai",message:data.answer,model_used:selectedModel,created_at:serverTimestamp()});
@@ -1568,6 +1583,22 @@ setLoading(false);
                         <>
                           <span style={{color:"var(--accent)",letterSpacing:1}}>⬡ {m.model}</span>
                           <button className="copy-btn" onClick={()=>{navigator.clipboard.writeText(m.text);showToast("Copied");}}>⊕ COPY</button>
+                          {m.id && (
+                            <>
+                              <button
+                                onClick={()=>rateMessage(m.id,"up",messages[i-1]?.text,m.text)}
+                                disabled={ratings[m.id]==="up"}
+                                title="Good answer"
+                                style={{background:"none",border:"none",cursor:ratings[m.id]==="up"?"default":"pointer",color:ratings[m.id]==="up"?"var(--green,#22D97A)":"var(--text-dim)",fontSize:12,padding:"0 4px",opacity:ratings[m.id]==="up"?1:0.6}}
+                              >👍</button>
+                              <button
+                                onClick={()=>rateMessage(m.id,"down",messages[i-1]?.text,m.text)}
+                                disabled={ratings[m.id]==="down"}
+                                title="Poor answer"
+                                style={{background:"none",border:"none",cursor:ratings[m.id]==="down"?"default":"pointer",color:ratings[m.id]==="down"?"var(--red,#E15554)":"var(--text-dim)",fontSize:12,padding:"0 4px",opacity:ratings[m.id]==="down"?1:0.6}}
+                              >👎</button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>

@@ -263,6 +263,23 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
           style={consoleSearchStyle}
         />
         {searching && <span style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--accent, #29D3FF)", alignSelf: "center", letterSpacing: 1 }}>◈ SEARCHING</span>}
+        <button
+          onClick={() => {
+            // Mirrors exactly what's currently filtered on screen -- same
+            // search text and type filter, not a separate "export everything"
+            // path that could silently diverge from what the analyst sees.
+            const params = new URLSearchParams();
+            if (search.trim()) params.set("q", search.trim());
+            if (typeFilter !== "all") params.set("type", typeFilter);
+            window.open(`${FLASK_URL}/export?${params.toString()}`, "_blank");
+          }}
+          style={{
+            padding: "0 14px", background: "var(--bg3, rgba(255,255,255,0.03))",
+            border: "1px solid var(--border2, rgba(255,255,255,0.08))", borderRadius: 10,
+            color: "var(--text-mid, #8FA3B5)", cursor: "pointer",
+            fontFamily: "var(--mono, monospace)", fontSize: 10, letterSpacing: 1, flexShrink: 0,
+          }}
+        >⬇ EXPORT CSV</button>
       </div>
 
       <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap" }}>
