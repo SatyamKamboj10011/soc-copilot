@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
 import { InvestigationPage } from "./InvestigationPage";
-import PipelineStatus from "./PipelineStatus";
+import PipelineStatus from "./PipelineStatusPage";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, getDoc, serverTimestamp, increment } from "firebase/firestore";
 
