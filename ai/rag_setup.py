@@ -1,8 +1,8 @@
 import os
 import time
+import hashlib
 import datetime
 import json
-import shutil
 import argparse
 import chromadb
 from langchain_core.documents import Document
@@ -29,7 +29,18 @@ MAX_EVENTS   = 5000
 # reasoning that already moved this script away from from_documents()
 # once before (see the comment further down).
 EMBED_BATCH = 100
-EMBED_BATCH_DELAY_SECONDS = 1  # small pause between batches, safety margin
+# Confirmed by a real 429 in production: Gemini's free embedding tier caps
+# at 100 requests/minute. 1s between ~51 sequential batch calls wasn't
+# enough margin -- especially since the client library's own internal
+# retry logic (visible in the traceback as tenacity frames) burns through
+# the quota faster than the batch count alone suggests, retrying before
+# ever surfacing the error to this script. 2s base delay plus the explicit
+# backoff-and-retry below (rather than just a longer fixed delay) is the
+# actual fix -- it recovers from a quota hit instead of crashing the whole
+# rebuild over it.
+EMBED_BATCH_DELAY_SECONDS = 2
+MAX_RATE_LIMIT_RETRIES = 5
+RATE_LIMIT_BACKOFF_SECONDS = 60  # Gemini's own error message suggested ~48s; padded for safety
 
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
@@ -176,11 +187,14 @@ def load_zeek_conns(path, max_events=100):
                 break
     return docs
 
-# Delete old ChromaDB
-if os.path.exists(CHROMA_DB_PATH):
-    shutil.rmtree(CHROMA_DB_PATH)
-    print("Deleted old ChromaDB")
-
+# Was: delete the whole ChromaDB and re-embed every document from scratch,
+# every single rebuild. Confirmed by a real 429 in production: with the
+# rebuild loop running every 2 hours and the honeypot data mostly just
+# APPENDING (most of the "top 5000 most recent" events are the SAME real
+# events as two hours ago), this was calling the embedding API for
+# thousands of documents that were already embedded last time, burning
+# through Gemini's free-tier rate limit for no reason. Now keeps the
+# existing collection and only embeds documents that are genuinely new.
 print(f"Loading logs from {LOG_SOURCE}...")
 docs = load_logs(LOG_SOURCE)
 print(f"Loaded {len(docs)} Suricata events")
@@ -199,50 +213,98 @@ print()
 print("Building ChromaDB (Gemini embeddings)...")
 embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 
-# NOTE: this used to call langchain_chroma's Chroma.from_documents(), which
-# was silently re-invoking embeddings.embed_documents() on the FULL document
-# list multiple times in a row (visible as the progress counter completing
-# 5461/5461 and then restarting from 0 with no error and no explanation in
-# between). from_documents() internally batches and writes through several
-# layers of langchain_chroma/chromadb that were not behaving predictably in
-# this environment. Rather than chase that further, this now computes
-# embeddings exactly once ourselves, explicitly batched (see EMBED_BATCH
-# above -- same reasoning applied to the Gemini switch: don't trust an
-# unverified internal batching behaviour with ~5100 texts in one call) and
-# writes them straight into chromadb's own client in a single, plain,
-# bounded loop -- no framework retry logic left that can loop silently.
+# Stable, content-based ID -- the SAME real event always hashes to the
+# SAME id regardless of its position in the list, which shifts between
+# runs as new events push old ones out of the "most recent N" window.
+# This is what makes the diff below actually work; the old positional
+# "str(i)" ids meant the exact same event could get a different id on
+# every single run, making before/after comparison meaningless.
+def _stable_id(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
+
 texts     = [d.page_content for d in docs]
 metadatas = [d.metadata for d in docs]
-ids       = [str(i) for i in range(len(docs))]
-
-print(f"Computing embeddings for {len(texts)} documents (batches of {EMBED_BATCH})...")
-vectors = []
-for start in range(0, len(texts), EMBED_BATCH):
-    end = min(start + EMBED_BATCH, len(texts))
-    batch_vectors = embeddings.embed_documents(texts[start:end])
-    vectors.extend(batch_vectors)
-    print(f"[embeddings] computed {end}/{len(texts)}")
-    if end < len(texts):
-        time.sleep(EMBED_BATCH_DELAY_SECONDS)
-print(f"Computed {len(vectors)} embeddings.")
+ids       = [_stable_id(t) for t in texts]
 
 client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-# "langchain" matches langchain_chroma's default collection_name, so app.py's
-# existing `Chroma(persist_directory=..., embedding_function=embeddings)`
+# "langchain" matches langchain_chroma's default collection_name, so
+# app.py's existing Chroma(persist_directory=..., embedding_function=...)
 # (which doesn't pass an explicit collection_name) finds this collection
 # without any change needed on that side.
 collection = client.get_or_create_collection(name="langchain")
 
-WRITE_BATCH = 500
-for start in range(0, len(texts), WRITE_BATCH):
-    end = min(start + WRITE_BATCH, len(texts))
-    collection.add(
-        ids=ids[start:end],
-        embeddings=vectors[start:end],
-        documents=texts[start:end],
-        metadatas=metadatas[start:end],
-    )
-    print(f"[chromadb] wrote {end}/{len(texts)}")
+# Cheap -- include=[] means only ids come back, not embeddings/documents.
+existing_ids = set(collection.get(include=[])["ids"])
+desired_ids = set(ids)
 
-print(f"\n✅ Done! {len(docs)} events stored in ChromaDB")
+ids_to_add = desired_ids - existing_ids
+ids_to_remove = existing_ids - desired_ids
+ids_unchanged = desired_ids & existing_ids
+
+print(f"[diff] {len(ids_unchanged)} already indexed (skipping), {len(ids_to_add)} new (embedding), {len(ids_to_remove)} aged out (removing)")
+
+if ids_to_remove:
+    collection.delete(ids=list(ids_to_remove))
+    print(f"[chromadb] removed {len(ids_to_remove)} documents no longer in the recent window")
+
+if not ids_to_add:
+    print("\n✅ Done! Nothing new to embed -- index already reflects current data.")
+    print(f"   Mode: {args.mode.upper()}")
+    raise SystemExit(0)
+
+# Only the genuinely new documents get embedded -- this is the actual fix
+# for the rate limit, not just a longer delay between batches.
+id_to_text = dict(zip(ids, texts))
+id_to_meta = dict(zip(ids, metadatas))
+new_ids_ordered = list(ids_to_add)
+new_texts = [id_to_text[i] for i in new_ids_ordered]
+new_metadatas = [id_to_meta[i] for i in new_ids_ordered]
+
+def _is_rate_limit_error(err_msg):
+    """Same string-matching approach used elsewhere in this project (see
+    app.py's _is_rate_limit_error) -- more resilient to exact exception
+    class names differing across library versions than importing a
+    specific exception type."""
+    m = (err_msg or "").lower()
+    return any(k in m for k in ["resource_exhausted", "429", "rate limit", "quota"])
+
+
+def _embed_batch_with_retry(batch_texts):
+    """Calls embed_documents() for one batch, retrying with a real pause
+    if it hits a rate limit rather than letting the whole rebuild crash --
+    confirmed necessary by a genuine 429 in production."""
+    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+        try:
+            return embeddings.embed_documents(batch_texts)
+        except Exception as e:
+            if _is_rate_limit_error(str(e)) and attempt < MAX_RATE_LIMIT_RETRIES:
+                print(f"[embeddings] rate limited (attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES}) -- waiting {RATE_LIMIT_BACKOFF_SECONDS}s before retrying this batch")
+                time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+                continue
+            raise  # a genuinely different error, or retries exhausted -- don't mask it
+
+
+print(f"Computing embeddings for {len(new_texts)} NEW documents (batches of {EMBED_BATCH})...")
+vectors = []
+for start in range(0, len(new_texts), EMBED_BATCH):
+    end = min(start + EMBED_BATCH, len(new_texts))
+    batch_vectors = _embed_batch_with_retry(new_texts[start:end])
+    vectors.extend(batch_vectors)
+    print(f"[embeddings] computed {end}/{len(new_texts)}")
+    if end < len(new_texts):
+        time.sleep(EMBED_BATCH_DELAY_SECONDS)
+print(f"Computed {len(vectors)} embeddings.")
+
+WRITE_BATCH = 500
+for start in range(0, len(new_ids_ordered), WRITE_BATCH):
+    end = min(start + WRITE_BATCH, len(new_ids_ordered))
+    collection.add(
+        ids=new_ids_ordered[start:end],
+        embeddings=vectors[start:end],
+        documents=new_texts[start:end],
+        metadatas=new_metadatas[start:end],
+    )
+    print(f"[chromadb] wrote {end}/{len(new_ids_ordered)}")
+
+print(f"\n✅ Done! {len(docs)} events current, {len(new_ids_ordered)} newly embedded, {len(ids_unchanged)} reused from before")
 print(f"   Mode: {args.mode.upper()}")

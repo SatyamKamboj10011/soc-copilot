@@ -1594,7 +1594,7 @@ def _run_rag_rebuild():
     rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
     ai_dir = os.path.join(os.path.dirname(__file__), '..', 'ai')
     result = subprocess.run(
-        [sys.executable, rag_script], timeout=180,
+        [sys.executable, rag_script], timeout=600,
         cwd=ai_dir, capture_output=True, text=True,
     )
     # Always print the child's own output to Render's log stream, pass or
