@@ -18,7 +18,7 @@ const QUICK_ASKS = [
 ];
 
 /* ==================== Inline Ask SIRA — quick contextual answer, no page jump ==================== */
-function InlineAskSira({ log, onEscalate }) {
+function InlineAskSira({ log, onEscalate, model }) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
@@ -95,7 +95,7 @@ function InlineAskSira({ log, onEscalate }) {
 }
 
 /* ==================== Side inspector — replaces the old centered modal ==================== */
-function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira }) {
+function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira, model }) {
   return (
     <>
       <div style={inspectorScrimStyle} onClick={onClose} />
@@ -155,7 +155,7 @@ function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira }) {
             )}
           </div>
 
-          <InlineAskSira log={log} onEscalate={onAskSira} />
+          <InlineAskSira log={log} onEscalate={onAskSira} model={model} />
         </div>
       </div>
     </>
@@ -410,6 +410,7 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
           onViewProfile={(ip) => { loadProfile(ip); setSelected(null); }}
           onWhatIf={runWhatIf}
           onAskSira={(q) => { setSelected(null); onAskSira(q); }}
+          model={model}
         />
       )}
 
