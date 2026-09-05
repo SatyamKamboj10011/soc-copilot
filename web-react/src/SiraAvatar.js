@@ -75,7 +75,7 @@ const SiraAvatar = forwardRef(function SiraAvatar({ onOpenFullView }, ref) {
       // is the accepted trade-off for having real working voice at all.
       const res = await fetch(`${FLASK_URL}/sira-speak`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.substring(0, 500) }),
+        body: JSON.stringify({ text: text.substring(0, 500), voice: localStorage.getItem("sira_voice") || undefined }),
       });
       if (!res.ok) throw new Error("speak failed");
       const blob = await res.blob();
