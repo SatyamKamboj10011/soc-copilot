@@ -56,6 +56,11 @@ app = Flask(__name__)
 # exactly as before: everything defaults to local Ollama, no fallback logic
 # ever triggers.
 DEPLOYED = os.getenv("DEPLOYED", "false").strip().lower() in ("1", "true", "yes")
+# Separate from DEPLOYED on purpose -- see get_llm()'s "ollama" branch.
+# Defaults to false so any deployment that doesn't explicitly set this
+# (e.g. if this code ever ran on Render again) keeps the old, correct
+# cloud-only behavior rather than assuming Ollama exists somewhere it doesn't.
+OLLAMA_AVAILABLE = os.getenv("OLLAMA_AVAILABLE", "false").strip().lower() in ("1", "true", "yes")
 DEFAULT_CLOUD_MODEL = os.getenv("DEFAULT_CLOUD_MODEL", "groq")
 
 # Comma-separated list, e.g. "https://soc-copilot.vercel.app,http://localhost:3000"
@@ -154,31 +159,35 @@ except ImportError as e:
     print(f"Documents blueprint not loaded: {e}")
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Was DirectOllamaEmbeddings, pointed at a local Ollama server -- that
-# meant retrieval could never work on any platform without Ollama running
-# in-container, which is exactly the infrastructure problem this project
-# spent a long time trying to solve (Docker + Ollama-for-embeddings-only
-# on Render/HF Spaces/etc). GoogleGenerativeAIEmbeddings needs none of
-# that: it's a REST API call, reuses the GEMINI_API_KEY already configured
-# for ChatGoogleGenerativeAI, and langchain-google-genai is already a
-# dependency. Zero new infrastructure.
+# Was GoogleGenerativeAIEmbeddings (Gemini's API) -- moved back to local
+# Ollama now that this runs on a real, dedicated VM instead of a
+# constrained PaaS free tier (Render). This genuinely eliminates the
+# whole category of rate-limit/quota crashes hit repeatedly with Gemini's
+# free tier: there is no external embedding API call at all anymore,
+# everything runs on this server's own Ollama instance -- nothing to
+# rate-limit, no key to manage, no daily quota to exhaust.
 #
-# IMPORTANT: this is a different embedding space than nomic-embed-text --
-# any existing ChromaDB collection built with the old embeddings is now
-# stale and must be rebuilt (re-run rag_setup.py, or trigger a rebuild via
-# /upload) before retrieval will return meaningful results again.
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+# IMPORTANT: this is a different embedding space than gemini-embedding-001
+# -- the existing ChromaDB collection was built with Gemini vectors, which
+# are now incompatible. The incremental rebuild system (rag_setup.py)
+# tracks documents by a content hash, not by embedding vector -- meaning
+# it would wrongly think old Gemini-embedded entries are "already
+# indexed" and skip re-embedding them with the new model, silently
+# leaving stale, wrong-space vectors in place. The ChromaDB collection
+# must be wiped once during this migration (see rag_setup.py's
+# migration note) before the incremental system is safe to rely on again.
+from local_embeddings import LocalOllamaEmbeddings
 
 # Same lesson learned from Kokoro crashing the whole app at import time --
-# GEMINI_API_KEY being missing/wrong should NOT take down every route,
-# just the ones that need retrieval. Every retriever.invoke() call in this
-# file already runs inside _call_with_timeout/_ping_with_timeout, which
-# catch ANY exception -- including the AttributeError from calling
-# .invoke() on retriever=None below -- and degrade gracefully (empty docs,
-# "offline" health status) instead of propagating. So the only fix needed
-# here is: don't let construction failure kill the process.
+# Ollama being unreachable should NOT take down every route, just the
+# ones that need retrieval. Every retriever.invoke() call in this file
+# already runs inside _call_with_timeout/_ping_with_timeout, which catch
+# ANY exception -- including the AttributeError from calling .invoke() on
+# retriever=None below -- and degrade gracefully (empty docs, "offline"
+# health status) instead of propagating. So the only fix needed here is:
+# don't let construction failure kill the process.
 try:
-    embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+    embeddings = LocalOllamaEmbeddings()
     vectorstore = Chroma(
         persist_directory="../ai/chroma_db",
         embedding_function=embeddings
@@ -216,26 +225,42 @@ def get_llm(model, api_key=None):
     # creating and maintaining a separate Modelfile per model -- is the
     # simpler way to get consistent behaviour across every model choice.
     SIRA_TEMPERATURE = 0.4
+    # Was never set anywhere -- every local model ran on its silent
+    # default context window (often 2048-4096 tokens for many Ollama
+    # models), which the full grounding prompt (retrieved log context +
+    # strict rules + history + question) can genuinely exceed, silently
+    # truncating either the actual evidence or the instructions telling
+    # the model to only use that evidence. 8192 gives real headroom for
+    # the current prompt sizes used in this app without needing to
+    # measure token counts precisely.
+    SIRA_NUM_CTX = 8192
 
-    if model == "ollama_qwen":
-        return OllamaLLM(model="qwen2.5:7b", temperature=SIRA_TEMPERATURE), "local"
+    if model == "ollama_qwen3":
+        # Qwen3 1.7B -- the smallest model in the lineup, specifically
+        # chosen for this server's real RAM constraint (4GB total, shared
+        # with Flask, ChromaDB, Nginx, and honeypot sync all running
+        # simultaneously) rather than a larger model that risks the whole
+        # server OOMing under real load.
+        return OllamaLLM(model="qwen3:1.7b", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     elif model == "ollama_phi3":
-        return OllamaLLM(model="phi3:3.8b", temperature=SIRA_TEMPERATURE), "local"
+        return OllamaLLM(model="phi3:3.8b", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     elif model == "ollama_phi4mini":
         # Phi-4-mini (3.8B, ~3GB) -- specifically documented as strong at
         # structured output and precise instruction-following despite its
         # small size, unlike a generic small model that trades that away.
-        # Roughly half the footprint of qwen2.5:7b -- the lightweight
-        # deployment-friendly option, not just a smaller/worse fallback.
-        return OllamaLLM(model="phi4-mini", temperature=SIRA_TEMPERATURE), "local"
+        return OllamaLLM(model="phi4-mini", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     elif model == "ollama_llama32":
-        # Llama 3.2 3B (~2.5GB) -- smallest general-purpose option here,
-        # solid everyday instruction-following for routine questions where
-        # speed/footprint matters more than handling complex reasoning.
-        return OllamaLLM(model="llama3.2:3b", temperature=SIRA_TEMPERATURE), "local"
+        # Llama 3.2 3B (~2.5GB) -- solid everyday instruction-following
+        # for routine questions where speed/footprint matters more than
+        # handling complex reasoning.
+        return OllamaLLM(model="llama3.2:3b", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     elif model == "groq":
         return ChatGroq(
-            model="llama-3.3-70b-versatile",
+            # Was llama-3.3-70b-versatile -- Groq deprecated it (announced
+            # June 17, 2026, fully decommissioned August 16, 2026, per
+            # Groq's own docs). openai/gpt-oss-120b is Groq's own
+            # recommended 1:1 replacement for this specific model.
+            model="openai/gpt-oss-120b",
             groq_api_key=api_key or os.getenv("GROQ_API_KEY"),
             temperature=SIRA_TEMPERATURE,
         ), "cloud"
@@ -257,20 +282,22 @@ def get_llm(model, api_key=None):
         ), "cloud"
     elif model == "ollama":
         # This is the frontend's literal default selectedModel value.
-        # Locally (DEPLOYED unset) this is sira-model, same as always. On
-        # Render, there's no Ollama server to reach at all -- defaulting to
-        # a cloud model here means a fresh visitor who never touched the
-        # model dropdown still gets a working answer instead of a
-        # connection-refused error.
-        if DEPLOYED:
+        # Previously gated on DEPLOYED alone, which correctly meant "no
+        # Ollama exists here" on Render -- but now runs on a real VM with
+        # genuine local Ollama, where that assumption is wrong. Gating on
+        # a separate OLLAMA_AVAILABLE flag instead keeps DEPLOYED's other,
+        # still-legitimate uses (skipping checks that would otherwise
+        # hang) intact, while letting this one specific decision reflect
+        # reality on servers that actually do have Ollama running.
+        if DEPLOYED and not OLLAMA_AVAILABLE:
             return get_llm(_safe_cloud_default(), api_key)
-        return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
+        return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     else:
-        # Any unrecognised model string -- same deployment-aware default as
-        # the explicit "ollama" branch above, for the same reason.
-        if DEPLOYED:
+        # Any unrecognised model string -- same reasoning as the explicit
+        # "ollama" branch above.
+        if DEPLOYED and not OLLAMA_AVAILABLE:
             return get_llm(_safe_cloud_default(), api_key)
-        return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE), "local"
+        return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
 
 
 def _is_rate_limit_error(err_msg):
@@ -846,7 +873,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     # measurably helps smaller models stay grounded, at the cost of the
     # richer structured-report formatting the larger models can reliably
     # follow.
-    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama_llama32"}
+    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama_llama32", "ollama_qwen3"}
 
     # Hard, code-verified constraint -- not a soft instruction. These IPs
     # were specifically named in the question and confirmed (via exact
@@ -1129,16 +1156,18 @@ def get_models():
     # ollama_llama32 exist here but be unreachable in the UI, since the
     # frontend's copy never got updated when these were added.
     return jsonify([
-        {"id": "ollama",          "name": "SIRA — qwen2.5:7b (local)",
+        {"id": "ollama",          "name": "SIRA — qwen3:1.7b (local)",
          "chip": "sira-model (local)", "cloud": False, "requires_key": False},
+        {"id": "ollama_qwen3",    "name": "Qwen3 1.7B — smallest, fastest on limited RAM (local)",
+         "chip": "qwen3 1.7b (local)", "cloud": False, "requires_key": False},
         {"id": "ollama_phi4mini", "name": "Phi-4-mini 3.8B — lightweight, strong structured output (local)",
          "chip": "phi4-mini (local)", "cloud": False, "requires_key": False},
-        {"id": "ollama_llama32",  "name": "Llama 3.2 3B — smallest, everyday questions (local)",
+        {"id": "ollama_llama32",  "name": "Llama 3.2 3B — everyday questions (local)",
          "chip": "llama3.2 3b (local)", "cloud": False, "requires_key": False},
-        {"id": "ollama_phi3",     "name": "Phi3 3.8B — fastest (local)",
+        {"id": "ollama_phi3",     "name": "Phi3 3.8B — fastest of the 3.8B-class models (local)",
          "chip": "phi3 3.8b (local)", "cloud": False, "requires_key": False},
-        {"id": "groq",            "name": "Groq — Llama 3.3 70B (cloud)",
-         "chip": "groq llama3 (cloud)", "cloud": True, "requires_key": False},
+        {"id": "groq",            "name": "Groq — GPT-OSS 120B (cloud)",
+         "chip": "groq gpt-oss (cloud)", "cloud": True, "requires_key": False},
         {"id": "gemini",          "name": "Google Gemini 2.0 Flash (cloud)",
          "chip": "gemini 2.0 (cloud)", "cloud": True, "requires_key": False},
         {"id": "mistral",         "name": "Mistral Small (cloud — free)",
@@ -1244,11 +1273,12 @@ def _call_with_timeout(fn, timeout_seconds, default=None):
 @app.route('/health', methods=['GET'])
 def health():
     flask_status = "ok"
-    if DEPLOYED:
+    if DEPLOYED and not OLLAMA_AVAILABLE:
         # No point pinging local Ollama when we already know there's no
-        # Ollama server on this box -- skip it rather than risk any delay,
-        # however small, on the one worker Render's free tier gives us.
-        ollama_status = "skipped (DEPLOYED=true)"
+        # Ollama server on this box -- skip it rather than risk any delay.
+        # On a server where OLLAMA_AVAILABLE=true, fall through to the
+        # real ping below instead, since it genuinely might be running.
+        ollama_status = "skipped (DEPLOYED=true, OLLAMA_AVAILABLE=false)"
     else:
         ok, err = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 5)
         ollama_status = "ok" if ok else f"offline — {err}"
@@ -1778,7 +1808,7 @@ Answer:"""
 
     results = {}
     models_to_try = [
-        ("groq",   ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0)),
+        ("groq",   ChatGroq(model="openai/gpt-oss-120b", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0)),
         ("gemini", ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0)),
         ("mistral",ChatMistralAI(model="mistral-small-latest", mistral_api_key=os.getenv("MISTRAL_API_KEY"))),
     ]

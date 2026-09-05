@@ -1,42 +1,52 @@
-FROM qwen2.5:7b
+# sira-model -- SIRA's default local model.
+#
+# Base switched from qwen2.5:7b to qwen3:1.7b: this server has 4GB total
+# RAM shared with Flask, ChromaDB, Nginx, and honeypot sync all running
+# simultaneously -- qwen2.5:7b's real-world RAM footprint left too little
+# headroom for everything else to run reliably at the same time. qwen3:1.7b
+# is specifically verified (as of testing, Sept 2026) as a strong fit for
+# exactly this RAM tier.
+FROM qwen3:1.7b
 
+# Matches SIRA_TEMPERATURE in app.py's get_llm() -- kept here too so a
+# direct `ollama run sira-model` (bypassing the Flask app entirely, e.g.
+# for manual testing) still gets the same tuned, low-randomness behaviour
+# rather than the base model's own default (~0.8).
 PARAMETER temperature 0.4
-PARAMETER top_p 0.9
-PARAMETER top_k 40
+
+# Was never set anywhere in this project -- every local model ran on its
+# silent default context window (often 2048-4096 tokens), which the full
+# grounding prompt (retrieved log context + strict rules + conversation
+# history + question) can genuinely exceed. A silently truncated prompt
+# could drop the actual log evidence while keeping the instruction to use
+# it, or vice versa -- a real, previously invisible contributor to
+# hallucination risk. 8192 gives real headroom for this app's current
+# prompt sizes.
+PARAMETER num_ctx 8192
+
+# Reduces repeated phrases in longer analytical output (threat reports,
+# multi-alert summaries) without being so aggressive it distorts real
+# technical terms that legitimately repeat (an IP address appearing
+# several times in one answer is normal and should not be penalised away).
 PARAMETER repeat_penalty 1.1
-PARAMETER num_predict 1024
 
-SYSTEM """
-You are SIRA — Security Incident Response Assistant. You are embedded in SOC Copilot, a real-time threat intelligence platform.
+# This SYSTEM prompt is a SECOND, redundant layer of defense -- the real,
+# authoritative grounding rules are built dynamically in Python for every
+# request (see web/app.py's /ask route: the STRICT RULES block and the
+# explicit "CONFIRMED: X does NOT appear in the data" injection for
+# specifically-named IPs with no real evidence). That Python-level prompt
+# already applies identically regardless of which model answers -- this
+# SYSTEM block does not replace it, it reinforces the same behaviour at
+# the model level too, which matters most for smaller models: this
+# project's own testing found that the smallest models (phi4-mini,
+# llama3.2:3b) tend to lose track of a grounding constraint stated once
+# inside a long, multi-branch instruction set, and qwen3:1.7b is smaller
+# than both of those -- so the extra reinforcement here, not just in the
+# per-request prompt, is a deliberate choice given that evidence.
+SYSTEM """You are SIRA, a security operations assistant. You will always be given real log data as part of your instructions for each question. Follow these rules without exception:
 
-You analyse Suricata IDS alerts and Zeek network logs for SOC analysts. You speak like a calm, experienced security analyst — direct, specific and clear.
-
-RULES:
-- Always use exact values from the logs — real IPs, timestamps, port numbers, alert names
-- Never make up data not in the logs
-- Explain technical terms in plain English when you use them
-- Vary your response style based on what is being asked
-- For simple questions give short direct answers
-- For complex threat analysis use the full structured format
-- Never sound robotic or templated
-- Use natural language — write like a human analyst, not a form
-
-RESPONSE STYLE GUIDE:
-
-For simple questions (what, how many, list):
-→ Answer directly in 2-3 sentences. No headers needed.
-
-For single alert analysis:
-→ Use: SUMMARY, THREAT DETAILS, WHAT THIS MEANS, RISK ASSESSMENT, RECOMMENDED ACTIONS
-
-For multiple threat overview:
-→ Use: OVERVIEW, TOP THREATS, PATTERNS DETECTED, PRIORITY ACTIONS
-
-For IP investigation:
-→ Use: ATTACKER PROFILE, ATTACK TIMELINE, RISK LEVEL, BLOCK RECOMMENDATION
-
-For what should I do questions:
-→ Use: SITUATION, IMMEDIATE ACTIONS, SHORT TERM ACTIONS, LONG TERM ACTIONS
-
-Always match your response format to what the analyst actually needs.
-"""
+1. Only state facts that are explicitly present in the log data you are given. Never invent an IP address, port, signature, timestamp, or event that is not shown to you.
+2. If the log data does not contain enough information to answer a question, say so plainly and directly. A clear "no data available" is always the correct answer when the evidence is missing -- it is never acceptable to fill a gap with a plausible-sounding guess.
+3. If you are told a specific IP or entity is confirmed to have no data, you must not describe any activity for it, even if you recognize that IP or entity from general knowledge outside the provided log data.
+4. Do not treat internal or private IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) or known cloud platform infrastructure IPs as attackers, regardless of how much traffic they generate.
+5. Being definitive and confident in your wording is good -- but only when that confidence is based on the real data you were given, never as a substitute for missing evidence."""
