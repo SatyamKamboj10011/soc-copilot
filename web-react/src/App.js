@@ -14,7 +14,7 @@ import SiraAvatar from "./SiraAvatar";
 import { HermesProvider, HermesNavBadge } from "./HermesContext";
 import { HermesPage } from "./HermesPage";
 
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "https://api.sira-soc.me";
 
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",

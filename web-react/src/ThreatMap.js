@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, Polyline } from "react-leaflet";
  
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "https://api.sira-soc.me";
 const NZ_COORDS = [-36.8485, 174.7633]; // Auckland — your server location
 // CARTO's raster basemaps now require a free API key (added their side
 // this week, mid-migration to vector tiles). Read from an env var rather

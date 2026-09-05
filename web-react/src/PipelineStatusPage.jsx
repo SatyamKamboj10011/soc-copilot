@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "https://api.sira-soc.me";
 
 /**
  * Every number, timestamp, and activity-feed entry here comes straight

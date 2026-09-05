@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, memo } from "react";
 import { motion, animate } from "framer-motion";
 import ThreatMap from "./ThreatMap";
 
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "https://api.sira-soc.me";
 
 const TSC_ORDER = ["security", "availability", "confidentiality", "processing_integrity", "privacy"];
 const TSC_COLORS = {

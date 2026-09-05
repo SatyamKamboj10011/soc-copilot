@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "https://api.sira-soc.me";
 
 export default function SiraVoice({ isOpen, onClose }) {
   const [input, setInput]         = useState("");

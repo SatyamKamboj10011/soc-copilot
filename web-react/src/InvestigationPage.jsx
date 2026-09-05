@@ -3,7 +3,7 @@ import {
   useAlertTriage, TriageBadge, TriageSelect, TriageSummary, TriageNotes,
 } from "./AlertTriage";
 
-const FLASK_URL = "https://soc-copilot.onrender.com";
+const FLASK_URL = "https://api.sira-soc.me";
 const PAGE_SIZE = 50;
 
 const TYPE_COLOR = {
