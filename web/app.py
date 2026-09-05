@@ -176,7 +176,7 @@ except ImportError as e:
 # leaving stale, wrong-space vectors in place. The ChromaDB collection
 # must be wiped once during this migration (see rag_setup.py's
 # migration note) before the incremental system is safe to rely on again.
-from local_embeddings import LocalOllamaEmbeddings
+from ai.local_embeddings import LocalOllamaEmbeddings
 
 # Same lesson learned from Kokoro crashing the whole app at import time --
 # Ollama being unreachable should NOT take down every route, just the
