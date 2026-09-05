@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
 import { InvestigationPage } from "./InvestigationPage";
-import PipelineStatus from "./PipelineStatus";
+import PipelineStatusPage from "./PipelineStatusPage";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, getDoc, serverTimestamp, increment } from "firebase/firestore";
 
@@ -1587,7 +1587,7 @@ setLoading(false);
           <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}} model={selectedModel}/>
         </div>
         <div style={{display:page==="pipeline"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
-          <PipelineStatus/>
+          <PipelineStatusPage/>
         </div>
         <div style={{display:page==="history"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <History/>
