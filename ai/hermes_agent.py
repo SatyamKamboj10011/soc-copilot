@@ -46,34 +46,66 @@ def _local_post(path, json_body=None, timeout=None):
         return None, resp.status_code
 
 # ── Deployment-aware report model ───────────────────────────────────────
-# Mirrors web/app.py's DEPLOYED-aware fallback in get_llm(), duplicated
-# here (rather than imported) to keep this module self-contained and avoid
-# a circular import back into the Flask app (app.py imports run_hermes_agent
-# from here, at call time inside the route handler). On Render, model names
-# like "nous-hermes2" or "phi4-mini" from the frontend's performance-tier
-# picker don't exist -- there is no cloud-capable Hermes model option
-# exposed in the UI at all today -- so DEPLOYED=true always routes the
-# final report-writing step to a cloud model instead, regardless of which
-# Ollama-only name was requested.
+# Mirrors web/app.py's DEPLOYED/OLLAMA_AVAILABLE-aware fallback in
+# get_llm(), duplicated here (rather than imported) to keep this module
+# self-contained and avoid a circular import back into the Flask app.
 DEPLOYED = os.getenv("DEPLOYED", "false").strip().lower() in ("1", "true", "yes")
+# Same separate flag as app.py -- see that file's get_llm() for the full
+# reasoning. Without this, Hermes always redirected to cloud on ANY
+# DEPLOYED=true server, even this one, which genuinely has Ollama running.
+OLLAMA_AVAILABLE = os.getenv("OLLAMA_AVAILABLE", "false").strip().lower() in ("1", "true", "yes")
 DEFAULT_CLOUD_MODEL = os.getenv("DEFAULT_CLOUD_MODEL", "groq")
 _KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral"}
 
+# Maps app.py's model IDs (what the frontend actually sends, matching
+# whatever the user picked for regular chat -- see App.js's hermesModel)
+# to real Ollama model tags. Was previously passing app.py's ID strings
+# (e.g. "ollama_qwen3") straight into OllamaLLM(model=...), which fails
+# outright since Ollama has no model literally named "ollama_qwen3" --
+# only the real tag "qwen3:1.7b" underneath it.
+_OLLAMA_MODEL_TAGS = {
+    "ollama":          "sira-model",
+    "ollama_qwen3":    "qwen3:1.7b",
+    "ollama_phi3":     "phi3:3.8b",
+    "ollama_phi4mini": "phi4-mini",
+    "ollama_llama32":  "llama3.2:3b",
+}
+
 
 def _get_report_llm(model):
-    """Returns (llm, is_cloud) for the final report-writing step."""
-    if DEPLOYED and model not in _KNOWN_CLOUD_MODELS:
+    """Returns (llm, is_cloud) for the final report-writing step. `model`
+    is whatever app.py's /hermes-agent route received -- one of the
+    _OLLAMA_MODEL_TAGS keys, or a cloud model id directly."""
+    if model in _KNOWN_CLOUD_MODELS:
+        return _cloud_llm(model)
+    if DEPLOYED and not OLLAMA_AVAILABLE:
+        # No real Ollama on this server -- redirect to cloud regardless
+        # of which local model was requested, same reasoning as app.py.
         cloud_model = DEFAULT_CLOUD_MODEL if DEFAULT_CLOUD_MODEL in _KNOWN_CLOUD_MODELS else "groq"
-        if cloud_model == "groq":
-            from langchain_groq import ChatGroq
-            return ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0.3), True
-        elif cloud_model == "gemini":
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0.3), True
-        elif cloud_model == "mistral":
-            from langchain_mistralai import ChatMistralAI
-            return ChatMistralAI(model="mistral-small-latest", mistral_api_key=os.getenv("MISTRAL_API_KEY"), temperature=0.3), True
-    return OllamaLLM(model=model, temperature=0.3, num_predict=2048), False
+        return _cloud_llm(cloud_model)
+    real_tag = _OLLAMA_MODEL_TAGS.get(model, "sira-model")
+    return OllamaLLM(model=real_tag, temperature=0.3, num_predict=2048), False
+
+
+def _cloud_llm(cloud_model):
+    if cloud_model == "groq":
+        from langchain_groq import ChatGroq
+        # Was llama-3.3-70b-versatile -- deprecated and decommissioned by
+        # Groq August 16, 2026. Matches the same fix applied in app.py.
+        return ChatGroq(model="openai/gpt-oss-120b", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0.3), True
+    elif cloud_model == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        # Was gemini-2.0-flash -- fully shut down by Google June 1, 2026.
+        # Matches the same fix applied in app.py.
+        return ChatGoogleGenerativeAI(model="gemini-3.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0.3), True
+    elif cloud_model == "mistral":
+        from langchain_mistralai import ChatMistralAI
+        return ChatMistralAI(model="mistral-small-latest", mistral_api_key=os.getenv("MISTRAL_API_KEY"), temperature=0.3), True
+    # Shouldn't reach here given _KNOWN_CLOUD_MODELS gates the caller, but
+    # fail toward a real, working default rather than silently returning
+    # nothing if it ever does.
+    from langchain_groq import ChatGroq
+    return ChatGroq(model="openai/gpt-oss-120b", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0.3), True
 
 
 # IPs that are internal infrastructure, not external attackers, even though
@@ -339,15 +371,15 @@ def _safe_step(label, fn, *args):
         return f"{label} failed: {type(e).__name__}: {e}", "failed"
 
 
-def run_hermes_agent(task: str, model: str = "nous-hermes2") -> dict:
-    # model is now a real parameter, not hardcoded -- lets the frontend's
-    # performance-tier picker choose a lighter model (e.g. phi4-mini) for
-    # the report-writing step when the user's hardware doesn't comfortably
-    # fit nous-hermes2 (10.7B, ~6.1GB). Defaults to nous-hermes2 so any
-    # existing caller that doesn't pass a model keeps today's behaviour.
-    # _get_report_llm additionally routes to a cloud model instead when
-    # DEPLOYED=true, regardless of which Ollama-only name was requested --
-    # see its docstring above.
+def run_hermes_agent(task: str, model: str = "ollama") -> dict:
+    # model now always reflects whatever the user picked for regular chat
+    # (see App.js's hermesModel, which was changed from a separate,
+    # disconnected performance-tier lookup to just using selectedModel
+    # directly) -- one model choice, not two to keep in sync. Was
+    # "nous-hermes2", a model never actually pulled on this server, which
+    # is exactly why Hermes stopped responding after the Azure migration.
+    # _get_report_llm resolves this id the same way app.py's get_llm()
+    # does -- real Ollama tag if OLLAMA_AVAILABLE, cloud otherwise.
     llm, is_cloud = _get_report_llm(model)
 
     steps = []

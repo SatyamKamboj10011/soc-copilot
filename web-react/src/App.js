@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import History from "./History";
 import Soc2Dashboard from "./Soc2Dashboard";
 import { InvestigationPage } from "./InvestigationPage";
-import PipelineStatus from "./PipelineStatusPage";
+import PipelineStatus from "./PipelineStatus";
 import { db } from "./firebase";
 import { collection, doc, setDoc, addDoc, getDoc, serverTimestamp, increment } from "firebase/firestore";
 
@@ -14,7 +14,7 @@ import SiraAvatar from "./SiraAvatar";
 import { HermesProvider, HermesNavBadge } from "./HermesContext";
 import { HermesPage } from "./HermesPage";
 
-const FLASK_URL = "https://api.sira-soc.me";
+const FLASK_URL = "https://soc-copilot.onrender.com";
 
 const QUICK_QUESTIONS = [
   "What IPs triggered alerts?",
@@ -1262,7 +1262,14 @@ setLoading(false);
   const alertCount  = alerts.filter(a=>a.event_type==="alert").length;
   const uniqueIPs   = [...new Set(alerts.map(a=>a.src_ip).filter(Boolean))].length;
   const loadingLabel = { ollama:"SIRA", ollama_phi3:"PHI3", groq:"GROQ", gemini:"GEMINI", mistral:"MISTRAL" };
-  const hermesModel = PERF_TIERS[perfTier]?.hermesModel || "nous-hermes2";
+  // Was PERF_TIERS[perfTier]?.hermesModel, a separate model choice
+  // entirely disconnected from the model the user actually picked for
+  // chat -- defaulted to "nous-hermes2", a model never pulled on this
+  // server, which is why Hermes stopped working after the migration.
+  // Using selectedModel directly means Hermes always runs on whatever
+  // the user is already using for regular questions -- one model choice,
+  // not two to keep in sync.
+  const hermesModel = selectedModel;
 
   return (
     <HermesProvider hermesModel={hermesModel}>
@@ -1577,7 +1584,7 @@ setLoading(false);
           />
         </div>
         <div style={{display:page==="investigation"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
-          <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}/>
+          <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}} model={selectedModel}/>
         </div>
         <div style={{display:page==="pipeline"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <PipelineStatus/>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from "react";
 
-const FLASK_URL = "https://api.sira-soc.me";
+const FLASK_URL = "https://soc-copilot.onrender.com";
 const HermesContext = createContext(null);
 
 function makeCaseId() {
@@ -25,7 +25,7 @@ function makeCaseId() {
  * App.js. Read via a ref so new investigations always use the latest tier
  * without HermesProvider needing to remount.
  */
-export function HermesProvider({ children, hermesModel = "nous-hermes2" }) {
+export function HermesProvider({ children, hermesModel = "ollama" }) {
   const [investigations, setInvestigations] = useState([]);
   // each: {id, caseId, task, status: 'running'|'done'|'error', steps, answer, error, startedAt}
   const [activeId, setActiveId] = useState(null);

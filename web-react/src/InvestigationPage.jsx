@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef, memo } from "react";
-import {
-  useAlertTriage, TriageBadge, TriageSelect, TriageSummary, TriageNotes,
-} from "./AlertTriage";
 
-const FLASK_URL = "https://api.sira-soc.me";
+const FLASK_URL = "https://soc-copilot.onrender.com";
 const PAGE_SIZE = 50;
 
 const TYPE_COLOR = {
@@ -35,7 +32,7 @@ function InlineAskSira({ log, onEscalate }) {
       const res = await fetch(`${FLASK_URL}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: finalQ, model: "ollama" }),
+        body: JSON.stringify({ question: finalQ, model }),
       });
       const data = await res.json();
       setAnswer(data.answer || "No answer returned.");
@@ -98,8 +95,7 @@ function InlineAskSira({ log, onEscalate }) {
 }
 
 /* ==================== Side inspector — replaces the old centered modal ==================== */
-function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira,
-                         triageStatus, triageRecord, onTriageChange, onNotesSave }) {
+function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira }) {
   return (
     <>
       <div style={inspectorScrimStyle} onClick={onClose} />
@@ -146,18 +142,6 @@ function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira,
             )}
           </div>
 
-          <div style={{
-            marginTop: 18, paddingTop: 16,
-            borderTop: "1px solid var(--border2, rgba(255,255,255,0.12))",
-          }}>
-            <div style={{
-              fontFamily: "var(--mono, monospace)", fontSize: 9, letterSpacing: 1.5,
-              color: "var(--text-dim, #5A5A62)", marginBottom: 8,
-            }}>TRIAGE STATUS</div>
-            <TriageSelect value={triageStatus} onChange={onTriageChange} />
-            <TriageNotes record={triageRecord} onSave={onNotesSave} />
-          </div>
-
           <div style={{ display: "flex", gap: 8, margin: "16px 0" }}>
             {log.src_ip && (
               <button onClick={() => onViewProfile(log.src_ip)} style={inspectorActionBtnStyle("var(--purple, #8B7CFF)")}>
@@ -179,16 +163,7 @@ function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira,
 }
 
 /* ==================== Main page ==================== */
-export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) {
-  // Triage state is shared across the team, not per-user: if one analyst marks
-  // something a false positive, everyone should see that rather than each
-  // person investigating the same alert independently.
-  const username = localStorage.getItem("username") || "unknown";
-  const {
-    update: updateTriage, statusOf, recordOf,
-    counts: triageCounts, loading: triageLoading, error: triageError,
-  } = useAlertTriage(username);
-
+export const InvestigationPage = memo(function InvestigationPage({ onAskSira, model = "ollama" }) {
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -364,24 +339,6 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
         >{viewMode === "raw" ? "☰ RAW LOGS" : "⊞ GROUPED + MITRE"}</button>
       </div>
 
-      <TriageSummary
-        counts={triageCounts}
-        loading={triageLoading}
-        style={{ marginBottom: 12 }}
-      />
-
-      {triageError && (
-        <div style={{
-          marginBottom: 12, padding: "8px 12px", borderRadius: 8,
-          background: "var(--red-dim, rgba(225,85,84,0.09))",
-          border: "1px solid rgba(225,85,84,0.3)",
-          fontFamily: "var(--mono, monospace)", fontSize: 10,
-          color: "var(--red, #E15554)",
-        }}>
-          Triage unavailable: {triageError}
-        </div>
-      )}
-
       <div style={consoleFrameStyle}>
         {viewMode === "grouped" ? (
           <>
@@ -420,7 +377,6 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
               <span style={{ width: 150 }}>SOURCE</span>
               <span style={{ width: 150 }}>DEST</span>
               <span style={{ flex: 1 }}>DETAIL</span>
-              <span style={{ width: 52 }}>STATUS</span>
             </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {visibleRows.map((l, i) => (
@@ -430,7 +386,6 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
                   <span style={{ width: 150, color: "var(--accent, #29D3FF)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.src_ip}</span>
                   <span style={{ width: 150, color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.dest_ip}</span>
                   <span style={{ flex: 1, color: "var(--text-dim, #5A5A62)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{detailFor(l)}</span>
-                  <TriageBadge status={statusOf(l)} compact />
                 </div>
               ))}
               {visibleRows.length === 0 && !searching && (
@@ -455,10 +410,6 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira }) 
           onViewProfile={(ip) => { loadProfile(ip); setSelected(null); }}
           onWhatIf={runWhatIf}
           onAskSira={(q) => { setSelected(null); onAskSira(q); }}
-          triageStatus={statusOf(selected)}
-          triageRecord={recordOf(selected)}
-          onTriageChange={(status) => updateTriage(selected, { status })}
-          onNotesSave={(notes) => updateTriage(selected, { notes })}
         />
       )}
 

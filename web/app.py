@@ -266,7 +266,12 @@ def get_llm(model, api_key=None):
         ), "cloud"
     elif model == "gemini":
         return ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            # Was gemini-2.0-flash -- Google fully shut this down June 1,
+            # 2026 (confirmed via Google's own official changelog).
+            # gemini-3.5-flash is Google's own recommended replacement --
+            # deliberately not gemini-2.5-flash, which already has its own
+            # announced shutdown for October 16, 2026, just weeks away.
+            model="gemini-3.5-flash",
             google_api_key=api_key or os.getenv("GEMINI_API_KEY"),
             temperature=SIRA_TEMPERATURE,
         ), "cloud"
@@ -639,7 +644,21 @@ def _extract_spoken_summary(text):
     the model's response. Returns (report_text_without_it, spoken_summary).
     If the model didn't include one -- smaller/simpler models sometimes
     drop instructions near the end of a long prompt -- spoken_summary is
-    "" and the caller falls back to the old trimmed-report behaviour."""
+    "" and the caller falls back to the old trimmed-report behaviour.
+
+    Also guards against a real, confirmed failure mode: a weaker model
+    (phi4-mini, observed directly in testing) putting the marker too
+    early in its response instead of at the end as instructed. Since
+    everything BEFORE the marker becomes the text answer, that would
+    leave the text panel nearly empty while the "spoken" half absorbs
+    almost the entire real answer -- exactly what was observed (a
+    response that played correctly as speech but showed almost nothing
+    as text). If the resulting report is suspiciously short next to a
+    much longer spoken part, that's a strong signal the split happened
+    in the wrong place, not that the model genuinely wrote a one-line
+    answer -- treat it as if no valid marker was found instead of
+    trusting an obviously bad split.
+    """
     if not text:
         return text, ""
     marker = "SPOKEN_SUMMARY:"
@@ -648,6 +667,8 @@ def _extract_spoken_summary(text):
         return text, ""
     report = text[:idx].rstrip()
     spoken = text[idx + len(marker):].strip()
+    if len(report) < 20 and len(spoken) > len(report) * 3:
+        return text, ""
     return report, spoken
 
 
@@ -1168,8 +1189,8 @@ def get_models():
          "chip": "phi3 3.8b (local)", "cloud": False, "requires_key": False},
         {"id": "groq",            "name": "Groq — GPT-OSS 120B (cloud)",
          "chip": "groq gpt-oss (cloud)", "cloud": True, "requires_key": False},
-        {"id": "gemini",          "name": "Google Gemini 2.0 Flash (cloud)",
-         "chip": "gemini 2.0 (cloud)", "cloud": True, "requires_key": False},
+        {"id": "gemini",          "name": "Google Gemini 3.5 Flash (cloud)",
+         "chip": "gemini 3.5 (cloud)", "cloud": True, "requires_key": False},
         {"id": "mistral",         "name": "Mistral Small (cloud — free)",
          "chip": "mistral small (cloud)", "cloud": True, "requires_key": False},
     ])
@@ -1649,23 +1670,45 @@ def rebuild_index():
     live honeypot-synced data -- WITHOUT requiring a file upload and
     without overwriting that file the way /upload does. This is the
     endpoint to hit when you just want the index to reflect current real
-    honeypot activity, not a manually-provided snapshot."""
+    honeypot activity, not a manually-provided snapshot.
+
+    Runs in a background thread rather than blocking this request --
+    confirmed necessary by a real crash in production: running the
+    rebuild synchronously blocked the single gunicorn worker for the
+    whole embedding process, and once that exceeded gunicorn's own
+    --timeout 120, gunicorn's watchdog forcibly killed the worker
+    mid-request (visible in the logs as handle_abort -> sys.exit(1)),
+    which the client just saw as a bare "Internal Server Error" with no
+    real explanation. Local Ollama embeddings make this more likely to
+    happen than it used to be, since they embed one document at a time
+    rather than Gemini's batched API. Progress is reported via the same
+    index_rebuild_status /pipeline-status already exposes, not via this
+    response directly."""
     eve_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
     if not os.path.exists(eve_path) or os.path.getsize(eve_path) == 0:
         return jsonify({"error": "logs/eve.json doesn't exist or is empty yet -- honeypot sync may not have pulled data yet. Check /health or wait a moment and retry."}), 409
-    try:
-        _run_rag_rebuild()
-        new_logs = load_logs()
-        return jsonify({
-            "message": "ChromaDB rebuilt from live honeypot data",
-            "events_loaded": len(new_logs)
-        })
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "ChromaDB rebuild timed out"}), 500
-    except RuntimeError as e:
-        # Now includes the real tail of rag_setup.py's own stderr, not
-        # just a generic "exit status 1" -- the actual root cause.
-        return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
+    if index_rebuild_status.get("in_progress"):
+        return jsonify({"message": "A rebuild is already in progress -- check /pipeline-status for progress instead of starting another."}), 202
+
+    def _background_manual_rebuild():
+        try:
+            index_rebuild_status["in_progress"] = True
+            _log_rebuild_event("started", "manual rebuild via /rebuild-index")
+            _run_rag_rebuild()
+            index_rebuild_status["in_progress"] = False
+            index_rebuild_status["last_rebuilt_at"] = datetime.utcnow().isoformat() + "Z"
+            index_rebuild_status["last_event_count"] = len(load_logs())
+            index_rebuild_status["last_error"] = None
+            _log_rebuild_event("completed", f"{index_rebuild_status['last_event_count']} events indexed (manual)")
+        except Exception as e:
+            index_rebuild_status["in_progress"] = False
+            index_rebuild_status["last_error"] = str(e)[:200]
+            _log_rebuild_event("error", str(e)[:150])
+
+    threading.Thread(target=_background_manual_rebuild, daemon=True, name="manual-rebuild").start()
+    return jsonify({
+        "message": "Rebuild started in the background -- check /pipeline-status for progress and completion, this response does not wait for it to finish."
+    }), 202
 
 
 @app.route('/pipeline-status', methods=['GET'])
@@ -1809,7 +1852,7 @@ Answer:"""
     results = {}
     models_to_try = [
         ("groq",   ChatGroq(model="openai/gpt-oss-120b", groq_api_key=os.getenv("GROQ_API_KEY"), temperature=0)),
-        ("gemini", ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0)),
+        ("gemini", ChatGoogleGenerativeAI(model="gemini-3.5-flash", google_api_key=os.getenv("GEMINI_API_KEY"), temperature=0)),
         ("mistral",ChatMistralAI(model="mistral-small-latest", mistral_api_key=os.getenv("MISTRAL_API_KEY"))),
     ]
 
