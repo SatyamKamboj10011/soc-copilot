@@ -619,32 +619,26 @@ function RustinelPanel() {
   );
 }
 
-  // const severityColor = (sev) => {
-  //   const s = (sev||"").toLowerCase();
-  //   if (s === "critical" || s === "high") return "var(--red)";
-  //   if (s === "medium") return "var(--orange)";
-  //   return "var(--accent)"; // low/unknown
-  // };
 
-  return (
-    <>
-      <div className="panel-divider"/>
-      <div className="section-label">Rustinel EDR</div>
-      <div style={{padding:"8px 20px"}}>
-        {ralerts.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO DETECTIONS</div>}
-        {ralerts.map((a,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)"}}>
-            <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:severityColor(a.severity),boxShadow:`0 0 6px ${severityColor(a.severity)}`}}/>
-            <div style={{flex:1,overflow:"hidden"}}>
-              <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.rule_name}</div>
-              <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.engine} — {a.process_name || a.host_os}</div>
-            </div>
-            <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,flexShrink:0,background:`${severityColor(a.severity)}22`,color:severityColor(a.severity),border:`1px solid ${severityColor(a.severity)}44`}}>{a.severity}</span>
-          </div>
-        ))}
-      </div>
-    </>
-  );
+  // return (
+  //   <>
+  //     <div className="panel-divider"/>
+  //     <div className="section-label">Rustinel EDR</div>
+  //     <div style={{padding:"8px 20px"}}>
+  //       {ralerts.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO DETECTIONS</div>}
+  //       {ralerts.map((a,i)=>(
+  //         <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)"}}>
+  //           <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:severityColor(a.severity),boxShadow:`0 0 6px ${severityColor(a.severity)}`}}/>
+  //           <div style={{flex:1,overflow:"hidden"}}>
+  //             <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.rule_name}</div>
+  //             <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.engine} — {a.process_name || a.host_os}</div>
+  //           </div>
+  //           <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,flexShrink:0,background:`${severityColor(a.severity)}22`,color:severityColor(a.severity),border:`1px solid ${severityColor(a.severity)}44`}}>{a.severity}</span>
+  //         </div>
+  //       ))}
+  //     </div>
+  //   </>
+  // );
 
 
 function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView }) {
