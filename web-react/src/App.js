@@ -577,19 +577,19 @@ function ThreatLevelCard({ alertCount }) {
   );
 }
 
-  return (
-    <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border2)" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>🛡️</span>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2 }}>THREAT LEVEL</span>
-        </div>
-        <span style={{ fontFamily: "var(--display)", fontSize: 15, fontWeight: 700, color }}>{level}</span>
-      </div>
-      <canvas ref={canvasRef} width={280} height={36} style={{ width: "100%", height: 36, display: "block" }} />
-    </div>
-  );
-}
+//   return (
+//     <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border2)" }}>
+//       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+//         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+//           <span style={{ fontSize: 16 }}>🛡️</span>
+//           <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2 }}>THREAT LEVEL</span>
+//         </div>
+//         <span style={{ fontFamily: "var(--display)", fontSize: 15, fontWeight: 700, color }}>{level}</span>
+//       </div>
+//       <canvas ref={canvasRef} width={280} height={36} style={{ width: "100%", height: 36, display: "block" }} />
+//     </div>
+//   );
+// }
 
 // Rustinel EDR widget -- reads real Sigma/YARA/IOC detections from the
 // /rustinel-alerts endpoint (see ai/rustinel_reader.py + app.py). Separate
@@ -619,12 +619,12 @@ function RustinelPanel() {
   );
 }
 
-  const severityColor = (sev) => {
-    const s = (sev||"").toLowerCase();
-    if (s === "critical" || s === "high") return "var(--red)";
-    if (s === "medium") return "var(--orange)";
-    return "var(--accent)"; // low/unknown
-  };
+  // const severityColor = (sev) => {
+  //   const s = (sev||"").toLowerCase();
+  //   if (s === "critical" || s === "high") return "var(--red)";
+  //   if (s === "medium") return "var(--orange)";
+  //   return "var(--accent)"; // low/unknown
+  // };
 
   return (
     <>
@@ -967,14 +967,14 @@ const [sessionId, setSessionId] = useState(() => {
   useEffect(() => { const t = setTimeout(() => { fetch(`${FLASK_URL}/stats`).then(r=>r.json()).then(setStats).catch(()=>{}); }, 500); return () => clearTimeout(t); }, []);
   useEffect(() => { const t = setTimeout(() => { fetch(`${FLASK_URL}/health`).then(r=>r.json()).then(setHealth).catch(()=>{}); }, 1000); return () => clearTimeout(t); }, []);
 
-  useEffect(() => {
-    fetch(`${FLASK_URL}/sentinel-config`).then(r=>r.json()).then(data=>{
-      if (data.server) {
-        const ip = data.server.replace("http://","").split(":")[0];
-        setSentinelIP(ip);
-      }
-    }).catch(()=>{});
-  }, []);
+  // useEffect(() => {
+  //   fetch(`${FLASK_URL}/sentinel-config`).then(r=>r.json()).then(data=>{
+  //     if (data.server) {
+  //       const ip = data.server.replace("http://","").split(":")[0];
+  //       setSentinelIP(ip);
+  //     }
+  //   }).catch(()=>{});
+  // }, []);
 
   useEffect(() => {
     const loadLastSession = async () => {
@@ -1323,21 +1323,21 @@ setLoading(false);
   //   setUploading(false);
   // };
 
-  const saveSentinelIP = async () => {
-    if (!sentinelIP.trim()) return;
-    setSentinelSaving(true);
-    try {
-      const res = await fetch(`${FLASK_URL}/sentinel-config`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ip:sentinelIP.trim()})
-      });
-      const data = await res.json();
-      if (data.message) showToast("Sentinel IP updated");
-      else showToast(data.error||"Save failed");
-    } catch { showToast("Cannot connect to Flask"); }
-    setSentinelSaving(false);
-  };
+  // const saveSentinelIP = async () => {
+  //   if (!sentinelIP.trim()) return;
+  //   setSentinelSaving(true);
+  //   try {
+  //     const res = await fetch(`${FLASK_URL}/sentinel-config`,{
+  //       method:"POST",
+  //       headers:{"Content-Type":"application/json"},
+  //       body:JSON.stringify({ip:sentinelIP.trim()})
+  //     });
+  //     const data = await res.json();
+  //     if (data.message) showToast("Sentinel IP updated");
+  //     else showToast(data.error||"Save failed");
+  //   } catch { showToast("Cannot connect to Flask"); }
+  //   setSentinelSaving(false);
+  // };
 
   const alertCount  = alerts.filter(a=>a.event_type==="alert").length;
   const uniqueIPs   = [...new Set(alerts.map(a=>a.src_ip).filter(Boolean))].length;
