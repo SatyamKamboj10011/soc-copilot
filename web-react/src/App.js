@@ -577,36 +577,6 @@ function ThreatLevelCard({ alertCount }) {
   );
 }
 
-//   return (
-//     <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border2)" }}>
-//       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-//         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-//           <span style={{ fontSize: 16 }}>🛡️</span>
-//           <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2 }}>THREAT LEVEL</span>
-//         </div>
-//         <span style={{ fontFamily: "var(--display)", fontSize: 15, fontWeight: 700, color }}>{level}</span>
-//       </div>
-//       <canvas ref={canvasRef} width={280} height={36} style={{ width: "100%", height: 36, display: "block" }} />
-//     </div>
-//   );
-// }
-
-// Rustinel EDR widget -- reads real Sigma/YARA/IOC detections from the
-// /rustinel-alerts endpoint (see ai/rustinel_reader.py + app.py). Separate
-// from the Connected Machines list above it: that shows Sentinel's raw
-// connection heuristic, this shows Rustinel's actual rule-based detections
-// -- two different depths of endpoint visibility, kept visually consistent
-// (same list-item pattern) but functionally distinct.
-// function RustinelPanel() {
-//   const [ralerts, setRalerts] = useState([]);
-//   useEffect(() => {
-//     const fetchAlerts = () => fetch(`${FLASK_URL}/rustinel-alerts?limit=5`).then(r=>r.json()).then(setRalerts).catch(()=>{});
-//     fetchAlerts();
-//     const interval = setInterval(fetchAlerts, 20000);
-//     return () => clearInterval(interval);
-//   }, []);
-
-
 function RustinelPanel() {
   return (
     <>
@@ -618,28 +588,6 @@ function RustinelPanel() {
     </>
   );
 }
-
-
-  // return (
-  //   <>
-  //     <div className="panel-divider"/>
-  //     <div className="section-label">Rustinel EDR</div>
-  //     <div style={{padding:"8px 20px"}}>
-  //       {ralerts.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO DETECTIONS</div>}
-  //       {ralerts.map((a,i)=>(
-  //         <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)"}}>
-  //           <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:severityColor(a.severity),boxShadow:`0 0 6px ${severityColor(a.severity)}`}}/>
-  //           <div style={{flex:1,overflow:"hidden"}}>
-  //             <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.rule_name}</div>
-  //             <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.engine} — {a.process_name || a.host_os}</div>
-  //           </div>
-  //           <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,flexShrink:0,background:`${severityColor(a.severity)}22`,color:severityColor(a.severity),border:`1px solid ${severityColor(a.severity)}44`}}>{a.severity}</span>
-  //         </div>
-  //       ))}
-  //     </div>
-  //   </>
-  // );
-
 
 function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView }) {
   const canvasRef = useRef(null);
