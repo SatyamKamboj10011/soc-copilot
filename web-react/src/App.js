@@ -645,7 +645,7 @@ function RustinelPanel() {
       </div>
     </>
   );
-}
+
 
 function ThreatSummaryPanel({ alerts, machines, siraAvatarRef, onOpenFullView }) {
   const canvasRef = useRef(null);
