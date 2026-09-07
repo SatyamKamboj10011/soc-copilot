@@ -1298,7 +1298,12 @@ def health():
         # real ping below instead, since it genuinely might be running.
         ollama_status = "skipped (DEPLOYED=true, OLLAMA_AVAILABLE=false)"
     else:
-        ok, err = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 5)
+        # Was 5s -- confirmed via real testing that this server's CPU-only
+        # inference (no GPU, shared with Flask/ChromaDB/Nginx/honeypot sync
+        # on 2 vCPUs) can genuinely take longer than that even when the
+        # model is already warm, which was making /health report Ollama as
+        # "offline" when it was actually just slow, not actually down.
+        ok, err = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 20)
         ollama_status = "ok" if ok else f"offline — {err}"
 
     cloud_status = "not checked"
@@ -2676,10 +2681,12 @@ def _compliance_context():
     unique_ips = len(set(l.get('src_ip') for l in logs if l.get('src_ip')))
     critical_alerts = sum(1 for l in alert_events if l.get('alert', {}).get('severity') == 1)
 
-    if DEPLOYED:
+    if DEPLOYED and not OLLAMA_AVAILABLE:
         ollama_ok = False
     else:
-        ollama_ok, _ = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 5)
+        # Same 5s -> 20s fix as /health -- this server's CPU-only inference
+        # can genuinely take longer than 5s even when warm.
+        ollama_ok, _ = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 20)
     cloud_ok = None
     if DEPLOYED:
         cloud_ok, _ = _ping_with_timeout(lambda: get_llm(DEFAULT_CLOUD_MODEL)[0].invoke("ping"), 8)
