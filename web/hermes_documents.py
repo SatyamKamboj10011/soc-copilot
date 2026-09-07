@@ -24,21 +24,22 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 # ==================== REPORT STYLING ====================
 
-INK    = colors.HexColor("#0B1220")
-MUTED  = colors.HexColor("#667085")
-RULE   = colors.HexColor("#D9E1EA")
-BAND   = colors.HexColor("#0A1020")
-ACCENT = colors.HexColor("#19B5FE")
-ACCENT_2 = colors.HexColor("#7C5CFC")
-SOFT   = colors.HexColor("#F4F7FB")
-SOFT_BLUE = colors.HexColor("#EAF7FF")
-WHITE  = colors.white
+INK = colors.HexColor("#0A1020")
+MUTED = colors.HexColor("#667085")
+RULE = colors.HexColor("#D7E0EA")
+BAND = colors.HexColor("#07101F")
+ACCENT = colors.HexColor("#00C2FF")
+PURPLE = colors.HexColor("#7457FF")
+SOFT = colors.HexColor("#F5F8FC")
+SOFT_BLUE = colors.HexColor("#EAF8FF")
+CARD = colors.white
+WHITE = colors.white
 
 SEVERITY_COLOURS = {
-    "CRITICAL": colors.HexColor("#E5484D"),
-    "HIGH":     colors.HexColor("#F08C46"),
-    "MEDIUM":   colors.HexColor("#D9A441"),
-    "LOW":      colors.HexColor("#2CB67D"),
+    "CRITICAL": colors.HexColor("#F04438"),
+    "HIGH": colors.HexColor("#F79009"),
+    "MEDIUM": colors.HexColor("#EAAA08"),
+    "LOW": colors.HexColor("#12B76A"),
 }
 
 SECTION_NAMES = [
@@ -53,23 +54,24 @@ ACTION_SECTIONS = {"RECOMMENDED ACTIONS", "PRIORITY ACTIONS", "IMMEDIATE ACTIONS
 _styles = getSampleStyleSheet()
 ST = {
     "title": ParagraphStyle("t", parent=_styles["Title"], fontName="Helvetica-Bold",
-                            fontSize=22, leading=26, alignment=TA_LEFT,
-                            textColor=INK, spaceAfter=3),
+                            fontSize=25, leading=29, textColor=INK),
     "sub": ParagraphStyle("s", parent=_styles["Normal"], fontName="Helvetica",
-                          fontSize=9.2, leading=13, textColor=MUTED, spaceAfter=12),
+                          fontSize=8.5, leading=12, textColor=MUTED, spaceAfter=8),
     "h": ParagraphStyle("h", parent=_styles["Heading2"], fontName="Helvetica-Bold",
                         fontSize=10.5, leading=13, textColor=INK,
-                        spaceBefore=15, spaceAfter=7),
+                        spaceBefore=13, spaceAfter=6),
     "body": ParagraphStyle("b", parent=_styles["Normal"], fontName="Helvetica",
-                           fontSize=9.2, leading=14, textColor=INK, spaceAfter=7),
+                           fontSize=9.1, leading=14, textColor=INK, spaceAfter=7),
     "cell": ParagraphStyle("c", parent=_styles["Normal"], fontName="Helvetica",
-                           fontSize=8.2, leading=11.5, textColor=INK),
+                           fontSize=8.1, leading=11.2, textColor=INK),
     "cellh": ParagraphStyle("ch", parent=_styles["Normal"], fontName="Helvetica-Bold",
-                            fontSize=7.3, leading=10, textColor=WHITE),
-    "label": ParagraphStyle("label", parent=_styles["Normal"], fontName="Helvetica-Bold",
-                            fontSize=6.8, leading=8, textColor=MUTED),
+                            fontSize=7, leading=9, textColor=WHITE),
+    "metric": ParagraphStyle("metric", parent=_styles["Normal"], fontName="Helvetica-Bold",
+                             fontSize=13, leading=15, textColor=INK),
+    "metric_label": ParagraphStyle("metric_label", parent=_styles["Normal"],
+                                   fontName="Helvetica-Bold", fontSize=6.4,
+                                   leading=8, textColor=MUTED),
 }
-
 
 def _esc(text):
     """Escape XML special characters before handing text to Paragraph."""
@@ -133,51 +135,56 @@ def _table(rows, widths, zebra=True):
     t = Table(data, colWidths=widths, repeatRows=1)
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), BAND),
-        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.45, RULE),
-        ("LINEABOVE", (0, 0), (-1, 0), 0.7, ACCENT),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
         ("RIGHTPADDING", (0, 0), (-1, -1), 8),
         ("TOPPADDING", (0, 0), (-1, 0), 7),
         ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
         ("TOPPADDING", (0, 1), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4, RULE),
+        ("LINEABOVE", (0, 0), (-1, 0), 1.2, ACCENT),
+        ("BOX", (0, 0), (-1, -1), 0.6, RULE),
     ]
     if zebra:
-        style.append(("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, SOFT]))
+        style.append(("ROWBACKGROUNDS", (0, 1), (-1, -1), [CARD, SOFT]))
     t.setStyle(TableStyle(style))
     return t
 
 
 def _furniture(canvas, doc):
-    """Premium classification band and footer, drawn on every page."""
+    """Premium command-center page shell; functionality is unchanged."""
     canvas.saveState()
     w, h = A4
 
     canvas.setFillColor(BAND)
-    canvas.rect(0, h - 15 * mm, w, 15 * mm, stroke=0, fill=1)
+    canvas.rect(0, h - 18 * mm, w, 18 * mm, stroke=0, fill=1)
     canvas.setFillColor(ACCENT)
-    canvas.rect(0, h - 15 * mm, w, 1.2 * mm, stroke=0, fill=1)
+    canvas.rect(0, h - 18 * mm, w, 1.5 * mm, stroke=0, fill=1)
 
     canvas.setFillColor(WHITE)
-    canvas.setFont("Helvetica-Bold", 8)
-    canvas.drawString(18 * mm, h - 9.5 * mm, "SIRA")
-    canvas.setFont("Helvetica", 7.2)
-    canvas.drawString(31 * mm, h - 9.5 * mm, "SOC INVESTIGATION COPILOT")
-    canvas.setFont("Helvetica-Bold", 7)
-    canvas.drawRightString(w - 18 * mm, h - 9.5 * mm,
-                           "CONFIDENTIAL  ·  INTERNAL USE ONLY")
+    canvas.setFont("Helvetica-Bold", 9)
+    canvas.drawString(17 * mm, h - 10 * mm, "SIRA")
+    canvas.setFont("Helvetica", 6.8)
+    canvas.drawString(30 * mm, h - 10 * mm,
+                      "SECURITY INVESTIGATION & RESPONSE ANALYTICS")
+
+    canvas.setFillColor(colors.HexColor("#12B76A"))
+    canvas.circle(w - 48 * mm, h - 9.5 * mm, 1.4 * mm, stroke=0, fill=1)
+    canvas.setFillColor(WHITE)
+    canvas.setFont("Helvetica-Bold", 6.8)
+    canvas.drawString(w - 44 * mm, h - 10 * mm, "REPORT ACTIVE")
+    canvas.drawRightString(w - 17 * mm, h - 10 * mm, "CONFIDENTIAL")
 
     canvas.setStrokeColor(RULE)
-    canvas.setLineWidth(0.6)
-    canvas.line(18 * mm, 14 * mm, w - 18 * mm, 14 * mm)
+    canvas.setLineWidth(0.5)
+    canvas.line(17 * mm, 14 * mm, w - 17 * mm, 14 * mm)
     canvas.setFillColor(MUTED)
-    canvas.setFont("Helvetica", 7)
-    canvas.drawString(18 * mm, 9.5 * mm,
-                      "Generated automatically by SIRA  ·  Verify findings before acting.")
-    canvas.setFont("Helvetica-Bold", 7)
-    canvas.drawRightString(w - 18 * mm, 9.5 * mm, f"PAGE {doc.page:02d}")
+    canvas.setFont("Helvetica", 6.8)
+    canvas.drawString(17 * mm, 9 * mm,
+                      "SIRA automated analysis  ·  Verify findings before acting")
+    canvas.setFont("Helvetica-Bold", 6.8)
+    canvas.drawRightString(w - 17 * mm, 9 * mm, f"{doc.page:02d}")
     canvas.restoreState()
 
 
@@ -187,8 +194,8 @@ def _build_pdf(title, content, meta_lines=None, source_query="", analyst=None,
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        topMargin=26 * mm, bottomMargin=20 * mm,
-        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=28 * mm, bottomMargin=21 * mm,
+        leftMargin=17 * mm, rightMargin=17 * mm,
         title=title, author="SIRA",
     )
     W = A4[0] - 36 * mm
@@ -198,47 +205,73 @@ def _build_pdf(title, content, meta_lines=None, source_query="", analyst=None,
     severity = _severity_of(content)
     story = []
 
+    # ==================== COMMAND-CENTER HERO ====================
     if severity:
-        chip = Table(
-            [[Paragraph(f'<font color="white"><b>{severity}</b></font>', ST["cellh"])]],
-            colWidths=[31 * mm])
-        chip.setStyle(TableStyle([
+        sev = Table(
+            [[Paragraph(f"<b>{severity}</b>", ST["cellh"])]],
+            colWidths=[30 * mm], rowHeights=[12 * mm])
+        sev.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), SEVERITY_COLOURS[severity]),
-            ("BOX", (0, 0), (-1, -1), 0.5, SEVERITY_COLOURS[severity]),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ]))
-        head = Table([[Paragraph(_esc(title), ST["title"]), chip]],
-                     colWidths=[W - 34 * mm, 34 * mm])
-        head.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ]))
-        story.append(head)
+        hero = Table([[
+            Paragraph(
+                '<font color="#00C2FF" size="7"><b>SECURITY INVESTIGATION</b></font><br/>'
+                f'<font size="23"><b>{_esc(title)}</b></font><br/>'
+                '<font color="#667085" size="8">Automated investigation report · SIRA analysis</font>',
+                ST["body"]),
+            sev
+        ]], colWidths=[W - 33 * mm, 30 * mm])
     else:
-        story.append(Paragraph(_esc(title), ST["title"]))
+        hero = Table([[
+            Paragraph(
+                '<font color="#00C2FF" size="7"><b>SECURITY INVESTIGATION</b></font><br/>'
+                f'<font size="23"><b>{_esc(title)}</b></font><br/>'
+                '<font color="#667085" size="8">Automated investigation report · SIRA analysis</font>',
+                ST["body"])
+        ]], colWidths=[W])
 
-    story.append(Paragraph(
-        "AUTOMATED INVESTIGATION REPORT  ·  SIRA ANALYSIS",
-        ParagraphStyle("heroSub", parent=ST["sub"], fontName="Helvetica-Bold",
-                       fontSize=7.5, textColor=ACCENT)
-    ))
-
-    meta = _table(
-        [["CASE ID", "GENERATED", "ANALYST", "MODEL"],
-         [_case_id(title, content),
-          datetime.utcnow().strftime("%d %B %Y, %H:%M UTC"),
-          _esc(analyst or "—"),
-          _esc(model or "—")]],
-        [W * 0.22, W * 0.32, W * 0.23, W * 0.23], zebra=False)
-    meta.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 0.7, RULE),
-        ("BACKGROUND", (0, 1), (-1, -1), SOFT_BLUE),
+    hero.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), CARD),
+        ("BOX", (0, 0), (-1, -1), 0.8, RULE),
+        ("LINEBEFORE", (0, 0), (0, 0), 4, ACCENT),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (0, 0), 13),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 11),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 11),
     ]))
-    story.append(meta)
+    story.append(hero)
+    story.append(Spacer(1, 7))
+
+    # ==================== TELEMETRY CARD ====================
+    telemetry = Table([
+        [Paragraph("CASE ID", ST["metric_label"]),
+         Paragraph("GENERATED", ST["metric_label"]),
+         Paragraph("ANALYST", ST["metric_label"]),
+         Paragraph("MODEL", ST["metric_label"])],
+        [Paragraph(_case_id(title, content), ST["metric"]),
+         Paragraph(datetime.utcnow().strftime("%d %b %Y · %H:%M UTC"), ST["cell"]),
+         Paragraph(_esc(analyst or "—"), ST["cell"]),
+         Paragraph(_esc(model or "—"), ST["cell"])]
+    ], colWidths=[W*.24, W*.28, W*.24, W*.24])
+    telemetry.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), SOFT_BLUE),
+        ("BOX", (0, 0), (-1, -1), 0.7, RULE),
+        ("LINEBEFORE", (0, 0), (0, -1), 3, PURPLE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+        ("TOPPADDING", (0, 1), (-1, 1), 1),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 7),
+    ]))
+    story.append(telemetry)
+    story.append(Spacer(1, 5))
 
     if source_query:
         story.append(Spacer(1, 4))
@@ -251,7 +284,7 @@ def _build_pdf(title, content, meta_lines=None, source_query="", analyst=None,
                                ST["body"]))
 
     if ips or sigs or ports or cves:
-        story.append(Paragraph("Indicators of Compromise", ST["h"]))
+        story.append(Paragraph('<font color="#00C2FF"><b>01</b></font>  INDICATORS OF COMPROMISE', ST["h"]))
         rows = [["TYPE", "INDICATOR", "CONTEXT"]]
         rows += [["IP address", f'<font face="Courier">{ip}</font>',
                   "Observed in alert traffic"] for ip in ips[:8]]
@@ -263,7 +296,7 @@ def _build_pdf(title, content, meta_lines=None, source_query="", analyst=None,
         story.append(_table(rows, [W * 0.18, W * 0.37, W * 0.45]))
 
     if mitre:
-        story.append(Paragraph("MITRE ATT&amp;CK Mapping", ST["h"]))
+        story.append(Paragraph('<font color="#7457FF"><b>02</b></font>  MITRE ATT&amp;CK MAPPING', ST["h"]))
         rows = [["TACTIC", "TECHNIQUE", "ID"]]
         rows += [[_esc(m.get("tactic", "\u2014")),
                   _esc(m.get("technique", "\u2014")),
@@ -281,7 +314,7 @@ def _build_pdf(title, content, meta_lines=None, source_query="", analyst=None,
             story.append(Paragraph(_esc(para).replace("\n", "<br/>"), ST["body"]))
 
     if steps:
-        story.append(Paragraph("Investigation Trail", ST["h"]))
+        story.append(Paragraph('<font color="#00C2FF"><b>03</b></font>  INVESTIGATION TRAIL', ST["h"]))
         story.append(Paragraph(
             "Each step the agent executed, in order. Included so the conclusion "
             "above can be verified rather than taken on trust.", ST["body"]))
@@ -298,7 +331,7 @@ def _build_pdf(title, content, meta_lines=None, source_query="", analyst=None,
 
     actions = next((b for n, b in sections if n in ACTION_SECTIONS), None)
     if actions:
-        story.append(Paragraph("Recommended Actions", ST["h"]))
+        story.append(Paragraph('<font color="#12B76A"><b>04</b></font>  RECOMMENDED ACTIONS', ST["h"]))
         items = [l.strip() for l in actions.split("\n") if re.match(r"^\d+\.", l.strip())]
         if not items:
             items = [l.strip() for l in actions.split("\n") if l.strip()]
