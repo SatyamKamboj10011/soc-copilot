@@ -860,6 +860,16 @@ export default function App() {
   const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
   const [actionsPanelPos, setActionsPanelPos] = useState(null);
   const [actionsBusy, setActionsBusy] = useState(null); // id currently being approved/rejected, for a disabled state
+  // Was incorrectly driven by health.status (the OVERALL system health --
+  // ChromaDB, cloud, Ollama all factored in), meaning the Suricata/Zeek
+  // dots turned red whenever ANY unrelated part of the system had a rough
+  // moment, even though the sensors themselves were running fine. This
+  // tracks the sensors' own actual status instead, via whether the
+  // honeypot sync connection is genuinely alive.
+  const [sensorsConnected, setSensorsConnected] = useState(false);
+  const [emailScheduleOpen, setEmailScheduleOpen] = useState(false);
+  const [emailScheduleData, setEmailScheduleData] = useState({ email: "", scheduled_time: "09:00", enabled: false });
+  const [emailScheduleSaving, setEmailScheduleSaving] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
@@ -1058,24 +1068,85 @@ const [sessionId, setSessionId] = useState(() => {
     return () => clearInterval(interval);
   }, [fetchPendingActions]);
 
+  const fetchSensorStatus = useCallback(() => {
+    fetch(`${FLASK_URL}/pipeline-status`)
+      .then(r => r.json())
+      .then(d => setSensorsConnected(!!d.honeypot_sync?.connected))
+      .catch(() => setSensorsConnected(false));
+  }, []);
+  useEffect(() => {
+    fetchSensorStatus();
+    const interval = setInterval(fetchSensorStatus, 15000);
+    return () => clearInterval(interval);
+  }, [fetchSensorStatus]);
+
   const approveAction = async (id) => {
     setActionsBusy(id);
     try {
       const res = await fetch(`${FLASK_URL}/pending-actions/${id}/approve`, { method: "POST" });
       const data = await res.json();
-      showToast(data.detail || `Action #${id} approved`);
-    } catch { showToast("Failed to approve action"); }
+      // Was missing entirely -- fetch() only throws on a genuine network
+      // failure, not on a 4xx/5xx response, so a real server-side error
+      // (e.g. a database lock) was silently shown as if it succeeded.
+      if (!res.ok) {
+        showToast(data.error || `Failed to approve action #${id}`);
+      } else {
+        showToast(data.detail || `Action #${id} approved`);
+      }
+    } catch { showToast("Failed to approve action \u2014 could not reach the server"); }
     setActionsBusy(null);
     fetchPendingActions();
   };
   const rejectAction = async (id) => {
     setActionsBusy(id);
     try {
-      await fetch(`${FLASK_URL}/pending-actions/${id}/reject`, { method: "POST" });
-      showToast(`Action #${id} rejected`);
-    } catch { showToast("Failed to reject action"); }
+      const res = await fetch(`${FLASK_URL}/pending-actions/${id}/reject`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || `Failed to reject action #${id}`);
+      } else {
+        showToast(`Action #${id} rejected`);
+      }
+    } catch { showToast("Failed to reject action \u2014 could not reach the server"); }
     setActionsBusy(null);
     fetchPendingActions();
+  };
+
+  const currentUsername = localStorage.getItem("username") || "unknown";
+
+  const openEmailSchedule = () => {
+    setEmailScheduleOpen(true);
+    fetch(`${FLASK_URL}/email-schedule?username=${encodeURIComponent(currentUsername)}`)
+      .then(r => r.json())
+      .then(d => setEmailScheduleData({
+        email: d.email || "",
+        scheduled_time: d.scheduled_time || "09:00",
+        enabled: !!d.enabled,
+      }))
+      .catch(() => {});
+  };
+
+  const saveEmailSchedule = async () => {
+    setEmailScheduleSaving(true);
+    try {
+      const res = await fetch(`${FLASK_URL}/email-schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: currentUsername, ...emailScheduleData }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Could not save daily report settings");
+      } else {
+        showToast(emailScheduleData.enabled
+          ? `Daily reports enabled — sent to ${emailScheduleData.email} at ${emailScheduleData.scheduled_time} UTC`
+          : "Daily reports disabled");
+        setEmailScheduleOpen(false);
+      }
+    } catch {
+      showToast("Could not reach the server to save settings");
+    }
+    setEmailScheduleSaving(false);
   };
 
   const checkReputation = async (ip) => { if (reputations[ip]) return; try { const data = await fetch(`${FLASK_URL}/reputation/${ip}`).then(r=>r.json()); setReputations(prev=>({...prev,[ip]:data})); } catch {} };
@@ -1365,14 +1436,22 @@ setLoading(false);
           </div>
           <div className="nav-right">
             <div className="nav-status">
-              <div className="status-pill"><div className={`ndot ${health?.status==="ok"?"ndot-green":"ndot-red"}`}/>SURICATA</div>
-              <div className="status-pill"><div className={`ndot ${health?.status==="ok"?"ndot-green":"ndot-red"}`}/>ZEEK</div>
+              <div className="status-pill"><div className={`ndot ${sensorsConnected?"ndot-green":"ndot-red"}`}/>SURICATA</div>
+              <div className="status-pill"><div className={`ndot ${sensorsConnected?"ndot-green":"ndot-red"}`}/>ZEEK</div>
               <div className="status-pill"><div className="ndot ndot-red"/>{stats?.alert_count??alertCount} ALERTS</div>
               <div className="status-pill" style={{cursor:"pointer", background: pendingActions.length>0 ? "var(--purple-dim)" : undefined, border: pendingActions.length>0 ? "1px solid var(--purple)" : undefined}} onClick={()=>setActionsPanelOpen(true)} title="Actions proposed by Hermes, awaiting your approval">
                 <div className="ndot" style={{background: pendingActions.length>0 ? "var(--purple)" : "var(--text-dim)", boxShadow: pendingActions.length>0 ? "0 0 6px var(--purple)" : "none", animation: pendingActions.length>0 ? "blink 1.4s infinite" : "none"}}/>
                 {pendingActions.length} PENDING
               </div>
               <div className="status-pill"><div className={`ndot ${(health?.ollama==="ok"||health?.cloud==="ok")?"ndot-cyan":"ndot-red"}`}/>AI {(health?.ollama==="ok"||health?.cloud==="ok")?"READY":"OFFLINE"}</div>
+              <button
+                className="status-pill"
+                onClick={openEmailSchedule}
+                title="Set up automatic daily email reports"
+                style={{ cursor: "pointer", background: "none", border: "1px solid var(--border2)", color: "var(--text-mid)" }}
+              >
+                ✉ DAILY REPORT
+              </button>
             </div>
             <div className="nav-time"><NavClock/></div>
             <div className="user-pill"><div className="user-avatar">{username[0].toUpperCase()}</div>{username.toUpperCase()}</div>
@@ -1907,6 +1986,58 @@ setLoading(false);
           </div>
         </div>
       ))}
+    </div>
+  </div>,
+  document.body
+)}
+
+      {emailScheduleOpen && createPortal(
+  <div className="float-panel" style={{ right: 20, bottom: 20 }}>
+    <button className="modal-close" onClick={()=>setEmailScheduleOpen(false)} style={{top:14,right:14,zIndex:5}}>✕</button>
+    <div className="float-panel-body">
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <div style={{width:34,height:34,borderRadius:10,background:"linear-gradient(135deg,var(--accent),var(--purple))",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>✉</div>
+        <div>
+          <div style={{fontFamily:"var(--display)",fontSize:16,fontWeight:600,color:"var(--text)"}}>Daily Email Report</div>
+          <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-mid)"}}>Automatic PDF summary, sent every day at a time you choose</div>
+        </div>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,color:"var(--text-dim)",marginBottom:6}}>EMAIL ADDRESS</div>
+        <input
+          type="email"
+          value={emailScheduleData.email}
+          onChange={e=>setEmailScheduleData(prev=>({...prev, email: e.target.value}))}
+          placeholder="you@example.com"
+          style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid var(--border2)",color:"var(--text)",fontFamily:"var(--sans)",fontSize:12,outline:"none"}}
+        />
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,color:"var(--text-dim)",marginBottom:6}}>TIME (UTC, 24-HOUR)</div>
+        <input
+          type="time"
+          value={emailScheduleData.scheduled_time}
+          onChange={e=>setEmailScheduleData(prev=>({...prev, scheduled_time: e.target.value}))}
+          style={{width:"100%",boxSizing:"border-box",padding:"9px 11px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid var(--border2)",color:"var(--text)",fontFamily:"var(--mono)",fontSize:12,outline:"none"}}
+        />
+      </div>
+
+      <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:18,cursor:"pointer"}}>
+        <input
+          type="checkbox"
+          checked={emailScheduleData.enabled}
+          onChange={e=>setEmailScheduleData(prev=>({...prev, enabled: e.target.checked}))}
+        />
+        <span style={{fontFamily:"var(--sans)",fontSize:12,color:"var(--text)"}}>Send me this report automatically every day</span>
+      </label>
+
+      <button
+        onClick={saveEmailSchedule}
+        disabled={emailScheduleSaving}
+        style={{width:"100%",padding:"10px",borderRadius:8,background:"var(--accent-dim, rgba(41,211,255,0.08))",border:"1px solid var(--accent, #29D3FF)",color:"var(--accent, #29D3FF)",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,letterSpacing:1,cursor:emailScheduleSaving?"not-allowed":"pointer",opacity:emailScheduleSaving?0.5:1}}
+      >{emailScheduleSaving ? "SAVING…" : "SAVE"}</button>
     </div>
   </div>,
   document.body

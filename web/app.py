@@ -98,7 +98,13 @@ bcrypt = Bcrypt(app)
 DB_PATH = os.path.join(os.path.dirname(__file__), 'users.db')
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    # Was sqlite3.connect(DB_PATH) with no timeout -- SQLite's own default
+    # is only 5 seconds before raising "database is locked" if another
+    # connection (honeypot_log_sync, index_rebuild, and other background
+    # threads all touch this same file) happens to hold a write lock at
+    # that moment. 30s gives real concurrent access enough room to
+    # resolve naturally instead of erroring under normal, expected load.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -138,6 +144,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sentinel_block_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ip TEXT NOT NULL
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS email_schedule (
+            username        TEXT PRIMARY KEY,
+            email           TEXT NOT NULL,
+            scheduled_time  TEXT NOT NULL,
+            enabled         INTEGER NOT NULL DEFAULT 1,
+            last_sent_date  TEXT
         )
     ''')
     conn.commit()
@@ -2402,64 +2417,74 @@ def list_pending_actions():
 
 @app.route('/pending-actions/<int:action_id>/approve', methods=['POST'])
 def approve_pending_action(action_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
-    if not row:
-        conn.close()
-        return jsonify({"error": "not found"}), 404
-    if row["status"] != "pending":
-        conn.close()
-        return jsonify({"error": f"action is already {row['status']}, not pending"}), 400
+    try:
+        conn = get_db()
+        row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "not found"}), 404
+        if row["status"] != "pending":
+            conn.close()
+            return jsonify({"error": f"action is already {row['status']}, not pending"}), 400
 
-    action_type = row["action_type"]
-    target = row["target"]
-    now = datetime.utcnow().isoformat() + "Z"
+        action_type = row["action_type"]
+        target = row["target"]
+        now = datetime.utcnow().isoformat() + "Z"
 
-    if action_type == "block_ip":
-        # Reuses the existing Sentinel block-queue mechanism -- delivered
-        # to any polling endpoint agent's next /ingest check-in.
-        conn.execute("INSERT INTO sentinel_block_queue (ip) VALUES (?)", (target,))
-        conn.execute("UPDATE pending_actions SET status='executed', executed_at=?, result=? WHERE id=?",
-                     (now, "Queued for next Sentinel check-in", action_id))
-        conn.commit()
+        if action_type == "block_ip":
+            # Reuses the existing Sentinel block-queue mechanism -- delivered
+            # to any polling endpoint agent's next /ingest check-in.
+            conn.execute("INSERT INTO sentinel_block_queue (ip) VALUES (?)", (target,))
+            conn.execute("UPDATE pending_actions SET status='executed', executed_at=?, result=? WHERE id=?",
+                         (now, "Queued for next Sentinel check-in", action_id))
+            conn.commit()
+            conn.close()
+            return jsonify({"status": "executed", "detail": "Queued for next Sentinel check-in"})
+
+        elif action_type == "add_suricata_rule":
+            ok, detail = _execute_add_suricata_rule(target)
+            conn.execute("UPDATE pending_actions SET status=?, executed_at=?, result=? WHERE id=?",
+                         ("executed" if ok else "failed", now, detail, action_id))
+            conn.commit()
+            conn.close()
+            return jsonify({"status": "executed" if ok else "failed", "detail": detail})
+
+        elif action_type in ("isolate_endpoint", "restart_service"):
+            # Marked approved and queryable, but NOT yet actually executable --
+            # that needs new command handling inside sentinel_launcher.py
+            # (the endpoint agent) which isn't wired up yet. Kept as a real,
+            # visible "approved but not yet executable" state rather than
+            # silently pretending it worked.
+            conn.execute("UPDATE pending_actions SET status='approved', executed_at=?, result=? WHERE id=?",
+                         (now, "Approved -- execution for this action type is not yet implemented on the endpoint agent", action_id))
+            conn.commit()
+            conn.close()
+            return jsonify({"status": "approved", "detail": "Approved, but endpoint-agent execution isn't wired up yet for this action type"})
+
         conn.close()
-        return jsonify({"status": "executed", "detail": "Queued for next Sentinel check-in"})
-
-    elif action_type == "add_suricata_rule":
-        ok, detail = _execute_add_suricata_rule(target)
-        conn.execute("UPDATE pending_actions SET status=?, executed_at=?, result=? WHERE id=?",
-                     ("executed" if ok else "failed", now, detail, action_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "executed" if ok else "failed", "detail": detail})
-
-    elif action_type in ("isolate_endpoint", "restart_service"):
-        # Marked approved and queryable, but NOT yet actually executable --
-        # that needs new command handling inside sentinel_launcher.py
-        # (the endpoint agent) which isn't wired up yet. Kept as a real,
-        # visible "approved but not yet executable" state rather than
-        # silently pretending it worked.
-        conn.execute("UPDATE pending_actions SET status='approved', executed_at=?, result=? WHERE id=?",
-                     (now, "Approved -- execution for this action type is not yet implemented on the endpoint agent", action_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "approved", "detail": "Approved, but endpoint-agent execution isn't wired up yet for this action type"})
-
-    conn.close()
-    return jsonify({"error": "unknown action_type"}), 400
+        return jsonify({"error": "unknown action_type"}), 400
+    except Exception as e:
+        # Was unguarded -- a genuine failure here (e.g. a persistent SQLite
+        # lock) crashed with an unhandled exception, which the frontend
+        # then couldn't distinguish from success (see approveAction's fix).
+        # A real, visible error is far better than a silent false-positive.
+        return jsonify({"error": f"Could not approve action: {e}"}), 500
 
 
 @app.route('/pending-actions/<int:action_id>/reject', methods=['POST'])
 def reject_pending_action(action_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
-    if not row:
+    try:
+        conn = get_db()
+        row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "not found"}), 404
+        conn.execute("UPDATE pending_actions SET status='rejected' WHERE id=?", (action_id,))
+        conn.commit()
         conn.close()
-        return jsonify({"error": "not found"}), 404
-    conn.execute("UPDATE pending_actions SET status='rejected' WHERE id=?", (action_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "rejected"})
+        return jsonify({"status": "rejected"})
+    except Exception as e:
+        return jsonify({"error": f"Could not reject action: {e}"}), 500
 
 
 
@@ -2915,6 +2940,189 @@ def _index_rebuild_loop():
         time.sleep(REBUILD_INTERVAL_SECONDS)
 
 
+def _build_daily_summary_content():
+    """Builds the text content for a daily automated report, using the same
+    SECTION_NAMES headings hermes_documents.py's PDF builder already knows
+    how to parse into a structured report -- this reuses that renderer
+    rather than building a separate, parallel PDF layout just for this
+    feature."""
+    logs = load_logs()
+    alert_logs = [l for l in logs if l.get("event_type") == "alert"]
+
+    ip_counts = {}
+    for l in alert_logs:
+        ip = l.get("src_ip")
+        if ip:
+            ip_counts[ip] = ip_counts.get(ip, 0) + 1
+    top_ips = sorted(ip_counts.items(), key=lambda x: -x[1])[:5]
+
+    sig_counts = {}
+    for l in alert_logs:
+        sig = l.get("alert", {}).get("signature")
+        if sig:
+            sig_counts[sig] = sig_counts.get(sig, 0) + 1
+    top_sigs = sorted(sig_counts.items(), key=lambda x: -x[1])[:5]
+
+    lines = []
+    lines.append("SUMMARY")
+    lines.append(f"This automated daily report covers {len(logs)} total events "
+                 f"and {len(alert_logs)} alerts currently in the index, across "
+                 f"{len(ip_counts)} distinct source IPs that triggered at least one alert.")
+
+    lines.append("TOP THREATS")
+    if top_ips:
+        for ip, count in top_ips:
+            lines.append(f"{ip} -- {count} alert(s)")
+    else:
+        lines.append("No alerting source IPs in the current data.")
+
+    lines.append("PATTERNS DETECTED")
+    if top_sigs:
+        for sig, count in top_sigs:
+            lines.append(f"{sig} -- seen {count} time(s)")
+    else:
+        lines.append("No repeated signatures in the current data.")
+
+    lines.append("RECOMMENDED ACTIONS")
+    lines.append("1. Review any items in Pending Actions that are still awaiting approval.")
+    lines.append("2. Investigate the top source IPs listed above if they are new or unexpected.")
+    lines.append("3. Confirm the honeypot sync and ChromaDB index are both current via the Pipeline page.")
+
+    return "\n\n".join(lines)
+
+
+def _send_scheduled_report(email):
+    """Builds today's report as a PDF and emails it, reusing the exact same
+    builder and SMTP path as the existing manual /api/documents/email
+    route -- so a scheduled report looks identical to one a user sends
+    themselves, not a separate, differently-formatted thing."""
+    from hermes_documents import _build_pdf
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders as email_encoders
+
+    content = _build_daily_summary_content()
+    title = f"SIRA Daily Report — {datetime.utcnow().strftime('%d %B %Y')}"
+    pdf_buf = _build_pdf(title, content, analyst="Automated Daily Report", model="scheduled")
+
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = int(os.environ.get("SMTP_PORT", 587))
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_pass = os.environ.get("SMTP_PASS")
+    from_email = os.environ.get("SMTP_FROM", smtp_user)
+    if not all([smtp_host, smtp_user, smtp_pass]):
+        print("[email_schedule] SMTP not configured -- skipping scheduled send")
+        return False
+
+    msg = MIMEMultipart()
+    msg["From"] = from_email
+    msg["To"] = email
+    msg["Subject"] = title
+    msg.attach(MIMEText("Your scheduled SIRA daily report is attached.", "plain"))
+    attachment = MIMEBase("application", "pdf")
+    attachment.set_payload(pdf_buf.read())
+    email_encoders.encode_base64(attachment)
+    attachment.add_header("Content-Disposition", "attachment; filename=SIRA_Daily_Report.pdf")
+    msg.attach(attachment)
+
+    try:
+        import smtplib
+        server = smtplib.SMTP(smtp_host, smtp_port)
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(from_email, email, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"[email_schedule] failed to send to {email}: {e}")
+        return False
+
+
+def _email_schedule_loop():
+    """Checks every 60s whether any enabled schedule's time has arrived
+    today and hasn't already been sent -- a simple polling loop, matching
+    the same pattern as _index_rebuild_loop, rather than a real cron
+    daemon, since this app has no OS-level cron access on a shared VM."""
+    while True:
+        try:
+            now = datetime.utcnow()
+            current_hhmm = now.strftime("%H:%M")
+            today = now.strftime("%Y-%m-%d")
+
+            conn = get_db()
+            due = conn.execute(
+                "SELECT username, email FROM email_schedule "
+                "WHERE enabled = 1 AND scheduled_time = ? "
+                "AND (last_sent_date IS NULL OR last_sent_date != ?)",
+                (current_hhmm, today)
+            ).fetchall()
+
+            for row in due:
+                sent = _send_scheduled_report(row["email"])
+                if sent:
+                    conn.execute(
+                        "UPDATE email_schedule SET last_sent_date = ? WHERE username = ?",
+                        (today, row["username"])
+                    )
+                    conn.commit()
+                    print(f"[email_schedule] sent daily report to {row['email']}")
+            conn.close()
+        except Exception as e:
+            print(f"[email_schedule] loop error (will retry next cycle): {e}")
+        time.sleep(60)
+
+
+_email_scheduler_started = False
+
+
+def _maybe_start_email_scheduler():
+    global _email_scheduler_started
+    if _email_scheduler_started:
+        return
+    _email_scheduler_started = True
+    thread = threading.Thread(target=_email_schedule_loop, daemon=True, name="email-scheduler")
+    thread.start()
+    print("[email_schedule] background scheduler thread started")
+
+
+@app.route('/email-schedule', methods=['GET'])
+def get_email_schedule():
+    username = request.args.get('username', 'unknown')
+    conn = get_db()
+    row = conn.execute("SELECT * FROM email_schedule WHERE username = ?", (username,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"enabled": False, "email": "", "scheduled_time": "09:00"})
+    return jsonify(dict(row))
+
+
+@app.route('/email-schedule', methods=['POST'])
+def set_email_schedule():
+    data = request.get_json(force=True) or {}
+    username = data.get('username', 'unknown')
+    email = (data.get('email') or '').strip()
+    scheduled_time = (data.get('scheduled_time') or '09:00').strip()
+    enabled = 1 if data.get('enabled') else 0
+
+    if enabled and not email:
+        return jsonify({"error": "An email address is required to enable daily reports"}), 400
+    # HH:MM, 24-hour -- matches what an <input type="time"> sends.
+    if not re.match(r'^\d{2}:\d{2}$', scheduled_time):
+        return jsonify({"error": "scheduled_time must be in HH:MM format"}), 400
+
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO email_schedule (username, email, scheduled_time, enabled, last_sent_date) "
+        "VALUES (?, ?, ?, ?, NULL) "
+        "ON CONFLICT(username) DO UPDATE SET email=?, scheduled_time=?, enabled=?",
+        (username, email, scheduled_time, enabled, email, scheduled_time, enabled)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "saved", "email": email, "scheduled_time": scheduled_time, "enabled": bool(enabled)})
+
+
 def _maybe_start_index_rebuild():
     """Same one-process-only guard pattern as _maybe_start_honeypot_sync --
     see that function's docstring for why gunicorn vs `python app.py`
@@ -2961,6 +3169,7 @@ if __name__ != '__main__':
     # path. Start immediately; see docstring above for why this is safe.
     _maybe_start_honeypot_sync()
     _maybe_start_index_rebuild()
+    _maybe_start_email_scheduler()
 
 
 if __name__ == '__main__':
@@ -2973,6 +3182,7 @@ if __name__ == '__main__':
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         _maybe_start_honeypot_sync()
         _maybe_start_index_rebuild()
+        _maybe_start_email_scheduler()
 
     # NOTE: debug=True's reloader watches every file under the project tree
     # recursively -- this originally caused two separate problems:
