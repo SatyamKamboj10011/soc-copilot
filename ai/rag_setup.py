@@ -7,40 +7,15 @@ import argparse
 import chromadb
 from langchain_core.documents import Document
 
-# Was DirectOllamaEmbeddings, pointed at a local Ollama server -- this
-# script has its OWN embeddings instantiation, separate from app.py's, so
-# switching app.py to Gemini embeddings alone didn't fix this file. Both
-# now need to agree on the same embedding space, or ChromaDB ends up with
-# vectors from one provider being queried by another -- which doesn't
-# error, it just returns nonsense-similar results that look like real hits.
-# That's exactly what caused a fabricated answer citing a documentation-
-# placeholder IP (203.0.113.5) instead of saying "no data available."
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+print("Building ChromaDB (local Ollama embeddings)...")
+from local_embeddings import LocalOllamaEmbeddings, EMBED_MODEL
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 USEFUL_TYPES = {"alert", "dns", "http", "tls", "flow"}
 MAX_EVENTS   = 5000
 
-# Gemini's embedding API is rate-limited by tokens-per-minute (generous --
-# 10M/min on the free tier) rather than a strict request count the way chat
-# models are, but the exact per-call batch size limit isn't clearly
-# documented. Rather than trust embed_documents() to chunk ~5100 texts
-# safely on its own, this batches explicitly and predictably -- same
-# reasoning that already moved this script away from from_documents()
-# once before (see the comment further down).
 EMBED_BATCH = 100
-# Confirmed by a real 429 in production: Gemini's free embedding tier caps
-# at 100 requests/minute. 1s between ~51 sequential batch calls wasn't
-# enough margin -- especially since the client library's own internal
-# retry logic (visible in the traceback as tenacity frames) burns through
-# the quota faster than the batch count alone suggests, retrying before
-# ever surfacing the error to this script. 2s base delay plus the explicit
-# backoff-and-retry below (rather than just a longer fixed delay) is the
-# actual fix -- it recovers from a quota hit instead of crashing the whole
-# rebuild over it.
-EMBED_BATCH_DELAY_SECONDS = 2
-MAX_RATE_LIMIT_RETRIES = 5
-RATE_LIMIT_BACKOFF_SECONDS = 60  # Gemini's own error message suggested ~48s; padded for safety
+EMBED_BATCH_DELAY_SECONDS = 0  # local Ollama has no external rate limit -- no delay needed between batches
 
 # Paths
 ALL_LOGS_PATH   = "../logs/eve.json"
@@ -57,10 +32,10 @@ args = parser.parse_args()
 
 if args.mode == "train":
     LOG_SOURCE = TRAIN_LOGS_PATH
-    print("🎓 TRAINING MODE — loading train_logs.json (80% of logs)")
+    print("TRAINING MODE — loading train_logs.json (80% of logs)")
 else:
     LOG_SOURCE = ALL_LOGS_PATH
-    print("📦 FULL MODE — loading all logs from eve.json")
+    print("FULL MODE — loading all logs from eve.json")
 
 def format_event(event):
     etype = event.get("event_type", "unknown")
@@ -72,7 +47,7 @@ def format_event(event):
     proto = event.get("proto", "unknown")
 
     text  = f"Event: {etype} | Time: {ts} | Protocol: {proto}\n"
-    text += f"Source: {src}:{sport} → Destination: {dst}:{dport}\n"
+    text += f"Source: {src}:{sport} -> Destination: {dst}:{dport}\n"
 
     if etype == "alert":
         alert = event.get("alert", {})
@@ -95,8 +70,6 @@ def format_event(event):
     return text.strip()
 
 
-# //ZEEK FORMATTER FUNCTION
-
 def format_zeek_conn(line):
     if line.startswith("#"):
         return None
@@ -107,7 +80,7 @@ def format_zeek_conn(line):
         from datetime import datetime, timezone
         ts = datetime.fromtimestamp(float(parts[0]), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         text  = f"Event: zeek_conn | Time: {ts} | Protocol: {parts[6]}\n"
-        text += f"Source: {parts[2]}:{parts[3]} → Destination: {parts[4]}:{parts[5]}\n"
+        text += f"Source: {parts[2]}:{parts[3]} -> Destination: {parts[4]}:{parts[5]}\n"
         text += f"Duration: {parts[8]}s | Bytes sent: {parts[9]} | State: {parts[11] if len(parts) > 11 else 'unknown'}\n"
         return text.strip()
     except:
@@ -141,13 +114,6 @@ def load_logs(path):
                 ))
             except:
                 continue
-    # eve.json is chronological (oldest first). Previously this loop broke
-    # as soon as MAX_EVENTS was reached, which meant the OLDEST events won
-    # once the file grew past the cap -- SIRA would get permanently stuck
-    # reasoning about old data and blind to everything newer from that point
-    # on. Keeping the most recent MAX_EVENTS instead means the cap always
-    # reflects current activity, not whichever events happened to come first
-    # the day the threshold was first crossed.
     if len(docs) > MAX_EVENTS:
         docs = docs[-MAX_EVENTS:]
     return docs
@@ -180,21 +146,12 @@ def load_zeek_conns(path, max_events=100):
                     "date":       ts[:10] if len(parts) > 0 else "",
                     "hour":       ts[11:13] if len(parts) > 0 else "",
                     "split":      "full"
-
                 }
             ))
             if len(docs) >= max_events:
                 break
     return docs
 
-# Was: delete the whole ChromaDB and re-embed every document from scratch,
-# every single rebuild. Confirmed by a real 429 in production: with the
-# rebuild loop running every 2 hours and the honeypot data mostly just
-# APPENDING (most of the "top 5000 most recent" events are the SAME real
-# events as two hours ago), this was calling the embedding API for
-# thousands of documents that were already embedded last time, burning
-# through Gemini's free-tier rate limit for no reason. Now keeps the
-# existing collection and only embeds documents that are genuinely new.
 print(f"Loading logs from {LOG_SOURCE}...")
 docs = load_logs(LOG_SOURCE)
 print(f"Loaded {len(docs)} Suricata events")
@@ -210,15 +167,8 @@ print("\nSample chunk:")
 print(docs[0].page_content)
 print()
 
-print("Building ChromaDB (Gemini embeddings)...")
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+embeddings = LocalOllamaEmbeddings()
 
-# Stable, content-based ID -- the SAME real event always hashes to the
-# SAME id regardless of its position in the list, which shifts between
-# runs as new events push old ones out of the "most recent N" window.
-# This is what makes the diff below actually work; the old positional
-# "str(i)" ids meant the exact same event could get a different id on
-# every single run, making before/after comparison meaningless.
 def _stable_id(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
 
@@ -227,13 +177,35 @@ metadatas = [d.metadata for d in docs]
 ids       = [_stable_id(t) for t in texts]
 
 client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-# "langchain" matches langchain_chroma's default collection_name, so
-# app.py's existing Chroma(persist_directory=..., embedding_function=...)
-# (which doesn't pass an explicit collection_name) finds this collection
-# without any change needed on that side.
 collection = client.get_or_create_collection(name="langchain")
 
-# Cheap -- include=[] means only ids come back, not embeddings/documents.
+# Content-hash IDs are stable across runs of the SAME embedding model, but
+# say nothing about which model actually produced the stored vectors --
+# this server's ChromaDB collection was built with Gemini vectors, which
+# are incompatible with local Ollama's embedding space. Without this
+# check, the diff below would see the SAME content-hash IDs already
+# present and skip re-embedding them, silently leaving old, wrong-space
+# vectors in place under a collection now queried with a different
+# embedding model. A marker file records which model last built this
+# collection; a mismatch forces one full wipe.
+model_marker_path = os.path.join(CHROMA_DB_PATH, ".embedding_model")
+previous_model = None
+if os.path.exists(model_marker_path):
+    with open(model_marker_path) as f:
+        previous_model = f.read().strip()
+
+if previous_model != EMBED_MODEL:
+    if previous_model is not None:
+        print(f"[migration] embedding model changed ({previous_model} -> {EMBED_MODEL}) -- wiping collection to avoid mixing incompatible vector spaces")
+    else:
+        print(f"[migration] no embedding-model marker found (collection predates this check) -- wiping to guarantee a clean {EMBED_MODEL} space")
+    existing_all = collection.get(include=[])["ids"]
+    if existing_all:
+        collection.delete(ids=existing_all)
+    os.makedirs(CHROMA_DB_PATH, exist_ok=True)
+    with open(model_marker_path, "w") as f:
+        f.write(EMBED_MODEL)
+
 existing_ids = set(collection.get(include=[])["ids"])
 desired_ids = set(ids)
 
@@ -248,40 +220,20 @@ if ids_to_remove:
     print(f"[chromadb] removed {len(ids_to_remove)} documents no longer in the recent window")
 
 if not ids_to_add:
-    print("\n✅ Done! Nothing new to embed -- index already reflects current data.")
+    print("\nDone! Nothing new to embed -- index already reflects current data.")
     print(f"   Mode: {args.mode.upper()}")
     raise SystemExit(0)
 
-# Only the genuinely new documents get embedded -- this is the actual fix
-# for the rate limit, not just a longer delay between batches.
 id_to_text = dict(zip(ids, texts))
 id_to_meta = dict(zip(ids, metadatas))
 new_ids_ordered = list(ids_to_add)
 new_texts = [id_to_text[i] for i in new_ids_ordered]
 new_metadatas = [id_to_meta[i] for i in new_ids_ordered]
 
-def _is_rate_limit_error(err_msg):
-    """Same string-matching approach used elsewhere in this project (see
-    app.py's _is_rate_limit_error) -- more resilient to exact exception
-    class names differing across library versions than importing a
-    specific exception type."""
-    m = (err_msg or "").lower()
-    return any(k in m for k in ["resource_exhausted", "429", "rate limit", "quota"])
-
-
 def _embed_batch_with_retry(batch_texts):
-    """Calls embed_documents() for one batch, retrying with a real pause
-    if it hits a rate limit rather than letting the whole rebuild crash --
-    confirmed necessary by a genuine 429 in production."""
-    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
-        try:
-            return embeddings.embed_documents(batch_texts)
-        except Exception as e:
-            if _is_rate_limit_error(str(e)) and attempt < MAX_RATE_LIMIT_RETRIES:
-                print(f"[embeddings] rate limited (attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES}) -- waiting {RATE_LIMIT_BACKOFF_SECONDS}s before retrying this batch")
-                time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
-                continue
-            raise  # a genuinely different error, or retries exhausted -- don't mask it
+    """No external rate limit to retry against anymore -- local Ollama
+    embeddings have no quota."""
+    return embeddings.embed_documents(batch_texts)
 
 
 print(f"Computing embeddings for {len(new_texts)} NEW documents (batches of {EMBED_BATCH})...")
@@ -291,7 +243,7 @@ for start in range(0, len(new_texts), EMBED_BATCH):
     batch_vectors = _embed_batch_with_retry(new_texts[start:end])
     vectors.extend(batch_vectors)
     print(f"[embeddings] computed {end}/{len(new_texts)}")
-    if end < len(new_texts):
+    if end < len(new_texts) and EMBED_BATCH_DELAY_SECONDS:
         time.sleep(EMBED_BATCH_DELAY_SECONDS)
 print(f"Computed {len(vectors)} embeddings.")
 
@@ -306,5 +258,5 @@ for start in range(0, len(new_ids_ordered), WRITE_BATCH):
     )
     print(f"[chromadb] wrote {end}/{len(new_ids_ordered)}")
 
-print(f"\n✅ Done! {len(docs)} events current, {len(new_ids_ordered)} newly embedded, {len(ids_unchanged)} reused from before")
+print(f"\nDone! {len(docs)} events current, {len(new_ids_ordered)} newly embedded, {len(ids_unchanged)} reused from before")
 print(f"   Mode: {args.mode.upper()}")
