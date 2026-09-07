@@ -235,25 +235,15 @@ def get_llm(model, api_key=None):
     # measure token counts precisely.
     SIRA_NUM_CTX = 8192
 
-    if model == "ollama_qwen3":
-        # Qwen3 1.7B -- the smallest model in the lineup, specifically
-        # chosen for this server's real RAM constraint (4GB total, shared
-        # with Flask, ChromaDB, Nginx, and honeypot sync all running
-        # simultaneously) rather than a larger model that risks the whole
-        # server OOMing under real load.
-        return OllamaLLM(model="qwen3:1.7b", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
-    elif model == "ollama_phi3":
-        return OllamaLLM(model="phi3:3.8b", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
-    elif model == "ollama_phi4mini":
-        # Phi-4-mini (3.8B, ~3GB) -- specifically documented as strong at
-        # structured output and precise instruction-following despite its
-        # small size, unlike a generic small model that trades that away.
+    if model == "ollama_phi4mini":
+        # Phi-4-mini (3.8B, ~3GB) -- kept as the one deliberately "bigger,
+        # smarter" local alternative to the default sira-model. Chosen over
+        # llama3.2:3b and phi3:3.8b (both removed after real testing) since
+        # Microsoft specifically tuned this generation for reasoning and
+        # precise instruction-following at this size, genuinely
+        # outperforming the other two rather than just being another
+        # similarly-sized option to maintain.
         return OllamaLLM(model="phi4-mini", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
-    elif model == "ollama_llama32":
-        # Llama 3.2 3B (~2.5GB) -- solid everyday instruction-following
-        # for routine questions where speed/footprint matters more than
-        # handling complex reasoning.
-        return OllamaLLM(model="llama3.2:3b", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     elif model == "groq":
         return ChatGroq(
             # Was llama-3.3-70b-versatile -- Groq deprecated it (announced
@@ -894,7 +884,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     # measurably helps smaller models stay grounded, at the cost of the
     # richer structured-report formatting the larger models can reliably
     # follow.
-    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama_llama32", "ollama_qwen3"}
+    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini"}
 
     # Hard, code-verified constraint -- not a soft instruction. These IPs
     # were specifically named in the question and confirmed (via exact
@@ -1173,20 +1163,12 @@ def get_models():
     # This is the single source of truth for every model's display metadata
     # (name, short "chip" label, whether it's cloud/local). The frontend
     # fetches this on load instead of keeping its own separate hardcoded
-    # list -- that duplication is exactly what let ollama_phi4mini and
-    # ollama_llama32 exist here but be unreachable in the UI, since the
-    # frontend's copy never got updated when these were added.
+    # list -- avoids the two ever drifting out of sync.
     return jsonify([
         {"id": "ollama",          "name": "SIRA — qwen3:1.7b (local)",
          "chip": "sira-model (local)", "cloud": False, "requires_key": False},
-        {"id": "ollama_qwen3",    "name": "Qwen3 1.7B — smallest, fastest on limited RAM (local)",
-         "chip": "qwen3 1.7b (local)", "cloud": False, "requires_key": False},
-        {"id": "ollama_phi4mini", "name": "Phi-4-mini 3.8B — lightweight, strong structured output (local)",
+        {"id": "ollama_phi4mini", "name": "Phi-4-mini 3.8B — bigger, smarter local option (local)",
          "chip": "phi4-mini (local)", "cloud": False, "requires_key": False},
-        {"id": "ollama_llama32",  "name": "Llama 3.2 3B — everyday questions (local)",
-         "chip": "llama3.2 3b (local)", "cloud": False, "requires_key": False},
-        {"id": "ollama_phi3",     "name": "Phi3 3.8B — fastest of the 3.8B-class models (local)",
-         "chip": "phi3 3.8b (local)", "cloud": False, "requires_key": False},
         {"id": "groq",            "name": "Groq — GPT-OSS 120B (cloud)",
          "chip": "groq gpt-oss (cloud)", "cloud": True, "requires_key": False},
         {"id": "gemini",          "name": "Google Gemini 3.5 Flash (cloud)",
