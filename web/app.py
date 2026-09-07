@@ -7,6 +7,10 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 from langchain_mistralai import ChatMistralAI
+# OpenRouter is OpenAI-API-compatible, not a separate LangChain integration --
+# ChatOpenAI with a custom base_url pointed at OpenRouter's endpoint is the
+# correct way to use it, same pattern OpenRouter's own docs recommend.
+from langchain_openai import ChatOpenAI
 from collections import Counter
 from datetime import datetime
 import sqlite3
@@ -27,10 +31,6 @@ from dotenv import load_dotenv
 import os
 import sys
 
-# Voice: edge-tts (Microsoft Edge's speech API, zero local model files,
-# zero GPU/RAM overhead) -- replaces Kokoro, which needed two large model
-# files that don't exist on any deploy target and forced a whole Docker
-# detour just to host them. See get_speech_audio() below.
 import asyncio
 import edge_tts
 
@@ -45,27 +45,10 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = Flask(__name__)
 
-# ── Deployment config ────────────────────────────────────────────────────
-# DEPLOYED gates defaults and failure-recovery behaviour ONLY -- every model
-# option (local Ollama variants and cloud) stays selectable everywhere,
-# always. Setting DEPLOYED=true on Render doesn't remove sira-model or
-# nous-hermes2 from the UI -- it just means "if nothing local is actually
-# reachable, recover to a cloud model instead of hard-failing" and "when
-# the frontend hasn't specified a model, default to one that will actually
-# work here." Running locally with DEPLOYED unset (the default) behaves
-# exactly as before: everything defaults to local Ollama, no fallback logic
-# ever triggers.
 DEPLOYED = os.getenv("DEPLOYED", "false").strip().lower() in ("1", "true", "yes")
-# Separate from DEPLOYED on purpose -- see get_llm()'s "ollama" branch.
-# Defaults to false so any deployment that doesn't explicitly set this
-# (e.g. if this code ever ran on Render again) keeps the old, correct
-# cloud-only behavior rather than assuming Ollama exists somewhere it doesn't.
 OLLAMA_AVAILABLE = os.getenv("OLLAMA_AVAILABLE", "false").strip().lower() in ("1", "true", "yes")
 DEFAULT_CLOUD_MODEL = os.getenv("DEFAULT_CLOUD_MODEL", "groq")
 
-# Comma-separated list, e.g. "https://soc-copilot.vercel.app,http://localhost:3000"
-# Falls back to the original localhost-only origins when unset, so local
-# dev needs no env changes at all.
 _default_origins = "http://localhost:3000,http://127.0.0.1:3000"
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
 
@@ -75,35 +58,19 @@ CORS(
     supports_credentials=True,
 )
 
-# Render's platform-level health check hits "/" by default to decide
-# whether this instance is healthy enough to receive traffic -- without a
-# real route here, that check got a 404, Render marked the whole service
-# unhealthy, and refused to route ANY external request to it at all
-# (regardless of the actual URL someone was trying to visit) -- which
-# looked identical to every request 502ing, even though gunicorn and the
-# app itself were completely fine underneath. This single route was the
-# actual fix for that, not a code hang anywhere else.
 @app.route('/', methods=['GET', 'HEAD'])
 def root():
     return jsonify({"service": "soc-copilot-backend", "status": "running"}), 200
 
 
-# JWT Config
 app.config["JWT_SECRET_KEY"] = "soc-copilot-secret-key-2024"
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 jwt = JWTManager(app)
 bcrypt = Bcrypt(app)
 
-# ── SQLite Setup ─────────────────────────────────────────────────────────────
 DB_PATH = os.path.join(os.path.dirname(__file__), 'users.db')
 
 def get_db():
-    # Was sqlite3.connect(DB_PATH) with no timeout -- SQLite's own default
-    # is only 5 seconds before raising "database is locked" if another
-    # connection (honeypot_log_sync, index_rebuild, and other background
-    # threads all touch this same file) happens to hold a write lock at
-    # that moment. 30s gives real concurrent access enough room to
-    # resolve naturally instead of erroring under normal, expected load.
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
@@ -161,46 +128,15 @@ def init_db():
 
 init_db()
 
-# Documents blueprint (Hermes report save / PDF export / email share).
-# Guarded so the app still boots if the module isn't present yet -- without
-# this registration the /api/documents/* routes don't exist at all, and the
-# browser surfaces that as a CORS preflight failure rather than a 404,
-# which is misleading to debug.
 try:
     from hermes_documents import documents_bp
     app.register_blueprint(documents_bp, url_prefix="/api/documents")
     print("Documents blueprint registered — /api/documents/* available")
 except ImportError as e:
     print(f"Documents blueprint not loaded: {e}")
-# ─────────────────────────────────────────────────────────────────────────────
 
-# Was GoogleGenerativeAIEmbeddings (Gemini's API) -- moved back to local
-# Ollama now that this runs on a real, dedicated VM instead of a
-# constrained PaaS free tier (Render). This genuinely eliminates the
-# whole category of rate-limit/quota crashes hit repeatedly with Gemini's
-# free tier: there is no external embedding API call at all anymore,
-# everything runs on this server's own Ollama instance -- nothing to
-# rate-limit, no key to manage, no daily quota to exhaust.
-#
-# IMPORTANT: this is a different embedding space than gemini-embedding-001
-# -- the existing ChromaDB collection was built with Gemini vectors, which
-# are now incompatible. The incremental rebuild system (rag_setup.py)
-# tracks documents by a content hash, not by embedding vector -- meaning
-# it would wrongly think old Gemini-embedded entries are "already
-# indexed" and skip re-embedding them with the new model, silently
-# leaving stale, wrong-space vectors in place. The ChromaDB collection
-# must be wiped once during this migration (see rag_setup.py's
-# migration note) before the incremental system is safe to rely on again.
 from ai.local_embeddings import LocalOllamaEmbeddings
 
-# Same lesson learned from Kokoro crashing the whole app at import time --
-# Ollama being unreachable should NOT take down every route, just the
-# ones that need retrieval. Every retriever.invoke() call in this file
-# already runs inside _call_with_timeout/_ping_with_timeout, which catch
-# ANY exception -- including the AttributeError from calling .invoke() on
-# retriever=None below -- and degrade gracefully (empty docs, "offline"
-# health status) instead of propagating. So the only fix needed here is:
-# don't let construction failure kill the process.
 try:
     embeddings = LocalOllamaEmbeddings()
     vectorstore = Chroma(
@@ -215,67 +151,28 @@ except Exception as e:
     retriever = None
 
 
-_KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral"}
+_KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral", "openrouter"}
 
 
 def _safe_cloud_default():
-    """Returns DEFAULT_CLOUD_MODEL only if it's one of the three explicit
-    cloud branches below -- otherwise falls back to "groq" instead. Without
-    this, a typo/whitespace/wrong-case value in the DEFAULT_CLOUD_MODEL env
-    var (e.g. "Mistral" instead of "mistral") would make get_llm()'s
-    DEPLOYED fallback call itself with that same non-matching string over
-    and over, forever -- a genuine infinite recursion this project hit in
-    testing, not a hypothetical. Every path through this function is now
-    guaranteed to land on a real terminal branch within one extra call."""
     value = (DEFAULT_CLOUD_MODEL or "").strip()
     return value if value in _KNOWN_CLOUD_MODELS else "groq"
 
 
 def get_llm(model, api_key=None):
-    # sira-model's own Modelfile bakes in temperature=0.4 for controlled,
-    # grounded output -- every other model here was previously falling back
-    # to its provider's own default (Ollama's default ~0.8, each cloud
-    # provider's own default), which is meaningfully more random. Setting
-    # the same tuned temperature explicitly everywhere -- rather than
-    # creating and maintaining a separate Modelfile per model -- is the
-    # simpler way to get consistent behaviour across every model choice.
     SIRA_TEMPERATURE = 0.4
-    # Was never set anywhere -- every local model ran on its silent
-    # default context window (often 2048-4096 tokens for many Ollama
-    # models), which the full grounding prompt (retrieved log context +
-    # strict rules + history + question) can genuinely exceed, silently
-    # truncating either the actual evidence or the instructions telling
-    # the model to only use that evidence. 8192 gives real headroom for
-    # the current prompt sizes used in this app without needing to
-    # measure token counts precisely.
     SIRA_NUM_CTX = 8192
 
     if model == "ollama_phi4mini":
-        # Phi-4-mini (3.8B, ~3GB) -- kept as the one deliberately "bigger,
-        # smarter" local alternative to the default sira-model. Chosen over
-        # llama3.2:3b and phi3:3.8b (both removed after real testing) since
-        # Microsoft specifically tuned this generation for reasoning and
-        # precise instruction-following at this size, genuinely
-        # outperforming the other two rather than just being another
-        # similarly-sized option to maintain.
         return OllamaLLM(model="phi4-mini", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     elif model == "groq":
         return ChatGroq(
-            # Was llama-3.3-70b-versatile -- Groq deprecated it (announced
-            # June 17, 2026, fully decommissioned August 16, 2026, per
-            # Groq's own docs). openai/gpt-oss-120b is Groq's own
-            # recommended 1:1 replacement for this specific model.
             model="openai/gpt-oss-120b",
             groq_api_key=api_key or os.getenv("GROQ_API_KEY"),
             temperature=SIRA_TEMPERATURE,
         ), "cloud"
     elif model == "gemini":
         return ChatGoogleGenerativeAI(
-            # Was gemini-2.0-flash -- Google fully shut this down June 1,
-            # 2026 (confirmed via Google's own official changelog).
-            # gemini-3.5-flash is Google's own recommended replacement --
-            # deliberately not gemini-2.5-flash, which already has its own
-            # announced shutdown for October 16, 2026, just weeks away.
             model="gemini-3.5-flash",
             google_api_key=api_key or os.getenv("GEMINI_API_KEY"),
             temperature=SIRA_TEMPERATURE,
@@ -283,28 +180,33 @@ def get_llm(model, api_key=None):
     elif model == "mistral":
         return ChatMistralAI(
             model="mistral-small-latest",
-            # Was os.getenv(...) only -- silently ignored the "use your own
-            # key" toggle on the frontend regardless of what the user
-            # entered there. Groq and Gemini above already did this
-            # correctly; Mistral just hadn't been updated to match.
             mistral_api_key=api_key or os.getenv("MISTRAL_API_KEY"),
             temperature=SIRA_TEMPERATURE,
         ), "cloud"
+    elif model == "openrouter":
+        # "openrouter/free" is OpenRouter's own auto-router -- it picks
+        # from whichever specific free models are currently available,
+        # rather than pinning to one named model. This project already
+        # got burned twice by cloud providers deprecating a specific
+        # pinned model out from under it (Groq's llama-3.3-70b, Gemini's
+        # gemini-2.0-flash) -- the auto-router avoids that same failure
+        # mode, since OpenRouter's free lineup is documented to rotate
+        # over time and this adapts automatically instead of needing a
+        # code update when it does. Genuinely separate rate-limit pool
+        # from Groq/Gemini/Mistral (20 req/min, 50/day free, 1000/day
+        # after any one-time $10 lifetime credit purchase) -- real extra
+        # headroom, not just another name for the same quota.
+        return ChatOpenAI(
+            model="openrouter/free",
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
+            temperature=SIRA_TEMPERATURE,
+        ), "cloud"
     elif model == "ollama":
-        # This is the frontend's literal default selectedModel value.
-        # Previously gated on DEPLOYED alone, which correctly meant "no
-        # Ollama exists here" on Render -- but now runs on a real VM with
-        # genuine local Ollama, where that assumption is wrong. Gating on
-        # a separate OLLAMA_AVAILABLE flag instead keeps DEPLOYED's other,
-        # still-legitimate uses (skipping checks that would otherwise
-        # hang) intact, while letting this one specific decision reflect
-        # reality on servers that actually do have Ollama running.
         if DEPLOYED and not OLLAMA_AVAILABLE:
             return get_llm(_safe_cloud_default(), api_key)
         return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
     else:
-        # Any unrecognised model string -- same reasoning as the explicit
-        # "ollama" branch above.
         if DEPLOYED and not OLLAMA_AVAILABLE:
             return get_llm(_safe_cloud_default(), api_key)
         return OllamaLLM(model="sira-model", temperature=SIRA_TEMPERATURE, num_ctx=SIRA_NUM_CTX), "local"
@@ -327,31 +229,10 @@ def _is_connection_error(err_msg):
     ])
 
 
-_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral"]
+_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral", "openrouter"]
 
 
 def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
-    """Runs `prompt` through `model` and returns (answer, model_used,
-    fell_back). Centralises the resilience behaviour so /ask,
-    attacker-profile, what-if, and the compliance health check all get the
-    same protection instead of each having to remember to implement it.
-
-    On a connection error (no local Ollama running) or a genuine rate-limit
-    error, cycles through ALL free cloud providers in priority order
-    (groq -> gemini -> mistral, skipping whichever one just failed) instead
-    of giving up after one fallback attempt. This is what makes "free with
-    no limit barrier" actually true in practice: three independent free
-    tiers being rate-limited at the exact same moment is very unlikely,
-    even though any single one of them can be on its own. A genuinely
-    different failure (bad API key, real bug) is never masked by this loop
-    -- it's re-raised immediately so callers keep their existing specific
-    error handling for that.
-
-    Falls back regardless of whether the ORIGINAL pick was local or cloud
-    -- previously this only triggered for local models, so explicitly
-    picking e.g. Groq and having Groq itself rate-limit produced a hard
-    failure instead of trying another free provider.
-    """
     llm, llm_type = get_llm(model, api_key)
     try:
         result = llm.invoke(prompt)
@@ -364,33 +245,22 @@ def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
             raise
 
         candidates = [DEFAULT_CLOUD_MODEL] + [p for p in _CLOUD_PROVIDER_PRIORITY if p != DEFAULT_CLOUD_MODEL]
-        candidates = [c for c in candidates if c != model]  # don't retry the one that just failed
+        candidates = [c for c in candidates if c != model]
 
         for candidate in candidates:
             try:
-                # Never pass the original api_key to a fallback provider --
-                # a key for Mistral isn't valid for Groq/Gemini. Fallback
-                # attempts always use the server's own free-tier key.
                 fallback_llm, _ = get_llm(candidate, None)
                 answer = fallback_llm.invoke(prompt).content
                 return answer, candidate, True
             except Exception as fallback_err:
                 fallback_msg = str(fallback_err)
                 if _is_connection_error(fallback_msg) or _is_rate_limit_error(fallback_msg):
-                    continue  # this one's also down/limited -- try the next
-                raise  # a genuinely different error -- surface it, don't mask it
+                    continue
+                raise
 
-        raise  # every free provider was down or rate-limited
+        raise
 
 
-# eve.json is now genuinely large (growing continuously from real honeypot
-# traffic) and load_logs() used to re-read and re-parse the entire file on
-# every single API call (/stats, /logs, /search, /timeline, /top-ips, ...)
-# with no caching at all -- every dashboard refresh got a little slower as
-# the file grew. This cache keys off the file's mtime + size (both change
-# whenever honeypot_log_sync.py overwrites the file with fresh data) so a
-# re-parse only happens when the data has actually changed, not on every
-# request between syncs.
 MAX_CACHED_EVENTS = 5000
 _logs_cache = {"mtime": None, "size": None, "data": None}
 
@@ -420,11 +290,6 @@ def load_logs():
     except FileNotFoundError:
         pass
 
-    # eve.json is chronological (oldest first). Keeping the most recent
-    # MAX_CACHED_EVENTS instead of all of them bounds both memory and the
-    # per-request cost of the Counter()/sort operations every endpoint below
-    # runs over this list, while keeping the dashboard focused on current
-    # activity rather than the oldest events on record.
     if len(logs) > MAX_CACHED_EVENTS:
         logs = logs[-MAX_CACHED_EVENTS:]
 
@@ -433,7 +298,6 @@ def load_logs():
     _logs_cache["data"] = logs
     return logs
 
-# ── ADD HERE ──────────────────────────────────────────────────────────────────
 import re
 
 def format_ts(ts):
@@ -443,22 +307,10 @@ def format_ts(ts):
     return ts
 
 
-# edge-tts needs no model files and no lazy-loading dance -- it's just an
-# async HTTP call to Microsoft's Edge speech service. This one helper is
-# used by both /sira-speak and /sira-face-speak's audio-generation step.
 DEFAULT_VOICE = "en-GB-ThomasNeural"
-# A calmer, more deliberate default delivery -- edge-tts's default rate
-# reads slightly quick/casual for an assistant persona. Small, non-extreme
-# adjustments in both directions: unlike a specific ElevenLabs voice
-# clone, this doesn't change WHICH voice you're hearing, only its pacing
-# and register -- the actual transferable lever available here.
 DEFAULT_RATE = "-8%"
 DEFAULT_PITCH = "-3Hz"
 
-# Only voices actually confirmed working (tested via `edge-tts --write-media`)
-# go in this list -- a guessed name that doesn't exist raises
-# edge_tts.exceptions.NoAudioReceived, learned the hard way. Expand this
-# once you've run `edge-tts --list-voices` and confirmed more names.
 KNOWN_VOICES = [
     {"id": "en-GB-ThomasNeural", "label": "Thomas (British, calm)", "default": True},
     {"id": "en-GB-RyanNeural",   "label": "Ryan (British, precise)", "default": False},
@@ -466,9 +318,6 @@ KNOWN_VOICES = [
 
 
 async def _synthesize_speech(text, voice=None, rate=None, pitch=None):
-    """Returns raw MP3 bytes. rate/pitch accept edge-tts's format, e.g.
-    "-8%" and "-3Hz" -- defaults tuned for a calmer, more deliberate
-    delivery than edge-tts's out-of-the-box pacing."""
     communicate = edge_tts.Communicate(
         text,
         voice or DEFAULT_VOICE,
@@ -483,7 +332,6 @@ async def _synthesize_speech(text, voice=None, rate=None, pitch=None):
 
 
 def get_speech_audio(text, voice=None, rate=None, pitch=None):
-    """Sync wrapper -- Flask routes are sync, edge-tts's API is async."""
     return asyncio.run(_synthesize_speech(text, voice=voice, rate=rate, pitch=pitch))
 
 
@@ -496,8 +344,8 @@ def get_voices():
 def sira_speak():
     text = request.json.get("text", "")
     voice = request.json.get("voice") or DEFAULT_VOICE
-    rate = request.json.get("rate")   # None -> get_speech_audio falls back to DEFAULT_RATE
-    pitch = request.json.get("pitch") # None -> falls back to DEFAULT_PITCH
+    rate = request.json.get("rate")
+    pitch = request.json.get("pitch")
     if not text:
         return jsonify({"error": "no text"}), 400
     try:
@@ -508,29 +356,17 @@ def sira_speak():
 
 
 
-# ── SIRA FACE: edge-tts -> Wav2Lip -> synced video ────────────────────────
 import subprocess
 import uuid
 
 WAV2LIP_DIR = os.path.join(os.path.dirname(__file__), 'Wav2Lip')
 WAV2LIP_PYTHON = os.path.join(WAV2LIP_DIR, 'venv', 'Scripts', 'python.exe')
-WAV2LIP_CHECKPOINT = os.path.join('checkpoints', 'wav2lip_gan.pth')  # relative -- cwd is WAV2LIP_DIR
+WAV2LIP_CHECKPOINT = os.path.join('checkpoints', 'wav2lip_gan.pth')
 WAV2LIP_FACE = os.path.join(WAV2LIP_DIR, 'sira_face.jpg')
 
 
 @app.route('/sira-face-speak', methods=['POST'])
 def sira_face_speak():
-    """
-    Text -> edge-tts -> Wav2Lip (runs in its own Python 3.10 venv, separate
-    from Flask's interpreter) -> synced video, returned directly.
-
-    NOTE: Wav2Lip itself remains out of scope for deployment (Windows-only
-    venv path, heavy compute, large checkpoint file) -- this fix only
-    replaces the audio-generation step so this route fails cleanly with
-    its existing error handling below instead of crashing on a missing
-    get_kokoro_model(). Making Wav2Lip itself work on a deploy target is a
-    separate, bigger task.
-    """
     text = request.json.get("text", "")
     voice = request.json.get("voice") or DEFAULT_VOICE
     if not text:
@@ -552,9 +388,9 @@ def sira_face_speak():
                 "--face", WAV2LIP_FACE,
                 "--audio", audio_path,
                 "--outfile", video_path,
-                "--pads", "0", "20", "0", "0",  # extra bottom padding -- reduces the mouth-region seam
-                "--nosmooth",                    # disable over-smoothing that can cause blur/ghosting
-                "--resize_factor", "4",          # downscale processing further (was 2) -- genuine speed win, real quality tradeoff. If this looks too blurry, drop back to 2 or 3.
+                "--pads", "0", "20", "0", "0",
+                "--nosmooth",
+                "--resize_factor", "4",
             ],
             cwd=WAV2LIP_DIR,
             capture_output=True,
@@ -585,8 +421,6 @@ def sira_face_speak():
                 except OSError:
                     pass
 
-
-# ── AUTH ENDPOINTS ───────────────────────────────────────────────────────────
 
 @app.route('/auth/register', methods=['POST'])
 def register():
@@ -642,28 +476,7 @@ def me():
     return jsonify({"username": username}), 200
 
 
-# ── EXISTING ENDPOINTS ───────────────────────────────────────────────────────
-
 def _extract_spoken_summary(text):
-    """Splits SPOKEN_SUMMARY: (always the last line, per the prompt) out of
-    the model's response. Returns (report_text_without_it, spoken_summary).
-    If the model didn't include one -- smaller/simpler models sometimes
-    drop instructions near the end of a long prompt -- spoken_summary is
-    "" and the caller falls back to the old trimmed-report behaviour.
-
-    Also guards against a real, confirmed failure mode: a weaker model
-    (phi4-mini, observed directly in testing) putting the marker too
-    early in its response instead of at the end as instructed. Since
-    everything BEFORE the marker becomes the text answer, that would
-    leave the text panel nearly empty while the "spoken" half absorbs
-    almost the entire real answer -- exactly what was observed (a
-    response that played correctly as speech but showed almost nothing
-    as text). If the resulting report is suspiciously short next to a
-    much longer spoken part, that's a strong signal the split happened
-    in the wrong place, not that the model genuinely wrote a one-line
-    answer -- treat it as if no valid marker was found instead of
-    trusting an obviously bad split.
-    """
     if not text:
         return text, ""
     marker = "SPOKEN_SUMMARY:"
@@ -678,22 +491,8 @@ def _extract_spoken_summary(text):
 
 
 def _rewrite_followup_question(question, history):
-    """Turns a vague follow-up ("what is this IP", "the second one", "compare
-    that to the one before") into ONE fully self-contained question, using
-    recent conversation context to fill in whatever it's actually referring
-    to. This is what lets retrieval handle ordinal references ("the second
-    one") and multi-hop follow-ups that keyword matching or single-turn
-    semantic search can't resolve on their own -- those need something to
-    actually reason about what the reference points to first.
-
-    Uses phi4-mini specifically: this is a small, bounded rewriting task,
-    not the full grounded-QA problem -- a fast, light model is a good fit
-    here even though a bigger model is used for the real answer.
-    Fails safe: any error, or an empty result, just returns the original
-    question unchanged rather than blocking the request.
-    """
     if not history:
-        return question  # nothing to resolve a reference against -- skip the extra call entirely
+        return question
     try:
         recent = "\n".join([f"{m['role'].upper()}: {m['content'][:300]}" for m in history[-4:] if m.get('content')])
         rewrite_prompt = f"""Given this recent conversation and a follow-up question, rewrite the follow-up into ONE fully self-contained question that includes any specific detail (IP address, signature name, number, etc.) it refers back to. If the follow-up is already self-contained, return it exactly unchanged. Reply with ONLY the rewritten question -- no explanation, no quotes.
@@ -713,13 +512,9 @@ Rewritten question:"""
 
 _ask_request_count = 0
 
-# Real activity feed for the chat stage, same pattern as sync/rebuild above.
-# currently_processing is genuinely accurate (not an approximation) given
-# WEB_CONCURRENCY=1 -- this single process only ever handles one request
-# at a time regardless, so a simple flag correctly reflects reality.
 ask_activity = {
     "currently_processing": False,
-    "recent_requests": [],  # last 15 real requests: {"at": iso, "question_preview": str, "model_requested": str, "outcome": str}
+    "recent_requests": [],
 }
 MAX_ASK_EVENTS = 15
 
@@ -736,9 +531,6 @@ def _log_ask_event(question, model, outcome):
 
 @app.after_request
 def _clear_ask_processing_flag(response):
-    # Runs after EVERY response, not just /ask -- cheap no-op for other
-    # routes, but guarantees currently_processing resets even if /ask
-    # exits through a path that didn't explicitly log completion.
     if request.path == '/ask':
         ask_activity["currently_processing"] = False
     return response
@@ -759,11 +551,6 @@ def ask():
     honorific   = (data.get('honorific') or 'Sir').strip()
     _log_ask_event(question, model, "received")
 
-    # Identity/meta questions ("who are you", "what can you do") aren't
-    # about log data at all -- retrieving logs for them just grabs whatever
-    # random entries are nearest in the vector index, and the log-analysis
-    # prompt below then forces the model to write a fake incident report
-    # about them. Answer these directly instead, with no retrieval.
     if re.search(r'\b(who are you|what are you|what is sira|introduce yourself|what can you do|how do you work|tell me about yourself)\b', question, re.IGNORECASE):
         identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
 Speak like JARVIS from Iron Man: calm, precise, address the analyst as "{honorific}" occasionally.
@@ -787,30 +574,17 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
             resp['fallback_note'] = f"{model} wasn't reachable here, answered with {used_model} instead"
         return jsonify(resp)
 
-    # Retrieval normally only searches the CURRENT question's text -- but a
-    # vague follow-up ("what is this IP", "tell me more about that") gives
-    # the search almost nothing concrete to match against, even though the
-    # user is clearly referring to something from the PREVIOUS answer. This
-    # is why a real IP mentioned in a summary a moment ago can come back
-    # "not found in logs" on the very next question -- retrieval genuinely
-    # found nothing, not because the data isn't there.
     last_ai_text = ""
     for m in reversed(history):
         if m.get('role') in ('assistant', 'ai') and m.get('content'):
             last_ai_text = m['content']
             break
 
-    # Resolve vague references ("this IP", "the second one") into a real,
-    # self-contained question BEFORE retrieval -- everything downstream
-    # (semantic search, the IP regex boost, the final prompt) uses this
-    # resolved version instead of the raw, possibly-ambiguous original.
     resolved_question = _rewrite_followup_question(question, history)
 
     def _do_retrieval():
         docs = retriever.invoke(resolved_question)
         if last_ai_text:
-            # Supplement with a query that includes what was just discussed,
-            # so vague follow-ups can still land on the right log entries.
             followup_docs = retriever.invoke(f"{last_ai_text[:400]} {resolved_question}")
             docs = followup_docs + docs
 
@@ -821,29 +595,13 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
         if not docs:
             docs = retriever.invoke(question)
 
-        # Boost alert docs to top — always prioritise real alerts over flow/dns
         alert_docs = [d for d in docs if d.metadata.get('event_type') == 'alert']
         other_docs = [d for d in docs if d.metadata.get('event_type') != 'alert']
         docs = alert_docs + other_docs
 
-        # If question contains an IP, fetch extra targeted logs for that IP. If the
-        # CURRENT question doesn't name one explicitly -- e.g. "what is this IP",
-        # referring back to something already discussed -- fall back to any IP
-        # mentioned in the most recent AI response, instead of finding nothing.
         ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', resolved_question)
         if not ip_match and last_ai_text:
             ip_match = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', last_ai_text)
-        # Verified directly against load_logs() -- the raw data -- instead
-        # of semantic search. Two real bugs this fixes: (1) the old query
-        # ("src_ip {ip} alert") was biased toward alert-type documents
-        # specifically, causing false "no data" results for real IPs whose
-        # traffic is mostly flow/http/dns rather than alerts (confirmed:
-        # 10.0.0.4 has 4,435 real events but very few of them alerts).
-        # (2) this no longer depends on ChromaDB/embeddings being
-        # reachable at all for the common case of "tell me about IP X" --
-        # it works directly off the same raw log file /stats and /logs
-        # already read, so IP-specific questions stay grounded even during
-        # a ChromaDB outage like the one this project hit during testing.
         confirmed_no_data_ips = []
         if ip_match:
             all_logs = load_logs()
@@ -853,9 +611,6 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
                 if not real_events:
                     confirmed_no_data_ips.append(ip)
                     continue
-                # Build real text snippets directly from the matched raw
-                # events -- same shape of information the LLM would have
-                # gotten from ChromaDB, just sourced without needing it.
                 for e in real_events[:10]:
                     text = f"Event: {e.get('event_type','unknown')} | Time: {e.get('timestamp','unknown')}\nSource: {e.get('src_ip','')}:{e.get('src_port','?')} → Destination: {e.get('dest_ip','')}:{e.get('dest_port','?')}"
                     if e.get('event_type') == 'alert':
@@ -864,7 +619,6 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
                     extra_docs.append(type('Doc', (), {'page_content': text, 'metadata': {'src_ip': e.get('src_ip',''), 'dest_ip': e.get('dest_ip',''), 'event_type': e.get('event_type','')}})())
             docs = extra_docs + docs
 
-        # Deduplicate while preserving order
         seen = set()
         unique_docs = []
         for d in docs:
@@ -873,14 +627,6 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
                 unique_docs.append(d)
         return unique_docs[:15], confirmed_no_data_ips
 
-    # Bounded at 15s total for the whole retrieval sequence (up to 4
-    # retriever.invoke() calls chained together above) -- without this, an
-    # unreachable embeddings backend (e.g. DEPLOYED=true with no Ollama for
-    # nomic-embed-text) would hang here the same way /health used to hang,
-    # taking the single gunicorn worker down with it. On timeout/failure,
-    # docs degrades to [] -- the prompt below already instructs the model to
-    # say plainly when it has no relevant log data, so an empty context
-    # produces an honest "not available" answer instead of a crash.
     docs, confirmed_no_data_ips = _call_with_timeout(_do_retrieval, 15, default=([], []))
 
     context = "\n\n".join([d.page_content for d in docs])
@@ -890,26 +636,8 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     context
 )
 
-    # The smallest models (phi4-mini, llama3.2:3b) tend to lose track of the
-    # grounding constraint somewhere inside a long, multi-branch instruction
-    # set -- every model gets the SAME retrieved log data, so a smaller
-    # model giving worse/invented answers than sira-model on identical
-    # context is a real instruction-following capacity issue, not a data
-    # problem. A short, single-purpose prompt (nothing to lose track of)
-    # measurably helps smaller models stay grounded, at the cost of the
-    # richer structured-report formatting the larger models can reliably
-    # follow.
-    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini"}
+    SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama"}
 
-    # Hard, code-verified constraint -- not a soft instruction. These IPs
-    # were specifically named in the question and confirmed (via exact
-    # metadata match against the real data, not a guess) to have ZERO
-    # matching log entries. Confirmed necessary by direct evidence: a
-    # model given real-but-irrelevant similarity-matched context still
-    # fabricated a detailed report about an IP that genuinely doesn't
-    # exist anywhere in the logs. This block is deliberately blunt and
-    # repeated (both before and after the log data) since a single
-    # mention earlier in a long prompt has already been shown to get lost.
     no_data_warning = ""
     if confirmed_no_data_ips:
         ip_list = ", ".join(confirmed_no_data_ips)
@@ -926,16 +654,16 @@ Log Data:
 Question: {resolved_question}
 {no_data_warning}
 
-Remember: only use facts from the log data above. Answer clearly and concisely.
+Remember: only use facts from the log data above. Give a genuinely complete answer with real supporting detail -- specific IPs, timestamps, signatures -- not just the shortest possible response.
 
 After your answer, add one final line starting with SPOKEN_SUMMARY: followed by 1-2 short sentences that say the same thing as if you were talking to {honorific} out loud -- plain conversational language, no bullet points, no technical formatting, don't just re-read the answer above. Address {honorific} naturally once."""
     else:
         prompt = f"""You are SIRA — Security Incident Response Assistant.
 Speak exactly like JARVIS from Iron Man. Calm, authoritative, precise.
 Address the analyst as "{honorific}" occasionally.
-Never ramble. Lead with the most critical information first.
+Lead with the most critical information first, then give the supporting detail an analyst would actually need -- specific IPs, timestamps, signatures, patterns. Precise does not mean short: a complete, well-organised answer is more useful than a clipped one.
 Be definitive — never say "I think" or "maybe".
-Short sentences. Maximum impact per word.
+Every sentence should carry real information, not padding -- but don't compress a genuinely detailed answer down to one line just to sound terse.
 {no_data_warning}
 
 STRICT RULES:
@@ -954,8 +682,8 @@ Previous conversation:
 RESPONSE FORMAT RULES — read the question and pick the right format:
 
 IF the question is simple (how many, list, count, what ports):
-→ Answer in 2-4 natural sentences. No headers. Just answer directly.
-Example: "There are 171 alerts in total. The top attacker is 185.220.101.45 with 23 alerts, followed by 45.33.32.156 with 12 alerts."
+→ No headers needed, but give a genuinely complete answer, not just the bare number. Include relevant supporting detail: which specific IPs/signatures/times stand out, any pattern worth noting, and a brief note on what it means or what to check next. Several sentences, not one.
+Example: "There are 171 alerts in total. The top attacker is 185.220.101.45 with 23 alerts, mostly brute-force attempts against SSH, followed by 45.33.32.156 with 12 port-scanning alerts. Both have been active within the last hour, which suggests this is ongoing rather than a one-off spike."
 
 IF the question is about a specific alert or IP:
 → Use this structure:
@@ -1038,10 +766,6 @@ After everything above, add one final line starting with exactly SPOKEN_SUMMARY:
             return jsonify({"error": f"{model} is rate-limited right now. Try a different model."}), 429
         return jsonify({"error": f"Could not reach {model}: {err_msg[:200]}"}), 502
 
-    # Split the model's own natural spoken summary out of the written
-    # report -- the frontend uses this for voice instead of trimming down
-    # the structured report text, which always sounded like a report being
-    # read aloud no matter how it was cleaned up.
     answer, spoken_summary = _extract_spoken_summary(answer)
 
     resp = {'answer': answer, 'model_used': used_model, 'spoken_summary': spoken_summary}
@@ -1060,13 +784,6 @@ def get_logs():
 
 @app.route('/logs/grouped', methods=['GET'])
 def get_logs_grouped():
-    """Collapses repeated identical alerts (same signature, same src_ip,
-    same dest_ip) into one row with a real count and a real first/last-seen
-    time range, instead of listing every single occurrence separately.
-    This is how real SOC tools handle alert fatigue -- 200 identical
-    brute-force attempts from the same IP is one thing to review, not 200
-    rows to scroll past. Every count/timestamp here comes directly from
-    actual log entries; nothing is estimated or invented."""
     logs = load_logs()
     groups = {}
     for l in logs:
@@ -1102,11 +819,6 @@ def get_logs_grouped():
     return jsonify(result[:100])
 
 
-# Deliberately small and conservative -- only patterns genuinely
-# well-established enough to state with confidence. Matched against
-# Suricata's own real alert.category / signature text, never invented.
-# Anything that doesn't clearly match one of these returns no mapping at
-# all rather than guessing at a technique ID.
 _MITRE_CATEGORY_PATTERNS = [
     (["scan", "reconnaissance"], "T1595", "Active Scanning"),
     (["brute force", "brute-force", "credential"], "T1110", "Brute Force"),
@@ -1119,9 +831,6 @@ _MITRE_CATEGORY_PATTERNS = [
 
 
 def _map_to_mitre(signature, category):
-    """Returns {technique_id, technique_name} or None if nothing matched
-    confidently. Matches against the REAL signature + category text of the
-    alert -- never assigns a technique the text doesn't actually support."""
     haystack = f"{signature} {category}".lower()
     for keywords, technique_id, technique_name in _MITRE_CATEGORY_PATTERNS:
         if any(kw in haystack for kw in keywords):
@@ -1131,11 +840,6 @@ def _map_to_mitre(signature, category):
 
 @app.route('/logs/grouped-mitre', methods=['GET'])
 def get_logs_grouped_mitre():
-    """Same grouping as /logs/grouped, with a best-effort MITRE ATT&CK
-    technique attached where the signature/category text confidently
-    supports one. This is a coarse, category-level heuristic -- not a
-    definitive per-CVE attribution -- and entries with no confident match
-    simply have mitre: null rather than a guessed technique."""
     logs = load_logs()
     groups = {}
     for l in logs:
@@ -1175,10 +879,6 @@ def get_logs_grouped_mitre():
 
 @app.route('/models', methods=['GET'])
 def get_models():
-    # This is the single source of truth for every model's display metadata
-    # (name, short "chip" label, whether it's cloud/local). The frontend
-    # fetches this on load instead of keeping its own separate hardcoded
-    # list -- avoids the two ever drifting out of sync.
     return jsonify([
         {"id": "ollama",          "name": "SIRA — qwen3:1.7b (local)",
          "chip": "sira-model (local)", "cloud": False, "requires_key": False},
@@ -1190,6 +890,8 @@ def get_models():
          "chip": "gemini 3.5 (cloud)", "cloud": True, "requires_key": False},
         {"id": "mistral",         "name": "Mistral Small (cloud — free)",
          "chip": "mistral small (cloud)", "cloud": True, "requires_key": False},
+        {"id": "openrouter",      "name": "OpenRouter — auto-selects a free model (cloud)",
+         "chip": "openrouter (cloud)", "cloud": True, "requires_key": False},
     ])
 
 
@@ -1240,23 +942,6 @@ import concurrent.futures
 
 
 def _ping_with_timeout(fn, timeout_seconds=5):
-    """Runs fn() with a hard wall-clock timeout, so a slow or hanging
-    provider call (an unreachable local Ollama, a slow cloud API) can never
-    block a request indefinitely. This matters a lot on Render's free tier
-    specifically -- WEB_CONCURRENCY=1 means a single gunicorn worker, so one
-    stuck request blocks every other request too, which is what was causing
-    /health itself to 502: the ping never actually errored, it just never
-    returned, so nothing else could be served either.
-
-    Deliberately NOT using `with ThreadPoolExecutor(...) as executor:` here.
-    That context manager calls shutdown(wait=True) on exit -- including
-    when exiting via a caught TimeoutError -- which blocks until the
-    background task actually finishes regardless of the timeout already
-    having been handled. That silently defeated the whole point of this
-    function: it would catch the timeout, then immediately re-block on
-    cleanup waiting for the same hung call. shutdown(wait=False) below is
-    what actually lets this function return promptly.
-    """
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = executor.submit(fn)
     try:
@@ -1272,12 +957,6 @@ def _ping_with_timeout(fn, timeout_seconds=5):
 
 
 def _call_with_timeout(fn, timeout_seconds, default=None):
-    """Same bounded-execution idea as _ping_with_timeout, but returns fn()'s
-    actual return value (or `default` on timeout/error) instead of a bool.
-    Used for retrieval calls, where a caller needs the docs list itself --
-    not just whether the call succeeded -- and where the right behaviour on
-    failure is graceful degradation (answer with no log context, note that
-    plainly) rather than treating it as a hard error."""
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = executor.submit(fn)
     try:
@@ -1292,17 +971,8 @@ def _call_with_timeout(fn, timeout_seconds, default=None):
 def health():
     flask_status = "ok"
     if DEPLOYED and not OLLAMA_AVAILABLE:
-        # No point pinging local Ollama when we already know there's no
-        # Ollama server on this box -- skip it rather than risk any delay.
-        # On a server where OLLAMA_AVAILABLE=true, fall through to the
-        # real ping below instead, since it genuinely might be running.
         ollama_status = "skipped (DEPLOYED=true, OLLAMA_AVAILABLE=false)"
     else:
-        # Was 5s -- confirmed via real testing that this server's CPU-only
-        # inference (no GPU, shared with Flask/ChromaDB/Nginx/honeypot sync
-        # on 2 vCPUs) can genuinely take longer than that even when the
-        # model is already warm, which was making /health report Ollama as
-        # "offline" when it was actually just slow, not actually down.
         ok, err = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 20)
         ollama_status = "ok" if ok else f"offline — {err}"
 
@@ -1314,9 +984,6 @@ def health():
     ok, err = _ping_with_timeout(lambda: vectorstore.get(limit=1), 5)
     chroma_status = "ok" if ok else f"offline — {err}"
 
-    # A working LLM path is either local Ollama OR (when deployed) a
-    # reachable cloud model -- local being down is expected and fine on a
-    # deployed instance with no Ollama server, as long as cloud works.
     llm_path_ok = (ollama_status == "ok") or (DEPLOYED and cloud_status == "ok")
     overall = "ok" if llm_path_ok and chroma_status == "ok" else "degraded"
     return jsonify({
@@ -1328,8 +995,6 @@ def health():
         "deployed": DEPLOYED,
     })
 
-
-# //ADDIING SOME IMPORTANT ENDPOINTS
 
 @app.route('/search', methods=['GET'])
 def search():
@@ -1345,7 +1010,7 @@ def search():
     if event_type:
         logs = [l for l in logs if l.get('event_type') == event_type]
 
-    return jsonify(logs[:100])  # return top 100 matches
+    return jsonify(logs[:100])
 
 
 @app.route('/timeline', methods=['GET'])
@@ -1354,8 +1019,8 @@ def timeline():
     hourly = Counter()
     for l in logs:
         ts = l.get('timestamp', '')
-        if len(ts) >= 13:  # crude check for valid timestamp
-            hour = ts[11:13]  # "2024-06-01T14"
+        if len(ts) >= 13:
+            hour = ts[11:13]
             hourly[hour] += 1
 
     result = [{"hour": h, "count": c} for h, c in sorted(hourly.items())]
@@ -1374,12 +1039,6 @@ _geoip_cache = {}
 
 
 def _lookup_geoip(ip):
-    """Free, no-key IP geolocation via ip-api.com. That service allows 45
-    requests/minute per source IP -- caching every result in memory means
-    the same attacker IP (which shows up repeatedly in real traffic) is
-    never looked up twice, keeping actual usage far under that limit even
-    under heavy use. Returns None on any failure -- never invents a
-    location for an IP that couldn't be resolved."""
     if ip in _geoip_cache:
         return _geoip_cache[ip]
     try:
@@ -1408,10 +1067,6 @@ def _lookup_geoip(ip):
 
 @app.route('/geoip/top-ips', methods=['GET'])
 def geoip_top_ips():
-    """Top attacker IPs enriched with real geolocation data, for the
-    threat map. Any IP that can't be resolved (lookup failure, private/
-    reserved range, etc.) is simply omitted -- never given a guessed or
-    placeholder location."""
     logs = load_logs()
     limit = int(request.args.get('limit', 15))
     ip_counts = Counter(l.get('src_ip') for l in logs if l.get('src_ip'))
@@ -1502,19 +1157,10 @@ def correlate_ip():
 
 @app.route('/attention-items', methods=['GET'])
 def attention_items():
-    """Synthesizes existing real data sources into one prioritized list of
-    what actually needs attention right now, instead of requiring someone
-    to check five separate panels. Every item is pulled directly from real
-    data already served elsewhere (top-ips, pending_actions, Sentinel
-    machines) -- nothing here is invented, estimated, or scored by a
-    model; it's straightforward aggregation of real counts and real
-    stored rows."""
     from ai.hermes_agent import _is_internal_or_platform_ip
 
     items = []
 
-    # 1. Top external attacker by volume (internal/platform IPs excluded,
-    # same filter Hermes itself uses, imported rather than duplicated)
     logs = load_logs()
     ip_counts = Counter(
         l.get('src_ip') for l in logs
@@ -1530,7 +1176,6 @@ def attention_items():
             "ip": top_ip,
         })
 
-    # 2. Pending actions awaiting human approval
     try:
         conn = get_db()
         pending = conn.execute(
@@ -1546,9 +1191,8 @@ def attention_items():
                 "detail": "Proposed by Hermes, not yet executed",
             })
     except Exception:
-        pass  # table may not exist in every deployment state -- don't fail the whole widget over it
+        pass
 
-    # 3. Flagged Sentinel endpoints
     try:
         conn = get_db()
         flagged = conn.execute(
@@ -1566,7 +1210,6 @@ def attention_items():
     except Exception:
         pass
 
-    # 4. Recent Rustinel EDR detections, if that's running
     try:
         rres = requests.get(f"http://127.0.0.1:{os.getenv('PORT', '5000')}/rustinel-alerts", params={"limit": 5}, timeout=3)
         rustinel_alerts = rres.json()
@@ -1580,7 +1223,6 @@ def attention_items():
     except Exception:
         pass
 
-    # 5. Total alert count, as a baseline item if nothing more specific stood out
     alert_count = sum(1 for l in logs if l.get('event_type') == 'alert')
     if alert_count > 0:
         items.append({
@@ -1597,10 +1239,6 @@ def attention_items():
 
 @app.route('/attacker-timeline/<ip>', methods=['GET'])
 def attacker_timeline(ip):
-    """Every real log entry involving this IP (as source or destination),
-    sorted chronologically. This is the raw sequence of what actually
-    happened -- no narrative generated, no gaps filled in -- for viewing
-    one attacker's activity as a timeline rather than scattered rows."""
     logs = load_logs()
     events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
     events.sort(key=lambda l: l.get('timestamp', ''))
@@ -1631,61 +1269,23 @@ def attacker_timeline(ip):
 
 
 def _run_rag_rebuild():
-    """Runs rag_setup.py against whatever's currently in logs/eve.json --
-    shared by /upload (after it overwrites that file), the manual
-    /rebuild-index endpoint (no overwrite, indexes the live honeypot-synced
-    data as-is), and the automatic background rebuild loop below. Raises on
-    failure -- callers decide how to report that (HTTP error vs a log line
-    from a background thread).
-
-    Captures the child process's real stdout/stderr and includes the last
-    part of it in the raised exception -- subprocess.run(..., check=True)
-    alone only gives a generic "exit status 1" message with no indication
-    of what rag_setup.py itself actually failed on, which made a real
-    embeddings-API failure invisible in both /pipeline-status and Render's
-    logs until this was added."""
     rag_script = os.path.join(os.path.dirname(__file__), '..', 'ai', 'rag_setup.py')
     ai_dir = os.path.join(os.path.dirname(__file__), '..', 'ai')
     result = subprocess.run(
         [sys.executable, rag_script], timeout=600,
         cwd=ai_dir, capture_output=True, text=True,
     )
-    # Always print the child's own output to Render's log stream, pass or
-    # fail -- this is what "[embeddings] computed N/N" progress lines and
-    # any real traceback actually look like, previously invisible.
     if result.stdout:
         print(f"[rag_setup stdout]\n{result.stdout}")
     if result.stderr:
         print(f"[rag_setup stderr]\n{result.stderr}")
     if result.returncode != 0:
-        # The real traceback is almost always the last few lines of
-        # stderr -- surfacing that directly in the exception message means
-        # it shows up in index_rebuild_status["last_error"] via
-        # /pipeline-status too, not just buried in the full log stream.
         tail = (result.stderr or result.stdout or "").strip().splitlines()[-8:]
         raise RuntimeError(f"rag_setup.py exited {result.returncode}: " + " | ".join(tail))
 
 
 @app.route('/rebuild-index', methods=['POST'])
 def rebuild_index():
-    """Rebuilds ChromaDB from whatever's currently in logs/eve.json -- the
-    live honeypot-synced data -- WITHOUT requiring a file upload and
-    without overwriting that file the way /upload does. This is the
-    endpoint to hit when you just want the index to reflect current real
-    honeypot activity, not a manually-provided snapshot.
-
-    Runs in a background thread rather than blocking this request --
-    confirmed necessary by a real crash in production: running the
-    rebuild synchronously blocked the single gunicorn worker for the
-    whole embedding process, and once that exceeded gunicorn's own
-    --timeout 120, gunicorn's watchdog forcibly killed the worker
-    mid-request (visible in the logs as handle_abort -> sys.exit(1)),
-    which the client just saw as a bare "Internal Server Error" with no
-    real explanation. Local Ollama embeddings make this more likely to
-    happen than it used to be, since they embed one document at a time
-    rather than Gemini's batched API. Progress is reported via the same
-    index_rebuild_status /pipeline-status already exposes, not via this
-    response directly."""
     eve_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
     if not os.path.exists(eve_path) or os.path.getsize(eve_path) == 0:
         return jsonify({"error": "logs/eve.json doesn't exist or is empty yet -- honeypot sync may not have pulled data yet. Check /health or wait a moment and retry."}), 409
@@ -1715,13 +1315,6 @@ def rebuild_index():
 
 @app.route('/pipeline-status', methods=['GET'])
 def pipeline_status():
-    """Every value here is real, live state -- not a mock-up. Honeypot
-    sync status comes from honeypot_log_sync's own module-level dict,
-    updated at actual connection/pull events in that background thread.
-    Index rebuild status and chat activity are the same pattern, local to
-    this module. Event/request counts come directly from load_logs() and
-    real activity logs. Built specifically to back an honest pipeline
-    visualization, not a static diagram with invented activity."""
     try:
         from ai.honeypot_log_sync import sync_status as honeypot_sync_status
     except Exception:
@@ -1730,8 +1323,6 @@ def pipeline_status():
     logs = load_logs()
     chroma_ok, _ = _ping_with_timeout(lambda: vectorstore.get(limit=1), 5) if vectorstore else (False, "not configured")
 
-    # Real breakdown of what's actually indexed right now -- directly from
-    # the same logs the rest of the app serves, not a separate estimate.
     event_breakdown = {}
     for l in logs:
         et = l.get('event_type', 'unknown')
@@ -1763,7 +1354,6 @@ def upload():
     if not (filename.endswith('.json') or filename.endswith('.log')):
             return jsonify({"error": "Only .json or .log files accepted"}), 400
 
-# Always save as eve.json or conn.log regardless of original filename
     save_as = 'eve.json' if filename.endswith('.json') else 'conn.log'
     save_path = os.path.join(os.path.dirname(__file__), '..', 'logs', save_as)
 
@@ -1783,8 +1373,6 @@ def upload():
     except subprocess.TimeoutExpired:
         return jsonify({"error": "ChromaDB rebuild timed out"}), 500
     except RuntimeError as e:
-        # Now includes the real tail of rag_setup.py's own stderr, not
-        # just a generic "exit status 1" -- the actual root cause.
         return jsonify({"error": f"ChromaDB rebuild failed: {str(e)}"}), 500
 
 
@@ -1795,9 +1383,6 @@ def export():
     query = request.args.get('q', '').strip()
 
     if query:
-        # Mirrors /search's exact matching logic -- so exporting after
-        # typing something in the Investigation page's search box exports
-        # precisely those matching rows, not everything.
         logs = [l for l in logs if
                 query in l.get('src_ip', '') or
                 query in l.get('dest_ip', '') or
@@ -1866,8 +1451,6 @@ Answer:"""
 
     return jsonify(results)
 
-
-# ── HISTORY ENDPOINTS ────────────────────────────────────────────────────────
 
 @app.route('/history/sessions', methods=['GET'])
 @jwt_required()
@@ -1971,11 +1554,6 @@ def log_info():
     })
 
 
-# ── RUSTINEL: local endpoint detection (Sigma/YARA/IOC), separate source ────
-# from both the honeypot's network logs and Sentinel's raw connection
-# reports. Reads ECS NDJSON alert files Rustinel writes locally -- same
-# machine as this backend, so no sync/network transfer needed, just a
-# direct file read (see ai/rustinel_reader.py).
 from ai.rustinel_reader import load_rustinel_alerts
 
 
@@ -1991,12 +1569,10 @@ def attacker_profile(ip):
     import requests as req
     honorific = (request.args.get('honorific') or 'Sir').strip()
 
-    # 1. Get all suricata events for this IP
     logs = load_logs()
     events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
     alerts = [e for e in events if e.get('event_type') == 'alert']
 
-    # 2. AbuseIPDB
     abuse_data = {}
     try:
         r = req.get("https://api.abuseipdb.com/api/v2/check",
@@ -2005,30 +1581,18 @@ def attacker_profile(ip):
         abuse_data = r.json().get("data", {})
     except: pass
 
-    # 3. Geolocation
     geo = {}
     try:
         r = req.get(f"http://ip-api.com/json/{ip}", timeout=5)
         geo = r.json()
     except: pass
 
-    # 4. Attack signatures used
     signatures = list(set(e.get('alert', {}).get('signature', '') for e in alerts if e.get('alert')))
-
-    # 5. Ports targeted
     ports = list(set(str(e.get('dest_port', '')) for e in events if e.get('dest_port')))
 
-    # 6. Ask SIRA to profile the attacker
     docs = _call_with_timeout(lambda: retriever.invoke(f"attacks from {ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
 
-    # events came from an EXACT match against real logs (src_ip/dest_ip ==
-    # ip), unlike `context` above which is generic semantic search and can
-    # return real-but-irrelevant results even when this specific IP has
-    # nothing. If events is genuinely empty, that's a reliable, verified
-    # signal -- confirmed necessary by direct evidence of a model
-    # fabricating a full report for an IP later confirmed (via /search)
-    # to not exist anywhere in the real data.
     no_real_data = len(events) == 0
     no_data_instruction = "" if not no_real_data else f"""
 
@@ -2154,14 +1718,11 @@ One plain English sentence on what this tells us about our defences."""
 
     return jsonify({"answer": answer, "signature": alert_signature, "src_ip": src_ip})
 
-# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route('/hermes-agent', methods=['POST'])
 def hermes_agent():
     data = request.json
     task  = data.get('task', '').strip()
-    # Optional model override from the frontend's performance-tier picker --
-    # defaults to nous-hermes2 (today's behaviour) if not provided.
     model = data.get('model', 'nous-hermes2')
     if not task:
         return jsonify({"error": "No task provided"}), 400
@@ -2173,14 +1734,6 @@ def hermes_agent():
         return jsonify(result)
     except Exception as e:
         err_msg = str(e)
-        # Same idea as _invoke_llm's fallback, applied here by hand since
-        # run_hermes_agent has its own internal model handling rather than
-        # going through get_llm(). NOTE: this assumes run_hermes_agent
-        # accepts DEFAULT_CLOUD_MODEL's id ("groq" by default) the same way
-        # /ask's models do -- if ai/hermes_agent.py resolves model names
-        # differently internally, this retry will just fail too and you'll
-        # see the ORIGINAL error below (never masked), which is the signal
-        # to share that file so this can be wired in properly.
         if DEPLOYED and _is_connection_error(err_msg):
             try:
                 from ai.hermes_agent import run_hermes_agent as _retry, set_flask_client as _set_client_retry
@@ -2190,12 +1743,8 @@ def hermes_agent():
                 result["fallback_note"] = f"{model} wasn't reachable here, ran with {DEFAULT_CLOUD_MODEL} instead"
                 return jsonify(result)
             except Exception:
-                pass  # fall through to the original error below
+                pass
 
-        # Print the full traceback to the Flask console -- without this, a
-        # failure here surfaces to the browser as a bare 500 with no way to
-        # tell whether it was an import error, a missing Ollama model, or a
-        # tool failure inside the agent.
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -2267,8 +1816,6 @@ def cve_lookup():
     })
 
 
-# ── SENTINEL: SQLite-backed machine state (survives restarts/debug reloads) ──
-
 def init_sentinel_db():
     conn = get_db()
     conn.execute('''
@@ -2289,24 +1836,16 @@ def init_sentinel_db():
 init_sentinel_db()
 
 
-# ── APPROVAL-GATED ACTIONS ────────────────────────────────────────────────
-# Hermes (or SIRA) PROPOSES an action here -- it never executes anything
-# directly itself. A human must explicitly approve before anything real
-# happens. This is a deliberate design choice, not a missing feature:
-# autonomous firewall/service actions carry real risk (a false positive
-# blocking legitimate traffic, a bad service restart), so every action
-# waits for a person to click approve first.
-
 def init_actions_db():
     conn = get_db()
     conn.execute('''
         CREATE TABLE IF NOT EXISTS pending_actions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            action_type TEXT NOT NULL,   -- block_ip | isolate_endpoint | restart_service | add_suricata_rule
-            target      TEXT NOT NULL,   -- IP / machine_id / service name / rule text
-            machine_id  TEXT,            -- which endpoint this applies to, NULL for honeypot-side actions
-            reason      TEXT,            -- why this was proposed -- real evidence, not a guess
-            status      TEXT DEFAULT 'pending',  -- pending | approved | rejected | executed | failed
+            action_type TEXT NOT NULL,
+            target      TEXT NOT NULL,
+            machine_id  TEXT,
+            reason      TEXT,
+            status      TEXT DEFAULT 'pending',
             created_at  TEXT,
             executed_at TEXT,
             result      TEXT
@@ -2319,20 +1858,6 @@ init_actions_db()
 
 
 def _execute_add_suricata_rule(rule_text):
-    """SSH to the honeypot and append a new custom Suricata rule, then
-    reload Suricata via SIGHUP -- same connection details as
-    honeypot_log_sync.py, and the same SIGHUP-not-SIGUSR2 lesson learned
-    earlier (SIGUSR2 only reloads rules, it does NOT reopen log files --
-    but here we specifically WANT the rule-reload behaviour SIGHUP also
-    provides, so either signal works for this specific action; SIGHUP is
-    used for consistency with the rest of the project).
-
-    IMPORTANT SETUP NOTE: this appends to /etc/suricata/rules/custom.rules
-    on the honeypot. That file must actually be listed in suricata.yaml's
-    rule-files section for Suricata to load it -- if alerts from a newly
-    added rule never show up, check that first before assuming this
-    function is broken.
-    """
     import paramiko
     from ai.honeypot_log_sync import HONEYPOT_HOST, HONEYPOT_USER, HONEYPOT_KEY_PATH
     client = paramiko.SSHClient()
@@ -2358,10 +1883,6 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 
 
 def _send_webhook_alert(message):
-    """Posts to a Discord webhook if one's configured -- completely
-    optional, silently does nothing if DISCORD_WEBHOOK_URL isn't set.
-    Never raises -- a webhook failure should never break the action it's
-    reporting on."""
     if not DISCORD_WEBHOOK_URL:
         return
     try:
@@ -2372,9 +1893,6 @@ def _send_webhook_alert(message):
 
 @app.route('/propose-action', methods=['POST'])
 def propose_action():
-    """Hermes (or SIRA) calls this to propose an action -- it only ever
-    creates a pending row. Nothing executes until a human approves it via
-    /pending-actions/<id>/approve."""
     data = request.json or {}
     action_type = data.get('action_type')
     target      = data.get('target', '').strip()
@@ -2396,10 +1914,6 @@ def propose_action():
     action_id = cur.lastrowid
     conn.close()
 
-    # Real trigger, not an arbitrary threshold: this fires exactly when
-    # Hermes (or SIRA) has genuinely proposed a security action, using the
-    # same real target/reason already stored in the row -- nothing
-    # invented or embellished for the notification.
     _send_webhook_alert(
         f"🛡️ **SIRA proposed action #{action_id}**: {action_type} on `{target}`\n{reason}\n"
         f"Awaiting approval in the dashboard."
@@ -2437,8 +1951,6 @@ def approve_pending_action(action_id):
         now = datetime.utcnow().isoformat() + "Z"
 
         if action_type == "block_ip":
-            # Reuses the existing Sentinel block-queue mechanism -- delivered
-            # to any polling endpoint agent's next /ingest check-in.
             conn.execute("INSERT INTO sentinel_block_queue (ip) VALUES (?)", (target,))
             conn.execute("UPDATE pending_actions SET status='executed', executed_at=?, result=? WHERE id=?",
                          (now, "Queued for next Sentinel check-in", action_id))
@@ -2455,11 +1967,6 @@ def approve_pending_action(action_id):
             return jsonify({"status": "executed" if ok else "failed", "detail": detail})
 
         elif action_type in ("isolate_endpoint", "restart_service"):
-            # Marked approved and queryable, but NOT yet actually executable --
-            # that needs new command handling inside sentinel_launcher.py
-            # (the endpoint agent) which isn't wired up yet. Kept as a real,
-            # visible "approved but not yet executable" state rather than
-            # silently pretending it worked.
             conn.execute("UPDATE pending_actions SET status='approved', executed_at=?, result=? WHERE id=?",
                          (now, "Approved -- execution for this action type is not yet implemented on the endpoint agent", action_id))
             conn.commit()
@@ -2469,10 +1976,6 @@ def approve_pending_action(action_id):
         conn.close()
         return jsonify({"error": "unknown action_type"}), 400
     except Exception as e:
-        # Was unguarded -- a genuine failure here (e.g. a persistent SQLite
-        # lock) crashed with an unhandled exception, which the frontend
-        # then couldn't distinguish from success (see approveAction's fix).
-        # A real, visible error is far better than a silent false-positive.
         return jsonify({"error": f"Could not approve action: {e}"}), 500
 
 
@@ -2493,17 +1996,11 @@ def reject_pending_action(action_id):
 
 
 
-# Ports commonly associated with backdoors, RATs, and C2 channels.
-# Heuristic only — a starting point, not a substitute for real threat intel.
 SUSPICIOUS_PORTS = {
     4444, 1337, 31337, 6667, 6666, 12345, 54321, 9001, 4443, 8888
 }
 
 def detect_suspicious(connections):
-    """
-    The agent only reports raw connections — it makes no judgment calls.
-    That judgment happens here, server-side, where reputation/context lives.
-    """
     flagged = []
     for c in connections:
         remote = c.get("remote", "")
@@ -2648,13 +2145,6 @@ def sentinel_config():
     return jsonify({"message": "Sentinel server IP updated", "server": existing['server']})
 
 
-# ── SOC 2 COMPLIANCE DASHBOARD ────────────────────────────────────────────────
-# Controls are evaluated live against real telemetry (Suricata/Zeek events in
-# eve.json, Sentinel endpoint check-ins, and the LLM/vector-store health check)
-# rather than stored as opinions — there is no separate "compliance" data
-# source, so each control's pass/warn/fail is a heuristic read of the same
-# signals the rest of the app already collects.
-
 TSC_CATEGORIES = {
     "security":              "Security",
     "availability":          "Availability",
@@ -2664,7 +2154,6 @@ TSC_CATEGORIES = {
 }
 
 def _log_date_hour(ts):
-    """Extract (YYYY-MM-DD, hour:int) from a Suricata ISO timestamp, or (None, None)."""
     m = re.match(r'(\d{4}-\d{2}-\d{2})T(\d{2}):', ts or '')
     if not m:
         return None, None
@@ -2684,8 +2173,6 @@ def _compliance_context():
     if DEPLOYED and not OLLAMA_AVAILABLE:
         ollama_ok = False
     else:
-        # Same 5s -> 20s fix as /health -- this server's CPU-only inference
-        # can genuinely take longer than 5s even when warm.
         ollama_ok, _ = _ping_with_timeout(lambda: OllamaLLM(model="sira-model").invoke("ping"), 20)
     cloud_ok = None
     if DEPLOYED:
@@ -2881,14 +2368,12 @@ def compliance_trend():
 
 _index_rebuild_started = False
 
-# Real, live status -- same pattern as honeypot_log_sync's sync_status,
-# updated at actual rebuild events, not simulated.
 index_rebuild_status = {
     "in_progress": False,
     "last_rebuilt_at": None,
     "last_event_count": None,
     "last_error": None,
-    "recent_events": [],  # last 15 real rebuild events: {"at": iso, "type": "started"|"completed"|"error", "detail": str}
+    "recent_events": [],
 }
 
 MAX_REBUILD_EVENTS = 15
@@ -2904,26 +2389,14 @@ def _log_rebuild_event(event_type, detail):
 
 
 def _index_rebuild_loop():
-    """Waits for honeypot sync to have pulled real data, does an initial
-    ChromaDB rebuild, then re-rebuilds periodically so the index reflects
-    new attack traffic over time rather than staying frozen at whatever
-    existed the moment this process started. Runs entirely in a background
-    thread -- never blocks Flask from serving requests, and every retrieval
-    call already degrades gracefully (empty docs, not a crash) via
-    _call_with_timeout while a rebuild is in progress or hasn't happened yet.
-    """
     eve_path = os.path.join(os.path.dirname(__file__), '..', 'logs', 'eve.json')
 
-    # Wait for honeypot sync's first real pull rather than racing it --
-    # rebuilding against a file that doesn't exist yet just fails and
-    # wastes the attempt. Retries for up to 5 minutes before giving up on
-    # the INITIAL rebuild (periodic re-attempts below will keep trying).
     for _ in range(30):
         if os.path.exists(eve_path) and os.path.getsize(eve_path) > 0:
             break
         time.sleep(10)
 
-    REBUILD_INTERVAL_SECONDS = 2 * 60 * 60  # re-index every 2 hours
+    REBUILD_INTERVAL_SECONDS = 2 * 60 * 60
     while True:
         try:
             if os.path.exists(eve_path) and os.path.getsize(eve_path) > 0:
@@ -2948,11 +2421,6 @@ def _index_rebuild_loop():
 
 
 def _build_daily_summary_content():
-    """Builds the text content for a daily automated report, using the same
-    SECTION_NAMES headings hermes_documents.py's PDF builder already knows
-    how to parse into a structured report -- this reuses that renderer
-    rather than building a separate, parallel PDF layout just for this
-    feature."""
     logs = load_logs()
     alert_logs = [l for l in logs if l.get("event_type") == "alert"]
 
@@ -2999,10 +2467,6 @@ def _build_daily_summary_content():
 
 
 def _send_scheduled_report(email):
-    """Builds today's report as a PDF and emails it, reusing the exact same
-    builder and SMTP path as the existing manual /api/documents/email
-    route -- so a scheduled report looks identical to one a user sends
-    themselves, not a separate, differently-formatted thing."""
     from hermes_documents import _build_pdf
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
@@ -3047,10 +2511,6 @@ def _send_scheduled_report(email):
 
 
 def _email_schedule_loop():
-    """Checks every 60s whether any enabled schedule's time has arrived
-    today and hasn't already been sent -- a simple polling loop, matching
-    the same pattern as _index_rebuild_loop, rather than a real cron
-    daemon, since this app has no OS-level cron access on a shared VM."""
     while True:
         try:
             now = datetime.utcnow()
@@ -3114,7 +2574,6 @@ def set_email_schedule():
 
     if enabled and not email:
         return jsonify({"error": "An email address is required to enable daily reports"}), 400
-    # HH:MM, 24-hour -- matches what an <input type="time"> sends.
     if not re.match(r'^\d{2}:\d{2}$', scheduled_time):
         return jsonify({"error": "scheduled_time must be in HH:MM format"}), 400
 
@@ -3131,9 +2590,6 @@ def set_email_schedule():
 
 
 def _maybe_start_index_rebuild():
-    """Same one-process-only guard pattern as _maybe_start_honeypot_sync --
-    see that function's docstring for why gunicorn vs `python app.py`
-    need different guards."""
     global _index_rebuild_started
     if _index_rebuild_started:
         return
@@ -3147,22 +2603,6 @@ _honeypot_sync_started = False
 
 
 def _maybe_start_honeypot_sync():
-    """Starts the honeypot sync thread exactly once, however this process
-    was launched. Two different launch paths need two different guards:
-
-    - Gunicorn (Render's typical production launch) IMPORTS this module --
-      it never runs the `if __name__ == '__main__':` block below at all, so
-      the sync thread must start here, at true module level, guarded only
-      by "has this process already started it" (no Werkzeug reloader is
-      involved in this path, so there's no double-start risk to guard
-      against).
-    - `python app.py` locally uses Flask's debug reloader, which re-execs
-      this entire file in a child process with WERKZEUG_RUN_MAIN=true --
-      starting unconditionally at module level would run this in BOTH the
-      parent watcher process and the child, which is the exact double-sync
-      bug already documented below. That path keeps its own explicit
-      WERKZEUG_RUN_MAIN check inside __main__.
-    """
     global _honeypot_sync_started
     if _honeypot_sync_started:
         return
@@ -3172,48 +2612,17 @@ def _maybe_start_honeypot_sync():
 
 
 if __name__ != '__main__':
-    # Being imported, not run as a script -- this is the gunicorn/production
-    # path. Start immediately; see docstring above for why this is safe.
     _maybe_start_honeypot_sync()
     _maybe_start_index_rebuild()
     _maybe_start_email_scheduler()
 
 
 if __name__ == '__main__':
-    # Pull Suricata/Zeek logs from the public honeypot VM automatically,
-    # instead of manually uploading eve.json/conn.log. WERKZEUG_RUN_MAIN is
-    # only set in the child process the debug reloader actually forks to
-    # serve requests -- checking it here (rather than starting unconditionally)
-    # stops the sync thread from being started twice (once in the reloader's
-    # parent watcher process, once in the child) when debug=True.
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         _maybe_start_honeypot_sync()
         _maybe_start_index_rebuild()
         _maybe_start_email_scheduler()
 
-    # NOTE: debug=True's reloader watches every file under the project tree
-    # recursively -- this originally caused two separate problems:
-    #
-    # 1) /sira-face-speak runs inference (touches files inside
-    #    face_detection/detection/sfd/), which the reloader saw as "code
-    #    changed" and killed + restarted the whole Flask process mid-request
-    #    -> browser saw a CORS failure (connection reset, no headers ever
-    #    sent), not a real error.
-    #
-    # 2) honeypot_log_sync.py writes ../logs/eve.json and ../logs/conn.log
-    #    every ~15s whenever the honeypot has new data, and rag_setup.py
-    #    rewrites ../ai/chroma_db/ on every rebuild. The reloader was
-    #    watching both of those too, so a routine sync write was *also*
-    #    seen as "code changed" and restarted Flask -- which re-ran
-    #    start_background_sync() in the new child process, which then wrote
-    #    to eve.json again on its next poll, restarting Flask again, and so
-    #    on. This is what looked like "the embeddings/rebuild ran multiple
-    #    times back-to-back": it was actually Flask itself restarting in a
-    #    loop, not the rebuild script being invoked repeatedly.
-    #
-    # exclude_patterns keeps the reloader watching your actual app code
-    # while ignoring Wav2Lip's working files and the two data directories
-    # that are never supposed to contain source code in the first place.
     app.run(
         host='0.0.0.0',
         debug=True,
