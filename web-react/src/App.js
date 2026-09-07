@@ -562,24 +562,20 @@ function NavClock() {
 }
 
 function ThreatLevelCard({ alertCount }) {
-  const canvasRef = useRef(null);
   const level = alertCount > 15 ? "HIGH" : alertCount > 5 ? "MEDIUM" : "LOW";
   const color = level === "HIGH" ? "#E15554" : level === "MEDIUM" ? "#F0A857" : "#22D97A";
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const w = canvas.width, h = canvas.height;
-    const bars = Array.from({ length: 14 }, () => 0.2 + Math.random() * 0.8);
-    ctx.clearRect(0, 0, w, h);
-    const bw = w / bars.length;
-    bars.forEach((v, i) => {
-      ctx.fillStyle = i === bars.length - 1 ? color : "rgba(255,255,255,0.15)";
-      const bh = v * h;
-      ctx.fillRect(i * bw + 1, h - bh, bw - 2, bh);
-    });
-  }, [color, alertCount]);
+  return (
+    <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border2)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 16 }}>🛡️</span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 2 }}>THREAT LEVEL</span>
+        </div>
+        <span style={{ fontFamily: "var(--display)", fontSize: 15, fontWeight: 700, color }}>{level}</span>
+      </div>
+    </div>
+  );
+}
 
   return (
     <div style={{ margin: "0 20px 14px", padding: 14, borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border2)" }}>
@@ -601,14 +597,27 @@ function ThreatLevelCard({ alertCount }) {
 // connection heuristic, this shows Rustinel's actual rule-based detections
 // -- two different depths of endpoint visibility, kept visually consistent
 // (same list-item pattern) but functionally distinct.
+// function RustinelPanel() {
+//   const [ralerts, setRalerts] = useState([]);
+//   useEffect(() => {
+//     const fetchAlerts = () => fetch(`${FLASK_URL}/rustinel-alerts?limit=5`).then(r=>r.json()).then(setRalerts).catch(()=>{});
+//     fetchAlerts();
+//     const interval = setInterval(fetchAlerts, 20000);
+//     return () => clearInterval(interval);
+//   }, []);
+
+
 function RustinelPanel() {
-  const [ralerts, setRalerts] = useState([]);
-  useEffect(() => {
-    const fetchAlerts = () => fetch(`${FLASK_URL}/rustinel-alerts?limit=5`).then(r=>r.json()).then(setRalerts).catch(()=>{});
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 20000);
-    return () => clearInterval(interval);
-  }, []);
+  return (
+    <>
+      <div className="panel-divider"/>
+      <div className="section-label">Rustinel EDR</div>
+      <div style={{padding:"8px 20px"}}>
+        <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>COMING SOON</div>
+      </div>
+    </>
+  );
+}
 
   const severityColor = (sev) => {
     const s = (sev||"").toLowerCase();
@@ -800,42 +809,42 @@ export default function App() {
     }).catch(()=>{});
   }, []);
 
-  // ── Performance tier system ───────────────────────────────────────────
-  // Embeddings (nomic-embed-text) never change here -- only the reasoning
-  // models (SIRA chat + Hermes reports) switch. Changing the embedding
-  // model would silently break retrieval, since ChromaDB's whole index was
-  // built against one specific embedding space.
-  const PERF_TIERS = {
-    full:     { label: "Full",     siraModel: "ollama",          hermesModel: "nous-hermes2", ram: "~11 GB" },
-    balanced: { label: "Balanced", siraModel: "ollama_phi4mini", hermesModel: "phi4-mini",     ram: "~3 GB"  },
-    light:    { label: "Light",    siraModel: "ollama_llama32",  hermesModel: "phi4-mini",     ram: "~2.5 GB" },
-  };
-  const [perfTier, setPerfTier] = useState(() => localStorage.getItem("sira_perf_tier") || "full");
-  const [hwSpecs, setHwSpecs] = useState(null);
-  const [suggestedTier, setSuggestedTier] = useState(null);
+  // // ── Performance tier system ───────────────────────────────────────────
+  // // Embeddings (nomic-embed-text) never change here -- only the reasoning
+  // // models (SIRA chat + Hermes reports) switch. Changing the embedding
+  // // model would silently break retrieval, since ChromaDB's whole index was
+  // // built against one specific embedding space.
+  // const PERF_TIERS = {
+  //   full:     { label: "Full",     siraModel: "ollama",          hermesModel: "nous-hermes2", ram: "~11 GB" },
+  //   balanced: { label: "Balanced", siraModel: "ollama_phi4mini", hermesModel: "phi4-mini",     ram: "~3 GB"  },
+  //   light:    { label: "Light",    siraModel: "ollama_llama32",  hermesModel: "phi4-mini",     ram: "~2.5 GB" },
+  // };
+  // const [perfTier, setPerfTier] = useState(() => localStorage.getItem("sira_perf_tier") || "full");
+  // const [hwSpecs, setHwSpecs] = useState(null);
+  // const [suggestedTier, setSuggestedTier] = useState(null);
 
-  useEffect(() => {
-    // navigator.deviceMemory is Chrome/Edge-only and browsers deliberately
-    // round/cap it for privacy (e.g. reports "8" for anything >=8GB) -- a
-    // rough heuristic to SUGGEST a tier, never something to force silently.
-    const cores = navigator.hardwareConcurrency || null;
-    const mem = navigator.deviceMemory || null; // undefined on Firefox/Safari
-    setHwSpecs({ cores, mem });
-    let suggestion = "full";
-    if (mem && mem <= 4) suggestion = "light";
-    else if (mem && mem <= 8) suggestion = "balanced";
-    else if (!mem && cores && cores <= 4) suggestion = "balanced"; // no deviceMemory support -- fall back to core count only
-    setSuggestedTier(suggestion);
-  }, []);
+  // useEffect(() => {
+  //   // navigator.deviceMemory is Chrome/Edge-only and browsers deliberately
+  //   // round/cap it for privacy (e.g. reports "8" for anything >=8GB) -- a
+  //   // rough heuristic to SUGGEST a tier, never something to force silently.
+  //   const cores = navigator.hardwareConcurrency || null;
+  //   const mem = navigator.deviceMemory || null; // undefined on Firefox/Safari
+  //   setHwSpecs({ cores, mem });
+  //   let suggestion = "full";
+  //   if (mem && mem <= 4) suggestion = "light";
+  //   else if (mem && mem <= 8) suggestion = "balanced";
+  //   else if (!mem && cores && cores <= 4) suggestion = "balanced"; // no deviceMemory support -- fall back to core count only
+  //   setSuggestedTier(suggestion);
+  // }, []);
 
-  const applyPerfTier = (tierKey) => {
-    const tier = PERF_TIERS[tierKey];
-    if (!tier) return;
-    setPerfTier(tierKey);
-    localStorage.setItem("sira_perf_tier", tierKey);
-    setSelectedModel(tier.siraModel);
-    showToast(`Switched to ${tier.label} mode`);
-  };
+  // const applyPerfTier = (tierKey) => {
+  //   const tier = PERF_TIERS[tierKey];
+  //   if (!tier) return;
+  //   setPerfTier(tierKey);
+  //   localStorage.setItem("sira_perf_tier", tierKey);
+  //   setSelectedModel(tier.siraModel);
+  //   showToast(`Switched to ${tier.label} mode`);
+  // };
   // ─────────────────────────────────────────────────────────────────────
   const [messages, setMessages]           = useState([{ role:"ai", text:null, time:new Date().toLocaleTimeString(), isWelcome:true }]);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
@@ -874,10 +883,10 @@ export default function App() {
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
   const [page, setPage]                   = useState("dashboard");
-  const [showUpload, setShowUpload]       = useState(false);
-  const [uploadFile, setUploadFile]       = useState(null);
-  const [uploadStatus, setUploadStatus]   = useState("");
-  const [uploading, setUploading]         = useState(false);
+  // const [showUpload, setShowUpload]       = useState(false);
+  // const [uploadFile, setUploadFile]       = useState(null);
+  // const [uploadStatus, setUploadStatus]   = useState("");
+  // const [uploading, setUploading]         = useState(false);
 const [sessionId, setSessionId] = useState(() => {
   const existing = sessionStorage.getItem("currentSessionId");
   if (existing) return existing;
@@ -889,8 +898,8 @@ const [sessionId, setSessionId] = useState(() => {
   const [bootDone, setBootDone]           = useState(() => sessionStorage.getItem("bootDone") === "true");
   const [machines, setMachines]           = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
-  const [sentinelIP, setSentinelIP]       = useState("");
-  const [sentinelSaving, setSentinelSaving] = useState(false);
+  // const [sentinelIP, setSentinelIP]       = useState("");
+  // const [sentinelSaving, setSentinelSaving] = useState(false);
   const [useOwnKey, setUseOwnKey]         = useState(false);
   const [apiKeyInput, setApiKeyInput]     = useState("");
   const [showApiKey, setShowApiKey]       = useState(false);
@@ -1302,17 +1311,17 @@ try {
 setLoading(false);
   }
 
-  const handleUpload = async () => {
-    if (!uploadFile) { setUploadStatus("No file selected"); return; }
-    setUploading(true); setUploadStatus("Uploading...");
-    const formData = new FormData(); formData.append("file",uploadFile);
-    try {
-      const data = await fetch(`${FLASK_URL}/upload`,{method:"POST",body:formData}).then(r=>r.json());
-      if (data.message) { setUploadStatus("✓ "+data.message+(data.events_loaded?` (${data.events_loaded} events loaded)`:"")); showToast("Logs uploaded"); setTimeout(()=>{setShowUpload(false);setUploadFile(null);setUploadStatus("");},2000); }
-      else { setUploadStatus("✗ "+(data.error||"Upload failed")); }
-    } catch { setUploadStatus("✗ Cannot connect to Flask"); }
-    setUploading(false);
-  };
+  // const handleUpload = async () => {
+  //   if (!uploadFile) { setUploadStatus("No file selected"); return; }
+  //   setUploading(true); setUploadStatus("Uploading...");
+  //   const formData = new FormData(); formData.append("file",uploadFile);
+  //   try {
+  //     const data = await fetch(`${FLASK_URL}/upload`,{method:"POST",body:formData}).then(r=>r.json());
+  //     if (data.message) { setUploadStatus("✓ "+data.message+(data.events_loaded?` (${data.events_loaded} events loaded)`:"")); showToast("Logs uploaded"); setTimeout(()=>{setShowUpload(false);setUploadFile(null);setUploadStatus("");},2000); }
+  //     else { setUploadStatus("✗ "+(data.error||"Upload failed")); }
+  //   } catch { setUploadStatus("✗ Cannot connect to Flask"); }
+  //   setUploading(false);
+  // };
 
   const saveSentinelIP = async () => {
     if (!sentinelIP.trim()) return;
@@ -1390,7 +1399,7 @@ setLoading(false);
           </div>
         </div>
       )}
-
+{/* 
       {showUpload && (
         <div className="modal-overlay" onClick={()=>setShowUpload(false)}>
           <div className="modal" onClick={e=>e.stopPropagation()} style={{width:480}}>
@@ -1408,7 +1417,7 @@ setLoading(false);
             </button>
           </div>
         </div>
-      )}
+      )} */}
 
       <div className="app" style={{gridTemplateColumns:`${leftPanelOpen ? sidebarWidth : 28}px 1fr`, transition: isResizing.current ? "none" : "grid-template-columns 0.2s"}}>
         <nav className="topnav">
@@ -1538,35 +1547,6 @@ setLoading(false);
               </select>
             </div>
 
-            {/* ── Performance Mode — hardware-based tier picker ────────────
-                Sets BOTH SIRA's model (via selectedModel, reusing the
-                existing dropdown machinery) and Hermes's model (read from
-                HermesContext at investigation start). Embeddings never
-                change. */}
-            <div className="section-label">Performance Mode</div>
-            <div style={{padding:"10px 20px 0"}}>
-              <div style={{display:"flex",gap:6,marginBottom:8}}>
-                {Object.entries(PERF_TIERS).map(([key,t])=>(
-                  <button key={key} onClick={()=>applyPerfTier(key)} style={{
-                    flex:1, padding:"8px 6px", borderRadius:"var(--radius-sm)", cursor:"pointer",
-                    fontFamily:"var(--mono)", fontSize:9, letterSpacing:0.5, textTransform:"uppercase",
-                    background: perfTier===key ? "var(--accent)" : "var(--bg3)",
-                    color: perfTier===key ? "var(--bg)" : "var(--text-mid)",
-                    border: perfTier===key ? "1px solid var(--accent)" : "1px solid var(--border2)",
-                    fontWeight: perfTier===key ? 700 : 400,
-                  }}>
-                    {t.label}
-                    {suggestedTier===key && <div style={{fontSize:7,marginTop:2,opacity:0.75}}>SUGGESTED</div>}
-                  </button>
-                ))}
-              </div>
-              <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",lineHeight:1.6}}>
-                {hwSpecs && (
-                  <>Detected: {hwSpecs.cores||"?"} cores{hwSpecs.mem ? `, ~${hwSpecs.mem}GB RAM` : " (RAM detection unsupported in this browser)"}.<br/></>
-                )}
-                Est. RAM for current mode: <span style={{color:"var(--accent)"}}>{PERF_TIERS[perfTier].ram}</span>
-              </div>
-            </div>
             <div className="panel-divider"/>
             <div className="section-label" style={{justifyContent:"space-between"}}>
               Overview
@@ -1580,7 +1560,7 @@ setLoading(false);
             </div>
             <ThreatLevelCard alertCount={stats?.alert_count ?? alertCount} />
             <div className="panel-divider"/>
-            <div className="section-label">Connected Machines</div>
+            {/* <div className="section-label">Connected Machines</div>
             <div style={{padding:"8px 20px"}}>
               {machines.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO AGENTS CONNECTED</div>}
               {machines.map((m,i)=>(
@@ -1615,13 +1595,27 @@ setLoading(false);
                   </button>
                 </div>
               </div>
+            </div> */}
+
+
+                        <div className="section-label">Honeypot Status</div>
+            <div style={{padding:"8px 20px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0"}}>
+                <div style={{width:8,height:8,borderRadius:"50%",flexShrink:0,background:sensorsConnected?"var(--green)":"var(--red)",boxShadow:sensorsConnected?"0 0 6px var(--green)":"0 0 6px var(--red)",animation:"blink 2s infinite"}}/>
+                <div style={{fontFamily:"var(--mono)",fontSize:10,color:"var(--text)",fontWeight:700}}>
+                  {sensorsConnected ? "Connected — receiving live traffic" : "Not connected"}
+                </div>
+              </div>
             </div>
+
+
+
             <RustinelPanel/>
             <div className="panel-divider"/>
             <div className="feed-wrap">
-              <div style={{padding:"0 20px 10px"}}>
+              {/* <div style={{padding:"0 20px 10px"}}>
                 <button onClick={()=>setShowUpload(true)} style={{width:"100%",padding:"9px",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,textTransform:"uppercase",cursor:"pointer"}} onMouseEnter={e=>e.target.style.borderColor="var(--accent)"} onMouseLeave={e=>e.target.style.borderColor="var(--border2)"}>⬆ Upload Logs</button>
-              </div>
+              </div> */}
               <div className="section-label">Live Feed</div>
               <div style={{display:"flex",gap:5,padding:"9px 20px 7px",flexWrap:"wrap"}}>
                 {["all","alert","dns","http","tls","flow"].map(f=>(

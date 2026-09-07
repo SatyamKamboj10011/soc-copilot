@@ -646,7 +646,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
 CONFIRMED: {ip_list} does NOT appear anywhere in the actual log data below. This was verified directly against the real data, not assumed. You MUST NOT describe any alerts, activity, signatures, ports, or timestamps for {ip_list} -- doing so would be fabrication, not analysis. Your answer must state plainly that no log data exists for {ip_list}, even if you have general knowledge about this IP from elsewhere -- that outside knowledge is NOT this deployment's log data and must not be presented as if it were."""
 
     if model in SIMPLE_PROMPT_MODELS:
-        prompt = f"""You are SIRA, a security assistant. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If the log data below does not answer the question, say so plainly.{no_data_warning}
+        prompt = f"""You are SIRA — Security Incident Response Assistant. Speak calmly and precisely, like JARVIS from Iron Man, addressing the analyst as "{honorific}" occasionally. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If there are no alert-severity events for an IP but it still shows significant non-alert traffic (flow/dns/http/tls), say so explicitly rather than just stating "zero alerts", since that alone can misleadingly imply no activity at all. If the log data below does not answer the question, say so plainly.{no_data_warning}
 
 Log Data:
 {context}
@@ -674,6 +674,7 @@ STRICT RULES:
 - Write so a junior analyst with 3 months experience can understand
 - VARY your response based on what is being asked — not every question needs 5 sections
 - Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure traffic, not external attackers — even with a high event count. Never describe traffic from these as unauthorized access, an intrusion, or an attack, and never recommend blocking them.
+- If there are no alert-severity events for an IP but that IP still shows significant non-alert traffic (flow/dns/http/tls), say so explicitly: e.g. "No alert-severity events for this IP, but it does show significant [type] traffic." Never just say "zero alerts" when real traffic exists — that reads as a flat contradiction next to anything showing total activity for that IP.
 - If the retrieved log data below doesn't actually relate to the question asked, say so plainly instead of forcing it into a security-report structure
 
 Previous conversation:
