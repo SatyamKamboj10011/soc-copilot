@@ -275,6 +275,40 @@ def load_logs():
     _logs_cache["data"] = logs
     return logs
 
+
+def _build_aggregate_stats_context():
+    """Real counted stats over all logs -- independent of vector retrieval,
+    so questions like 'summarize' or 'what IP is triggering alerts' always
+    have the correct top-attacker/alert numbers available, even if semantic
+    retrieval doesn't happen to surface those specific log entries."""
+    logs = load_logs()
+    alert_logs = [l for l in logs if l.get('event_type') == 'alert']
+    ip_counts = Counter(l.get('src_ip') for l in alert_logs if l.get('src_ip'))
+    top_ips = ip_counts.most_common(5)
+    sig_counts = Counter(
+        l.get('alert', {}).get('signature') for l in alert_logs
+        if l.get('alert', {}).get('signature')
+    )
+    top_sigs = sig_counts.most_common(5)
+    unique_ips = len(set(l.get('src_ip') for l in logs if l.get('src_ip')))
+
+    lines = [
+        f"VERIFIED AGGREGATE STATS (counted directly from all {len(logs)} log events, "
+        f"{len(alert_logs)} of them alerts, across {unique_ips} unique source IPs -- "
+        f"these are the correct numbers, use them for any 'how many', 'summarize', "
+        f"or 'top attacker' style question instead of estimating from the log excerpts below):"
+    ]
+    if top_ips:
+        lines.append("Top attacking IPs by alert count: " +
+                      ", ".join(f"{ip} ({count} alerts)" for ip, count in top_ips))
+    else:
+        lines.append("No alerting source IPs currently in the log window.")
+    if top_sigs:
+        lines.append("Top alert signatures: " +
+                      ", ".join(f"{sig} ({count}x)" for sig, count in top_sigs))
+    return "\n".join(lines)
+
+
 import re
 
 def format_ts(ts):
@@ -612,6 +646,10 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     lambda m: f"at {m.group(1)}:{m.group(2)}",
     context
 )
+
+    aggregate_stats = _call_with_timeout(_build_aggregate_stats_context, 5, default="")
+    if aggregate_stats:
+        context = aggregate_stats + "\n\n" + context
 
     SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama"}
 
@@ -1544,6 +1582,7 @@ def rustinel_alerts():
 def attacker_profile(ip):
     import requests as req
     honorific = (request.args.get('honorific') or 'Sir').strip()
+    requested_model = (request.args.get('model') or 'ollama').strip()
 
     logs = load_logs()
     events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
@@ -1619,12 +1658,19 @@ RECOMMENDED BLOCK:
 YES or NO — one sentence justification."""
 
     try:
-        sira_assessment, _, _ = _invoke_llm("ollama", prompt)
+        sira_assessment, used_model, _ = _invoke_llm(requested_model, prompt)
     except Exception:
-        sira_assessment = "SIRA offline — manual review required"
+        # Requested model failed -- fall back to local rather than
+        # returning nothing, same pattern /ask uses.
+        try:
+            sira_assessment, used_model, _ = _invoke_llm("ollama", prompt)
+        except Exception:
+            sira_assessment = "SIRA offline — manual review required"
+            used_model = requested_model
 
     return jsonify({
         "ip": ip,
+        "model_used": used_model,
         "geo": {
             "country": geo.get("country", "Unknown"),
             "city": geo.get("city", "Unknown"),

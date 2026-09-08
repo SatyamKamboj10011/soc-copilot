@@ -1,10 +1,16 @@
 import { useState, useEffect, useRef, memo } from "react";
 import {
+  collection, doc, getDocs, setDoc, serverTimestamp,
+} from "firebase/firestore";
+import { db } from "./firebase";
+import {
   useAlertTriage, TriageBadge, TriageSelect, TriageSummary, TriageNotes,
+  TRIAGE_STATUS, STATUS_ORDER,
 } from "./AlertTriage";
 
 const FLASK_URL = "https://api.sira-soc.me";
 const PAGE_SIZE = 50;
+const PROFILES_COLLECTION = "attacker_profiles";
 
 const TYPE_COLOR = {
   alert: "var(--red, #E15554)",
@@ -178,6 +184,144 @@ function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira, mode
   );
 }
 
+/* ==================== Attacker profile — side panel (not a full-screen modal), can render
+   either a live fetch result or a cached Firestore record opened from the Profiles tab ==================== */
+function AttackerProfilePanel({ profile, loading, timeline, onClose, onRefresh, onAskSira }) {
+  return (
+    <>
+      <div style={inspectorScrimStyle} onClick={onClose} />
+      <div style={profilePanelStyle}>
+        <div style={inspectorHeaderStyle}>
+          <div>
+            <span style={{ ...typeBadgeStyle, background: "rgba(139,124,255,0.1)", color: "var(--purple, #8B7CFF)", border: "1px solid rgba(139,124,255,0.35)" }}>
+              ATTACKER PROFILE
+            </span>
+            {profile?.model_used && (
+              <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", marginTop: 6 }}>
+                model: {profile.model_used}
+                {profile.saved_by ? ` · saved by ${profile.saved_by}` : ""}
+                {profile.saved_at?.seconds ? ` · ${new Date(profile.saved_at.seconds * 1000).toLocaleString()}` : ""}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} style={inspectorCloseStyle}>✕</button>
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1, padding: "16px 20px" }}>
+          {loading && (
+            <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono, monospace)", color: "var(--accent, #29D3FF)", fontSize: 11 }}>
+              ◈ Building attacker profile...
+            </div>
+          )}
+
+          {profile && !profile.error && (
+            <>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 12, marginBottom: 16,
+                padding: 14, background: "var(--bg3, rgba(255,255,255,0.03))", borderRadius: 10,
+                border: "1px solid var(--purple, #8B7CFF)", borderLeft: "3px solid var(--purple, #8B7CFF)",
+              }}>
+                <img
+                  src={`https://flagcdn.com/24x18/${profile.geo?.flag?.toLowerCase()}.png`}
+                  alt=""
+                  style={{ width: 30, height: 22, borderRadius: 3, flexShrink: 0 }}
+                  onError={e => e.target.style.display = "none"}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 16, fontWeight: 700, color: "var(--purple, #8B7CFF)" }}>{profile.ip}</div>
+                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 10, color: "var(--text-mid, #9A9AA2)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {profile.geo?.city}, {profile.geo?.country} — {profile.geo?.isp}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{
+                    fontFamily: "var(--display, inherit)", fontSize: 22, fontWeight: 700,
+                    color: profile.abuse?.score > 75 ? "var(--red, #E15554)" : profile.abuse?.score > 25 ? "var(--orange, #F0A857)" : "var(--green, #22D97A)",
+                  }}>{profile.abuse?.score}%</div>
+                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 7.5, color: "var(--text-dim, #5A5A62)", letterSpacing: 1 }}>ABUSE SCORE</div>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+                {[
+                  { label: "Total Events", value: profile.stats?.total_events, color: "var(--accent, #29D3FF)" },
+                  { label: "Alerts", value: profile.stats?.total_alerts, color: "var(--red, #E15554)" },
+                  { label: "AbuseIPDB Reports", value: profile.abuse?.reports, color: "var(--orange, #F0A857)" },
+                  { label: "Ports Targeted", value: profile.stats?.ports_targeted?.length, color: "var(--purple, #8B7CFF)" },
+                ].map((s, i) => (
+                  <div key={i} style={{ background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))", borderRadius: 10, padding: 10, textAlign: "center" }}>
+                    <div style={{ fontFamily: "var(--display, inherit)", fontSize: 18, fontWeight: 700, color: s.color }}>{s.value ?? "—"}</div>
+                    <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 7.5, color: "var(--text-dim, #5A5A62)", letterSpacing: 0.6, marginTop: 3 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {profile.stats?.signatures?.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", letterSpacing: 1.5, marginBottom: 7 }}>ATTACK SIGNATURES</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {profile.stats.signatures.map((sig, i) => (
+                      <span key={i} style={{ fontFamily: "var(--mono, monospace)", fontSize: 8.5, padding: "3px 9px", borderRadius: 20, background: "var(--red-dim, rgba(225,85,84,0.09))", color: "var(--red, #E15554)", border: "1px solid rgba(225,85,84,0.3)" }}>{sig}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {profile.stats?.ports_targeted?.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", letterSpacing: 1.5, marginBottom: 7 }}>PORTS TARGETED</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                    {profile.stats.ports_targeted.map((port, i) => (
+                      <span key={i} style={{ fontFamily: "var(--mono, monospace)", fontSize: 8.5, padding: "3px 9px", borderRadius: 20, background: "var(--accent-dim, rgba(41,211,255,0.09))", color: "var(--accent, #29D3FF)", border: "1px solid rgba(41,211,255,0.25)" }}>{port}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))", borderLeft: "2px solid var(--purple, #8B7CFF)", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--purple, #8B7CFF)", letterSpacing: 1.5, marginBottom: 10 }}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
+                <div style={{ fontFamily: "var(--sans, sans-serif)", fontSize: 11.5, color: "var(--text-mid, #9A9AA2)", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>{profile.sira_assessment}</div>
+              </div>
+
+              {timeline?.timeline?.length > 0 && (
+                <div style={{ marginBottom: 16, background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))", borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", letterSpacing: 1.5, marginBottom: 10 }}>
+                    ⏱ EVENT TIMELINE — {timeline.total_events} TOTAL
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
+                    {timeline.timeline.map((e, i) => (
+                      <div key={i} style={{
+                        display: "flex", gap: 8, alignItems: "baseline", padding: "5px 7px",
+                        borderRadius: 6, background: e.event_type === "alert" ? "var(--red-dim, rgba(225,85,84,0.09))" : "rgba(255,255,255,0.02)",
+                        fontFamily: "var(--mono, monospace)", fontSize: 9.5,
+                      }}>
+                        <span style={{ color: "var(--text-dim, #5A5A62)", flexShrink: 0, width: 56 }}>{e.timestamp?.substring(11, 19)}</span>
+                        <span style={{ color: TYPE_COLOR[e.event_type] || "var(--text-mid, #9A9AA2)", fontWeight: 700, flexShrink: 0, width: 38 }}>{e.event_type?.substring(0, 4).toUpperCase()}</span>
+                        <span style={{ color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {e.signature || e.query || e.hostname || `${e.src_ip} → ${e.dest_ip}:${e.dest_port}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={onRefresh} style={inspectorActionBtnStyle("var(--accent, #29D3FF)")}>↻ Refresh Analysis</button>
+                <button onClick={() => onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`)} style={inspectorActionBtnStyle("var(--purple, #8B7CFF)")}>⬡ Full Analysis</button>
+              </div>
+            </>
+          )}
+
+          {profile?.error && (
+            <div style={{ color: "var(--red, #E15554)", fontFamily: "var(--mono, monospace)", fontSize: 11, padding: 20 }}>✗ {profile.error}</div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ==================== Main page ==================== */
 export const InvestigationPage = memo(function InvestigationPage({ onAskSira, model = "ollama" }) {
   // Triage state is shared across the team, not per-user: if one analyst marks
@@ -192,30 +336,77 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [viewMode, setViewMode] = useState("raw"); // "raw" | "grouped"
+  const [triageFilter, setTriageFilter] = useState("all");
+  const [viewMode, setViewMode] = useState("raw"); // "raw" | "grouped" | "profiles"
   const [groupedRows, setGroupedRows] = useState([]);
   const [groupedLoading, setGroupedLoading] = useState(false);
+  const [savedProfiles, setSavedProfiles] = useState([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [profileIp, setProfileIp] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [timeline, setTimeline] = useState(null);
   const [whatIf, setWhatIf] = useState(null);
   const [whatIfLoading, setWhatIfLoading] = useState(false);
   const searchDebounce = useRef(null);
 
+  const saveProfileToFirestore = async (ip, data) => {
+    try {
+      await setDoc(doc(db, PROFILES_COLLECTION, ip), {
+        ...data,
+        saved_at: serverTimestamp(),
+        saved_by: username,
+      }, { merge: true });
+    } catch {
+      // Non-fatal -- the live profile view above already succeeded
+      // regardless of whether the Firestore write lands.
+    }
+  };
+
   const loadProfile = async (ip) => {
+    setProfileIp(ip);
     setProfileLoading(true); setProfile(null); setTimeline(null);
-    try { const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}?model=${model}`); setProfile(await res.json()); }
+    try {
+      const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}?model=${model}`);
+      const data = await res.json();
+      setProfile(data);
+      if (data && !data.error) saveProfileToFirestore(ip, data);
+    }
     catch { setProfile({ error: "Failed to load profile" }); }
     setProfileLoading(false);
     // Separate try/catch -- a timeline failure shouldn't take down the
     // whole profile view, which already loaded fine above.
     try { const tRes = await fetch(`${FLASK_URL}/attacker-timeline/${ip}`); setTimeline(await tRes.json()); }
     catch { setTimeline(null); }
+  };
+
+  /** Opens a profile saved earlier in Firestore instantly (no LLM re-run) --
+   * only the (cheap) event timeline is re-fetched so it stays current. */
+  const openSavedProfile = async (saved) => {
+    setProfileIp(saved.ip);
+    setProfile(saved);
+    setProfileLoading(false);
+    setTimeline(null);
+    try { const tRes = await fetch(`${FLASK_URL}/attacker-timeline/${saved.ip}`); setTimeline(await tRes.json()); }
+    catch { setTimeline(null); }
+  };
+
+  const loadSavedProfiles = async () => {
+    setProfilesLoading(true);
+    try {
+      const snap = await getDocs(collection(db, PROFILES_COLLECTION));
+      const list = snap.docs.map(d => d.data());
+      list.sort((a, b) => (b.saved_at?.seconds || 0) - (a.saved_at?.seconds || 0));
+      setSavedProfiles(list);
+    } catch {
+      setSavedProfiles([]);
+    }
+    setProfilesLoading(false);
   };
 
   const runWhatIf = async (log) => {
@@ -308,9 +499,16 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
     return () => clearInterval(interval);
   }, [viewMode]); // eslint-disable-line
 
+  useEffect(() => {
+    if (viewMode !== "profiles") return;
+    loadSavedProfiles();
+  }, [viewMode]); // eslint-disable-line
+
   const loadMore = () => { setLoadingMore(true); fetchPage(search.trim(), offset, true); };
   const hasMore = offset < total;
-  const visibleRows = typeFilter === "all" ? rows : rows.filter(r => r.event_type === typeFilter);
+  const visibleRows = rows
+    .filter(r => typeFilter === "all" || r.event_type === typeFilter)
+    .filter(r => triageFilter === "all" || statusOf(r) === triageFilter);
 
   const detailFor = (l) => l.alert?.signature || l.dns?.rrname || l.http?.hostname || "—";
 
@@ -348,21 +546,29 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
         >⬇ EXPORT CSV</button>
       </div>
 
-      <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 5, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
         {["all", "alert", "dns", "http", "tls", "flow"].map(f => (
           <button key={f} onClick={() => setTypeFilter(f)} style={filterChipStyle(f === typeFilter)}>{f}</button>
         ))}
         <div style={{ flex: 1 }} />
-        <button
-          onClick={() => setViewMode(v => v === "raw" ? "grouped" : "raw")}
-          style={{
-            padding: "0 12px", height: 26, background: viewMode === "grouped" ? "var(--accent-dim, rgba(41,211,255,0.12))" : "var(--bg3, rgba(255,255,255,0.03))",
-            border: `1px solid ${viewMode === "grouped" ? "var(--accent, #29D3FF)" : "var(--border2, rgba(255,255,255,0.08))"}`, borderRadius: 8,
-            color: viewMode === "grouped" ? "var(--accent, #29D3FF)" : "var(--text-mid, #8FA3B5)", cursor: "pointer",
-            fontFamily: "var(--mono, monospace)", fontSize: 9, letterSpacing: 1,
-          }}
-        >{viewMode === "raw" ? "☰ RAW LOGS" : "⊞ GROUPED + MITRE"}</button>
+        {["raw", "grouped", "profiles"].map(v => (
+          <button key={v} onClick={() => setViewMode(v)} style={viewModeChipStyle(viewMode === v)}>
+            {v === "raw" ? "☰ RAW LOGS" : v === "grouped" ? "⊞ GROUPED + MITRE" : "◈ ATTACKER PROFILES"}
+          </button>
+        ))}
       </div>
+
+      {viewMode === "raw" && (
+        <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontFamily: "var(--mono, monospace)", fontSize: 8, color: "var(--text-dim, #5A5A62)", letterSpacing: 1, marginRight: 2 }}>TRIAGE:</span>
+          <button onClick={() => setTriageFilter("all")} style={filterChipStyle(triageFilter === "all")}>all</button>
+          {STATUS_ORDER.map(k => (
+            <button key={k} onClick={() => setTriageFilter(k)} style={filterChipStyle(triageFilter === k)}>
+              {TRIAGE_STATUS[k].label.toLowerCase()} ({triageCounts[k] || 0})
+            </button>
+          ))}
+        </div>
+      )}
 
       <TriageSummary
         counts={triageCounts}
@@ -409,6 +615,43 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
               ))}
               {!groupedLoading && groupedRows.length === 0 && (
                 <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>No alerts to group yet</div>
+              )}
+            </div>
+          </>
+        ) : viewMode === "profiles" ? (
+          <>
+            <div style={consoleHeaderRowStyle}>
+              <span style={{ width: 150 }}>IP</span>
+              <span style={{ width: 140 }}>LOCATION</span>
+              <span style={{ width: 60 }}>ABUSE</span>
+              <span style={{ width: 60 }}>ALERTS</span>
+              <span style={{ width: 90 }}>MODEL</span>
+              <span style={{ flex: 1 }}>SAVED</span>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {profilesLoading && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>Loading saved profiles...</div>
+              )}
+              {!profilesLoading && savedProfiles.map((p, i) => (
+                <div key={i} onClick={() => openSavedProfile(p)} style={consoleRowStyle}>
+                  <span style={{ width: 150, color: "var(--purple, #8B7CFF)", fontWeight: 700 }}>{p.ip}</span>
+                  <span style={{ width: 140, color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.geo?.city}, {p.geo?.country}</span>
+                  <span style={{
+                    width: 60,
+                    color: p.abuse?.score > 75 ? "var(--red, #E15554)" : p.abuse?.score > 25 ? "var(--orange, #F0A857)" : "var(--green, #22D97A)",
+                  }}>{p.abuse?.score}%</span>
+                  <span style={{ width: 60, color: "var(--text-dim, #5A5A62)" }}>{p.stats?.total_alerts ?? "—"}</span>
+                  <span style={{ width: 90, color: "var(--accent, #29D3FF)", fontSize: 9 }}>{p.model_used || "—"}</span>
+                  <span style={{ flex: 1, color: "var(--text-dim, #5A5A62)", fontSize: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.saved_at?.seconds ? new Date(p.saved_at.seconds * 1000).toLocaleString() : "—"}
+                    {p.saved_by ? ` · ${p.saved_by}` : ""}
+                  </span>
+                </div>
+              ))}
+              {!profilesLoading && savedProfiles.length === 0 && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>
+                  No attacker profiles saved yet — open one from Raw Logs to save it here
+                </div>
               )}
             </div>
           </>
@@ -464,66 +707,14 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
       )}
 
       {(profile || profileLoading) && (
-        <div className="modal-overlay" onClick={() => setProfile(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 680 }}>
-            <button className="modal-close" onClick={() => setProfile(null)}>✕</button>
-            {profileLoading && <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--accent)" }}>◈ Building attacker profile...</div>}
-            {profile && !profile.error && (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20, padding: "16px", background: "var(--bg3)", borderRadius: 12, border: "1px solid var(--purple)", borderLeft: "3px solid var(--purple)" }}>
-                  <img src={`https://flagcdn.com/24x18/${profile.geo.flag?.toLowerCase()}.png`} alt="" style={{ width: 36, height: 27, borderRadius: 3 }} onError={e => e.target.style.display = 'none'} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: "var(--purple)" }}>{profile.ip}</div>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-mid)", marginTop: 4 }}>{profile.geo.city}, {profile.geo.country} — {profile.geo.isp}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: "var(--display)", fontSize: 28, fontWeight: 700, color: profile.abuse.score > 75 ? "var(--red)" : profile.abuse.score > 25 ? "var(--orange)" : "var(--green)" }}>{profile.abuse.score}%</div>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 1.5 }}>ABUSE SCORE</div>
-                  </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
-                  {[{ label: "Total Events", value: profile.stats.total_events, color: "var(--accent)" }, { label: "Alerts", value: profile.stats.total_alerts, color: "var(--red)" }, { label: "AbuseIPDB Reports", value: profile.abuse.reports, color: "var(--orange)" }, { label: "Ports Targeted", value: profile.stats.ports_targeted.length, color: "var(--purple)" }].map((s, i) => (
-                    <div key={i} style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 10, padding: "12px", textAlign: "center" }}>
-                      <div style={{ fontFamily: "var(--display)", fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
-                      <div style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--text-dim)", letterSpacing: 1, marginTop: 4 }}>{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-                {profile.stats.signatures.length > 0 && <div style={{ marginBottom: 16 }}><div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 1.5, marginBottom: 8 }}>ATTACK SIGNATURES USED</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{profile.stats.signatures.map((sig, i) => (<span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "4px 10px", borderRadius: 20, background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(225,85,84,0.3)" }}>{sig}</span>))}</div></div>}
-                {profile.stats.ports_targeted.length > 0 && <div style={{ marginBottom: 16 }}><div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 1.5, marginBottom: 8 }}>PORTS TARGETED</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{profile.stats.ports_targeted.map((port, i) => (<span key={i} style={{ fontFamily: "var(--mono)", fontSize: 9, padding: "4px 10px", borderRadius: 20, background: "var(--accent-dim)", color: "var(--accent)", border: "1px solid rgba(41,211,255,0.25)" }}>{port}</span>))}</div></div>}
-                <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderLeft: "2px solid var(--purple)", borderRadius: 10, padding: 16 }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--purple)", letterSpacing: 1.5, marginBottom: 12 }}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
-                  <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{profile.sira_assessment}</div>
-                </div>
-
-                {timeline && timeline.timeline && timeline.timeline.length > 0 && (
-                  <div style={{ marginTop: 16, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 10, padding: 16 }}>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--text-dim)", letterSpacing: 1.5, marginBottom: 12 }}>
-                      ⏱ EVENT TIMELINE — {timeline.total_events} TOTAL EVENTS
-                    </div>
-                    <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-                      {timeline.timeline.map((e, i) => (
-                        <div key={i} style={{
-                          display: "flex", gap: 10, alignItems: "baseline", padding: "6px 8px",
-                          borderRadius: 6, background: e.event_type === "alert" ? "var(--red-dim)" : "rgba(255,255,255,0.02)",
-                          fontFamily: "var(--mono)", fontSize: 10,
-                        }}>
-                          <span style={{ color: "var(--text-dim)", flexShrink: 0, width: 62 }}>{e.timestamp?.substring(11, 19)}</span>
-                          <span style={{ color: TYPE_COLOR[e.event_type] || "var(--text-mid)", fontWeight: 700, flexShrink: 0, width: 44 }}>{e.event_type?.substring(0, 4).toUpperCase()}</span>
-                          <span style={{ color: "var(--text-mid)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {e.signature || e.query || e.hostname || `${e.src_ip} → ${e.dest_ip}:${e.dest_port}`}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <button className="ask-sira-btn" style={{ marginTop: 16 }} onClick={() => { onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`); setProfile(null); }}>⬡ ASK SIRA FOR FULL ANALYSIS</button>
-              </>
-            )}
-            {profile?.error && <div style={{ color: "var(--red)", fontFamily: "var(--mono)", fontSize: 12, padding: 20 }}>✗ {profile.error}</div>}
-          </div>
-        </div>
+        <AttackerProfilePanel
+          profile={profile}
+          loading={profileLoading}
+          timeline={timeline}
+          onClose={() => { setProfile(null); setTimeline(null); setProfileIp(null); }}
+          onRefresh={() => profileIp && loadProfile(profileIp)}
+          onAskSira={(q) => { setProfile(null); setTimeline(null); setProfileIp(null); onAskSira(q); }}
+        />
       )}
 
       {(whatIf || whatIfLoading) && (
@@ -576,6 +767,16 @@ const filterChipStyle = (active) => ({
   border: active ? "1px solid var(--accent, #29D3FF)" : "1px solid var(--border2, rgba(255,255,255,0.12))",
 });
 
+const viewModeChipStyle = (active) => ({
+  padding: "0 12px", height: 26,
+  background: active ? "var(--accent-dim, rgba(41,211,255,0.12))" : "var(--bg3, rgba(255,255,255,0.03))",
+  border: `1px solid ${active ? "var(--accent, #29D3FF)" : "var(--border2, rgba(255,255,255,0.08))"}`,
+  borderRadius: 8,
+  color: active ? "var(--accent, #29D3FF)" : "var(--text-mid, #8FA3B5)",
+  cursor: "pointer",
+  fontFamily: "var(--mono, monospace)", fontSize: 9, letterSpacing: 1,
+});
+
 const consoleFrameStyle = {
   display: "flex", flexDirection: "column", border: "1px solid var(--border2, rgba(255,255,255,0.12))",
   borderRadius: "var(--radius, 18px)", background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
@@ -614,6 +815,13 @@ const inspectorPanelStyle = {
   boxShadow: "0 1px 0 rgba(255,255,255,0.06) inset, 0 24px 60px -20px rgba(0,0,0,0.6)",
   display: "flex", flexDirection: "column", overflow: "hidden",
 };
+
+// Same side-panel treatment as EventInspector -- just a bit wider, since
+// the attacker profile has more to show (geo/abuse header, stat grid,
+// signature/port chips, assessment, timeline) than a single event's fields.
+// The two never appear at once (opening a profile always closes the event
+// inspector first), so they can safely share position/z-index.
+const profilePanelStyle = { ...inspectorPanelStyle, width: 460 };
 
 const inspectorHeaderStyle = {
   display: "flex", justifyContent: "space-between", alignItems: "flex-start",
