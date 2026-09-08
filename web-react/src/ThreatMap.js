@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, Polyline } from "react-leaflet";
 
 const FLASK_URL = "https://api.sira-soc.me";
@@ -77,14 +77,17 @@ export default function ThreatMap() {
           </Popup>
         </CircleMarker>
 
-        {/* Attacker markers + lines */}
+        {/* Attacker markers + lines -- Fragment, not a div: react-leaflet's
+            layers register themselves onto the map imperatively, and a
+            real DOM element wrapping them breaks that registration, so
+            Polyline/CircleMarker silently never render. */}
         {attackers.map((a, i) => {
           const size      = 4 + (a.count / maxCount) * 14;
           const opacity   = 0.5 + (a.count / maxCount) * 0.5;
           const color     = a.count > maxCount * 0.7 ? "#E15554" : a.count > maxCount * 0.3 ? "#E8B84D" : "#6B7280";
 
           return (
-            <div key={i}>
+            <Fragment key={i}>
               <Polyline
                 positions={[[a.lat, a.lon], NZ_COORDS]}
                 pathOptions={{ color, weight: 1, opacity: 0.3, dashArray: "4 6" }}
@@ -103,7 +106,7 @@ export default function ThreatMap() {
                   </div>
                 </Popup>
               </CircleMarker>
-            </div>
+            </Fragment>
           );
         })}
       </MapContainer>
