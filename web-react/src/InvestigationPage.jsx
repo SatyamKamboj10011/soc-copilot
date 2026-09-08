@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, memo } from "react";
-import {
-  collection, doc, getDocs, setDoc, serverTimestamp,
-} from "firebase/firestore";
-import { db } from "./firebase";
+import { useState, useEffect, useRef, useMemo, memo } from "react";
 import {
   useAlertTriage, TriageBadge, TriageSelect, TriageSummary, TriageNotes,
-  TRIAGE_STATUS, STATUS_ORDER,
+  TRIAGE_STATUS, STATUS_ORDER, alertKey,
 } from "./AlertTriage";
+import { useFloatingAnalysis } from "./FloatingAnalysis";
+import {
+  collection, getDocs,
+} from "firebase/firestore";
+import { db } from "./firebase";
 
 const FLASK_URL = "https://api.sira-soc.me";
 const PAGE_SIZE = 50;
@@ -184,144 +185,6 @@ function EventInspector({ log, onClose, onViewProfile, onWhatIf, onAskSira, mode
   );
 }
 
-/* ==================== Attacker profile — side panel (not a full-screen modal), can render
-   either a live fetch result or a cached Firestore record opened from the Profiles tab ==================== */
-function AttackerProfilePanel({ profile, loading, timeline, onClose, onRefresh, onAskSira }) {
-  return (
-    <>
-      <div style={inspectorScrimStyle} onClick={onClose} />
-      <div style={profilePanelStyle}>
-        <div style={inspectorHeaderStyle}>
-          <div>
-            <span style={{ ...typeBadgeStyle, background: "rgba(139,124,255,0.1)", color: "var(--purple, #8B7CFF)", border: "1px solid rgba(139,124,255,0.35)" }}>
-              ATTACKER PROFILE
-            </span>
-            {profile?.model_used && (
-              <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", marginTop: 6 }}>
-                model: {profile.model_used}
-                {profile.saved_by ? ` · saved by ${profile.saved_by}` : ""}
-                {profile.saved_at?.seconds ? ` · ${new Date(profile.saved_at.seconds * 1000).toLocaleString()}` : ""}
-              </div>
-            )}
-          </div>
-          <button onClick={onClose} style={inspectorCloseStyle}>✕</button>
-        </div>
-
-        <div style={{ overflowY: "auto", flex: 1, padding: "16px 20px" }}>
-          {loading && (
-            <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono, monospace)", color: "var(--accent, #29D3FF)", fontSize: 11 }}>
-              ◈ Building attacker profile...
-            </div>
-          )}
-
-          {profile && !profile.error && (
-            <>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 12, marginBottom: 16,
-                padding: 14, background: "var(--bg3, rgba(255,255,255,0.03))", borderRadius: 10,
-                border: "1px solid var(--purple, #8B7CFF)", borderLeft: "3px solid var(--purple, #8B7CFF)",
-              }}>
-                <img
-                  src={`https://flagcdn.com/24x18/${profile.geo?.flag?.toLowerCase()}.png`}
-                  alt=""
-                  style={{ width: 30, height: 22, borderRadius: 3, flexShrink: 0 }}
-                  onError={e => e.target.style.display = "none"}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 16, fontWeight: 700, color: "var(--purple, #8B7CFF)" }}>{profile.ip}</div>
-                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 10, color: "var(--text-mid, #9A9AA2)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {profile.geo?.city}, {profile.geo?.country} — {profile.geo?.isp}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <div style={{
-                    fontFamily: "var(--display, inherit)", fontSize: 22, fontWeight: 700,
-                    color: profile.abuse?.score > 75 ? "var(--red, #E15554)" : profile.abuse?.score > 25 ? "var(--orange, #F0A857)" : "var(--green, #22D97A)",
-                  }}>{profile.abuse?.score}%</div>
-                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 7.5, color: "var(--text-dim, #5A5A62)", letterSpacing: 1 }}>ABUSE SCORE</div>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-                {[
-                  { label: "Total Events", value: profile.stats?.total_events, color: "var(--accent, #29D3FF)" },
-                  { label: "Alerts", value: profile.stats?.total_alerts, color: "var(--red, #E15554)" },
-                  { label: "AbuseIPDB Reports", value: profile.abuse?.reports, color: "var(--orange, #F0A857)" },
-                  { label: "Ports Targeted", value: profile.stats?.ports_targeted?.length, color: "var(--purple, #8B7CFF)" },
-                ].map((s, i) => (
-                  <div key={i} style={{ background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))", borderRadius: 10, padding: 10, textAlign: "center" }}>
-                    <div style={{ fontFamily: "var(--display, inherit)", fontSize: 18, fontWeight: 700, color: s.color }}>{s.value ?? "—"}</div>
-                    <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 7.5, color: "var(--text-dim, #5A5A62)", letterSpacing: 0.6, marginTop: 3 }}>{s.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              {profile.stats?.signatures?.length > 0 && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", letterSpacing: 1.5, marginBottom: 7 }}>ATTACK SIGNATURES</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                    {profile.stats.signatures.map((sig, i) => (
-                      <span key={i} style={{ fontFamily: "var(--mono, monospace)", fontSize: 8.5, padding: "3px 9px", borderRadius: 20, background: "var(--red-dim, rgba(225,85,84,0.09))", color: "var(--red, #E15554)", border: "1px solid rgba(225,85,84,0.3)" }}>{sig}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {profile.stats?.ports_targeted?.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", letterSpacing: 1.5, marginBottom: 7 }}>PORTS TARGETED</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                    {profile.stats.ports_targeted.map((port, i) => (
-                      <span key={i} style={{ fontFamily: "var(--mono, monospace)", fontSize: 8.5, padding: "3px 9px", borderRadius: 20, background: "var(--accent-dim, rgba(41,211,255,0.09))", color: "var(--accent, #29D3FF)", border: "1px solid rgba(41,211,255,0.25)" }}>{port}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))", borderLeft: "2px solid var(--purple, #8B7CFF)", borderRadius: 10, padding: 14, marginBottom: 14 }}>
-                <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--purple, #8B7CFF)", letterSpacing: 1.5, marginBottom: 10 }}>◈ SIRA THREAT ACTOR ASSESSMENT</div>
-                <div style={{ fontFamily: "var(--sans, sans-serif)", fontSize: 11.5, color: "var(--text-mid, #9A9AA2)", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>{profile.sira_assessment}</div>
-              </div>
-
-              {timeline?.timeline?.length > 0 && (
-                <div style={{ marginBottom: 16, background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))", borderRadius: 10, padding: 14 }}>
-                  <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, color: "var(--text-dim, #5A5A62)", letterSpacing: 1.5, marginBottom: 10 }}>
-                    ⏱ EVENT TIMELINE — {timeline.total_events} TOTAL
-                  </div>
-                  <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
-                    {timeline.timeline.map((e, i) => (
-                      <div key={i} style={{
-                        display: "flex", gap: 8, alignItems: "baseline", padding: "5px 7px",
-                        borderRadius: 6, background: e.event_type === "alert" ? "var(--red-dim, rgba(225,85,84,0.09))" : "rgba(255,255,255,0.02)",
-                        fontFamily: "var(--mono, monospace)", fontSize: 9.5,
-                      }}>
-                        <span style={{ color: "var(--text-dim, #5A5A62)", flexShrink: 0, width: 56 }}>{e.timestamp?.substring(11, 19)}</span>
-                        <span style={{ color: TYPE_COLOR[e.event_type] || "var(--text-mid, #9A9AA2)", fontWeight: 700, flexShrink: 0, width: 38 }}>{e.event_type?.substring(0, 4).toUpperCase()}</span>
-                        <span style={{ color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {e.signature || e.query || e.hostname || `${e.src_ip} → ${e.dest_ip}:${e.dest_port}`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={onRefresh} style={inspectorActionBtnStyle("var(--accent, #29D3FF)")}>↻ Refresh Analysis</button>
-                <button onClick={() => onAskSira(`Give me a full threat analysis for attacker IP ${profile.ip} including all their attack patterns and recommended response`)} style={inspectorActionBtnStyle("var(--purple, #8B7CFF)")}>⬡ Full Analysis</button>
-              </div>
-            </>
-          )}
-
-          {profile?.error && (
-            <div style={{ color: "var(--red, #E15554)", fontFamily: "var(--mono, monospace)", fontSize: 11, padding: 20 }}>✗ {profile.error}</div>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
 /* ==================== Main page ==================== */
 export const InvestigationPage = memo(function InvestigationPage({ onAskSira, model = "ollama" }) {
   // Triage state is shared across the team, not per-user: if one analyst marks
@@ -329,15 +192,21 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
   // person investigating the same alert independently.
   const username = localStorage.getItem("username") || "unknown";
   const {
-    update: updateTriage, statusOf, recordOf,
+    triage, update: updateTriage, statusOf, recordOf,
     counts: triageCounts, loading: triageLoading, error: triageError,
   } = useAlertTriage(username);
+
+  // Attacker Profile and What-If now live in a provider mounted at the app
+  // root (see FloatingAnalysis.jsx) so they render as floating, draggable,
+  // resizable windows that survive navigating away from this page and never
+  // block interaction with the rest of the app.
+  const { openProfile, openSavedProfile, openWhatIf } = useFloatingAnalysis();
 
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [triageFilter, setTriageFilter] = useState("all");
-  const [viewMode, setViewMode] = useState("raw"); // "raw" | "grouped" | "profiles"
+  const [viewMode, setViewMode] = useState("raw"); // "raw" | "grouped" | "profiles" | "triage"
   const [groupedRows, setGroupedRows] = useState([]);
   const [groupedLoading, setGroupedLoading] = useState(false);
   const [savedProfiles, setSavedProfiles] = useState([]);
@@ -347,54 +216,7 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
   const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [profileIp, setProfileIp] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [timeline, setTimeline] = useState(null);
-  const [whatIf, setWhatIf] = useState(null);
-  const [whatIfLoading, setWhatIfLoading] = useState(false);
   const searchDebounce = useRef(null);
-
-  const saveProfileToFirestore = async (ip, data) => {
-    try {
-      await setDoc(doc(db, PROFILES_COLLECTION, ip), {
-        ...data,
-        saved_at: serverTimestamp(),
-        saved_by: username,
-      }, { merge: true });
-    } catch {
-      // Non-fatal -- the live profile view above already succeeded
-      // regardless of whether the Firestore write lands.
-    }
-  };
-
-  const loadProfile = async (ip) => {
-    setProfileIp(ip);
-    setProfileLoading(true); setProfile(null); setTimeline(null);
-    try {
-      const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}?model=${model}`);
-      const data = await res.json();
-      setProfile(data);
-      if (data && !data.error) saveProfileToFirestore(ip, data);
-    }
-    catch { setProfile({ error: "Failed to load profile" }); }
-    setProfileLoading(false);
-    // Separate try/catch -- a timeline failure shouldn't take down the
-    // whole profile view, which already loaded fine above.
-    try { const tRes = await fetch(`${FLASK_URL}/attacker-timeline/${ip}`); setTimeline(await tRes.json()); }
-    catch { setTimeline(null); }
-  };
-
-  /** Opens a profile saved earlier in Firestore instantly (no LLM re-run) --
-   * only the (cheap) event timeline is re-fetched so it stays current. */
-  const openSavedProfile = async (saved) => {
-    setProfileIp(saved.ip);
-    setProfile(saved);
-    setProfileLoading(false);
-    setTimeline(null);
-    try { const tRes = await fetch(`${FLASK_URL}/attacker-timeline/${saved.ip}`); setTimeline(await tRes.json()); }
-    catch { setTimeline(null); }
-  };
 
   const loadSavedProfiles = async () => {
     setProfilesLoading(true);
@@ -407,18 +229,6 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
       setSavedProfiles([]);
     }
     setProfilesLoading(false);
-  };
-
-  const runWhatIf = async (log) => {
-    setSelected(null); setWhatIfLoading(true); setWhatIf(null);
-    try {
-      const res = await fetch(`${FLASK_URL}/what-if`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signature: log.alert.signature, src_ip: log.src_ip, dest_ip: log.dest_ip, model }),
-      });
-      setWhatIf(await res.json());
-    } catch { setWhatIf({ error: "Failed to load" }); }
-    setWhatIfLoading(false);
   };
 
   const fetchPage = (q, pageOffset, append) => {
@@ -512,6 +322,24 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
 
   const detailFor = (l) => l.alert?.signature || l.dns?.rrname || l.http?.hostname || "—";
 
+  // Every event that has ever been explicitly triaged (status set and/or a
+  // note written), independent of whatever page of raw logs happens to be
+  // loaded right now -- this is the actual record, not a filtered view.
+  const triageEntries = useMemo(
+    () => Object.entries(triage).sort(
+      (a, b) => (b[1]?.updated_at?.seconds || 0) - (a[1]?.updated_at?.seconds || 0)
+    ),
+    [triage]
+  );
+
+  const openTriagedEvent = (key) => {
+    const match = rows.find(r => alertKey(r) === key);
+    if (match) setSelected(match);
+    // If the underlying log has rotated out of the currently loaded page,
+    // there's nothing to open the inspector on -- the status/notes are
+    // still visible in the Triage Log row itself either way.
+  };
+
   return (
     <div style={pageWrapStyle}>
       <div style={{ marginBottom: 18 }}>
@@ -551,9 +379,9 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
           <button key={f} onClick={() => setTypeFilter(f)} style={filterChipStyle(f === typeFilter)}>{f}</button>
         ))}
         <div style={{ flex: 1 }} />
-        {["raw", "grouped", "profiles"].map(v => (
+        {["raw", "grouped", "profiles", "triage"].map(v => (
           <button key={v} onClick={() => setViewMode(v)} style={viewModeChipStyle(viewMode === v)}>
-            {v === "raw" ? "☰ RAW LOGS" : v === "grouped" ? "⊞ GROUPED + MITRE" : "◈ ATTACKER PROFILES"}
+            {v === "raw" ? "☰ RAW LOGS" : v === "grouped" ? "⊞ GROUPED + MITRE" : v === "profiles" ? "◈ ATTACKER PROFILES" : "🗂 TRIAGE LOG"}
           </button>
         ))}
       </div>
@@ -655,6 +483,41 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
               )}
             </div>
           </>
+        ) : viewMode === "triage" ? (
+          <>
+            <div style={consoleHeaderRowStyle}>
+              <span style={{ width: 66 }}>STATUS</span>
+              <span style={{ width: 74 }}>TIME</span>
+              <span style={{ width: 150 }}>SOURCE</span>
+              <span style={{ width: 190 }}>SIGNATURE</span>
+              <span style={{ flex: 1 }}>NOTES</span>
+              <span style={{ width: 150 }}>UPDATED</span>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {triageLoading && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>Loading triage log...</div>
+              )}
+              {!triageLoading && triageEntries.map(([key, rec]) => (
+                <div key={key} onClick={() => openTriagedEvent(key)} style={consoleRowStyle}>
+                  <span style={{ width: 66 }}><TriageBadge status={rec.status} compact /></span>
+                  <span style={{ width: 74, color: "var(--text-dim, #5A5A62)" }}>{rec.alert_timestamp?.substring(11, 19) || "—"}</span>
+                  <span style={{ width: 150, color: "var(--accent, #29D3FF)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.src_ip || "—"}</span>
+                  <span style={{ width: 190, color: "var(--text-mid, #9A9AA2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.signature || "—"}</span>
+                  <span style={{ flex: 1, color: rec.notes ? "var(--text-mid, #9A9AA2)" : "var(--text-dim, #5A5A62)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {rec.notes || "—"}
+                  </span>
+                  <span style={{ width: 150, color: "var(--text-dim, #5A5A62)", fontSize: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {rec.updated_by || "—"}{rec.updated_at?.seconds ? ` · ${new Date(rec.updated_at.seconds * 1000).toLocaleString()}` : ""}
+                  </span>
+                </div>
+              ))}
+              {!triageLoading && triageEntries.length === 0 && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--text-dim, #5A5A62)", fontFamily: "var(--mono, monospace)", fontSize: 10 }}>
+                  No events have been triaged yet — set a status or add a note from an event's inspector panel
+                </div>
+              )}
+            </div>
+          </>
         ) : (
           <>
             <div style={consoleHeaderRowStyle}>
@@ -695,8 +558,8 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
         <EventInspector
           log={selected}
           onClose={() => setSelected(null)}
-          onViewProfile={(ip) => { loadProfile(ip); setSelected(null); }}
-          onWhatIf={runWhatIf}
+          onViewProfile={(ip) => { openProfile(ip, model, username); setSelected(null); }}
+          onWhatIf={(log) => { openWhatIf(log, model); setSelected(null); }}
           onAskSira={(q) => { setSelected(null); onAskSira(q); }}
           model={model}
           triageStatus={statusOf(selected)}
@@ -704,44 +567,6 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
           onTriageChange={(status) => updateTriage(selected, { status })}
           onNotesSave={(notes) => updateTriage(selected, { notes })}
         />
-      )}
-
-      {(profile || profileLoading) && (
-        <AttackerProfilePanel
-          profile={profile}
-          loading={profileLoading}
-          timeline={timeline}
-          onClose={() => { setProfile(null); setTimeline(null); setProfileIp(null); }}
-          onRefresh={() => profileIp && loadProfile(profileIp)}
-          onAskSira={(q) => { setProfile(null); setTimeline(null); setProfileIp(null); onAskSira(q); }}
-        />
-      )}
-
-      {(whatIf || whatIfLoading) && (
-        <div className="modal-overlay" onClick={() => { setWhatIf(null); setWhatIfLoading(false); }}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 720 }}>
-            <button className="modal-close" onClick={() => { setWhatIf(null); setWhatIfLoading(false); }}>✕</button>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--orange)", letterSpacing: 2, marginBottom: 4 }}>⚠ COUNTERFACTUAL</div>
-            <div className="modal-title">The Divergence Point</div>
-            <div className="modal-sub">{whatIf?.signature}</div>
-            {whatIfLoading && <div style={{ textAlign: "center", padding: 40, fontFamily: "var(--mono)", color: "var(--orange)" }}>⚠ SIRA is simulating the attack chain...</div>}
-            {whatIf && !whatIfLoading && !whatIf.error && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 8 }}>
-                <div style={{ background: "var(--green-dim)", border: "1px solid var(--green)", borderRadius: 10, padding: 16 }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--green)", letterSpacing: 1.5, marginBottom: 10 }}>✓ WHAT ACTUALLY HAPPENED</div>
-                  <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8 }}>
-                    This connection was detected and blocked before it could complete. Suricata flagged the signature and the session was terminated at the perimeter.
-                  </div>
-                </div>
-                <div style={{ background: "var(--orange-dim)", border: "1px solid var(--orange)", borderRadius: 10, padding: 16 }}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--orange)", letterSpacing: 1.5, marginBottom: 10 }}>⚠ IF IT HADN'T BEEN</div>
-                  <div style={{ fontFamily: "var(--sans)", fontSize: 12, color: "var(--text-mid)", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{whatIf.answer}</div>
-                </div>
-              </div>
-            )}
-            {whatIf?.error && <div style={{ color: "var(--red)", fontFamily: "var(--mono)", fontSize: 12, padding: 20 }}>✗ {whatIf.error}</div>}
-          </div>
-        </div>
       )}
     </div>
   );
@@ -815,13 +640,6 @@ const inspectorPanelStyle = {
   boxShadow: "0 1px 0 rgba(255,255,255,0.06) inset, 0 24px 60px -20px rgba(0,0,0,0.6)",
   display: "flex", flexDirection: "column", overflow: "hidden",
 };
-
-// Same side-panel treatment as EventInspector -- just a bit wider, since
-// the attacker profile has more to show (geo/abuse header, stat grid,
-// signature/port chips, assessment, timeline) than a single event's fields.
-// The two never appear at once (opening a profile always closes the event
-// inspector first), so they can safely share position/z-index.
-const profilePanelStyle = { ...inspectorPanelStyle, width: 460 };
 
 const inspectorHeaderStyle = {
   display: "flex", justifyContent: "space-between", alignItems: "flex-start",

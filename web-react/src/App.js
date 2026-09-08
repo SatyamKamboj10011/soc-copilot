@@ -13,6 +13,7 @@ import SiraVoice from "./SiraVoice";
 import SiraAvatar from "./SiraAvatar";
 import { HermesProvider, HermesNavBadge } from "./HermesContext";
 import { HermesPage } from "./HermesPage";
+import { FloatingAnalysisProvider } from "./FloatingAnalysis";
 
 const FLASK_URL = "https://api.sira-soc.me";
 
@@ -1293,8 +1294,17 @@ setLoading(false);
   // not two to keep in sync.
   const hermesModel = selectedModel;
 
+  // Shared by every "escalate to full chat" action across pages (Soc2Dashboard,
+  // InvestigationPage, and the floating Attacker Profile / What-If windows) --
+  // switches to the dashboard chat tab and sends the question there.
+  const handleAskSira = useCallback((q) => {
+    setPage("dashboard");
+    setTimeout(() => sendMessage(q), 300);
+  }, []); // eslint-disable-line
+
   return (
     <HermesProvider hermesModel={hermesModel}>
+    <FloatingAnalysisProvider onAskSira={handleAskSira}>
     <>
       {!bootDone && <BootSequence onComplete={()=>{ sessionStorage.setItem("bootDone","true"); setBootDone(true); }}/>}
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
@@ -1341,25 +1351,6 @@ setLoading(false);
           </div>
         </div>
       )}
-{/* 
-      {showUpload && (
-        <div className="modal-overlay" onClick={()=>setShowUpload(false)}>
-          <div className="modal" onClick={e=>e.stopPropagation()} style={{width:480}}>
-            <button className="modal-close" onClick={()=>setShowUpload(false)}>✕</button>
-            <div className="modal-title">Upload Log File</div>
-            <div className="modal-sub">REPLACE EVE.JSON OR CONN.LOG — CHROMADB WILL REBUILD AUTOMATICALLY</div>
-            <div style={{margin:"20px 0"}}>
-              <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:8}}>SELECT FILE</div>
-              <input type="file" accept=".json,.log" onChange={e=>{setUploadFile(e.target.files[0]);setUploadStatus("");}} style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--text)",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,padding:"10px",width:"100%"}}/>
-              {uploadFile && <div style={{marginTop:8,fontFamily:"var(--mono)",fontSize:10,color:"var(--accent)"}}>▸ {uploadFile.name} ({(uploadFile.size/1024).toFixed(1)} KB)</div>}
-            </div>
-            {uploadStatus && <div style={{fontFamily:"var(--mono)",fontSize:11,padding:"9px 13px",borderRadius:10,marginBottom:16,background:uploadStatus.startsWith("✓")?"var(--green-dim)":"var(--red-dim)",color:uploadStatus.startsWith("✓")?"var(--green)":"var(--red)",border:`1px solid ${uploadStatus.startsWith("✓")?"rgba(34,217,122,0.3)":"rgba(225,85,84,0.3)"}`}}>{uploadStatus}</div>}
-            <button onClick={handleUpload} disabled={!uploadFile||uploading} style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,var(--accent),var(--accent2))",border:"none",borderRadius:10,color:"var(--bg)",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,letterSpacing:1.5,cursor:uploadFile&&!uploading?"pointer":"not-allowed",opacity:uploadFile&&!uploading?1:0.4,textTransform:"uppercase"}}>
-              {uploading?"UPLOADING...":"⬆ UPLOAD AND REBUILD"}
-            </button>
-          </div>
-        </div>
-      )} */}
 
       <div className="app" style={{gridTemplateColumns:`${leftPanelOpen ? sidebarWidth : 28}px 1fr`, transition: isResizing.current ? "none" : "grid-template-columns 0.2s"}}>
         <nav className="topnav">
@@ -1594,12 +1585,12 @@ setLoading(false);
 
         <div style={{display:page==="analytics"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <Soc2Dashboard
-            onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}
+            onAskSira={handleAskSira}
             onSeeFindings={()=>setPage("investigation")}
           />
         </div>
         <div style={{display:page==="investigation"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
-          <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}} model={selectedModel}/>
+          <InvestigationPage onAskSira={handleAskSira} model={selectedModel}/>
         </div>
         <div style={{display:page==="pipeline"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <PipelineStatusPage/>
@@ -1981,6 +1972,7 @@ setLoading(false);
 
       <SiraVoice isOpen={didOpen} onClose={()=>setDidOpen(false)}/>
     </>
+    </FloatingAnalysisProvider>
     </HermesProvider>
   );
 }
