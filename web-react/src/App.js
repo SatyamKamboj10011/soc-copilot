@@ -13,6 +13,7 @@ import SiraVoice from "./SiraVoice";
 import SiraAvatar from "./SiraAvatar";
 import { HermesProvider, HermesNavBadge } from "./HermesContext";
 import { HermesPage } from "./HermesPage";
+import { FloatingAnalysisProvider } from "./FloatingAnalysis";
 
 const FLASK_URL = "https://api.sira-soc.me";
 
@@ -23,6 +24,11 @@ const QUICK_QUESTIONS = [
   "Summarise events",
 ];
 
+// Curated from a live check on 2026-08-24 — the free-tier landscape shifts
+// every few months, not by the minute, so this needs occasional manual
+// refreshing (ask Claude to re-check it) rather than a real search API
+// call on every request. Wiring in a paid search API just to find free
+// model providers would defeat the point.
 const KNOWN_FREE_PROVIDERS = [
   { id: "google-ai-studio",     name: "Google AI Studio (Gemini)",  keyword: "gemini",     signupUrl: "https://aistudio.google.com/",                                   note: "Gemini 2.5 Flash, 1M context, no card" },
   { id: "openrouter",           name: "OpenRouter (free models)",   keyword: "openrouter", signupUrl: "https://openrouter.ai/",                                         note: "20+ free models behind one key" },
@@ -91,6 +97,7 @@ const sharedCss = `
 
   .app { position: relative; z-index: 1; display: grid; grid-template-rows: 64px minmax(0, 1fr); grid-template-columns: var(--sidebar-width, 320px) 1fr; height: 100vh; width: 100vw; padding: 10px; gap: 10px; box-sizing: border-box; }
 
+  /* ===== TOP NAV — floating macOS titlebar ===== */
   .topnav {
     grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding: 0 18px;
     background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.018));
@@ -126,12 +133,14 @@ const sharedCss = `
   .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: white; transition: transform 0.2s; }
   .toggle-thumb.on { transform: translateX(13px); }
 
+  /* ===== MAC-STYLE SEGMENTED PAGE TABS ===== */
   .mac-tabs { display: inline-flex; gap: 2px; background: rgba(255,255,255,0.04); border: 1px solid var(--border2); border-radius: 14px; padding: 3px; }
   .mac-tab { position: relative; padding: 7px 16px; background: transparent; border: none; border-radius: var(--radius-sm); font-family: var(--mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); cursor: pointer; }
   .mac-tab.active { color: var(--bg); font-weight: 700; }
   .mac-tab-pill { position: absolute; inset: 0; background: var(--accent); border-radius: var(--radius-sm); z-index: 0; }
   .mac-hermes-btn { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; padding: 8px 15px; border-radius: 20px; cursor: pointer; background: linear-gradient(135deg, rgba(139,124,255,0.2), rgba(41,211,255,0.1)); color: var(--purple); border: 1px solid var(--purple); text-transform: uppercase; font-weight: 700; }
 
+  /* ===== LEFT SIDEBAR ===== */
   .left-panel {
     background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
     backdrop-filter: blur(20px) saturate(150%); -webkit-backdrop-filter: blur(20px) saturate(150%);
@@ -180,6 +189,7 @@ const sharedCss = `
   .feed-src { color: var(--accent); }
   .feed-time { font-family: var(--mono); font-size: 7px; color: var(--text-dim); flex-shrink: 0; }
 
+  /* ===== CHAT ===== */
   .chat-col {
     display: flex; flex-direction: column; overflow: hidden; position: relative; min-height: 0;
     background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
@@ -250,6 +260,7 @@ const sharedCss = `
   .welcome-tags { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 14px; }
   .wtag { font-family: var(--mono); font-size: 8px; letter-spacing: 0.5px; padding: 4px 11px; border-radius: 20px; border: 1px solid var(--border2); color: var(--text-dim); }
 
+  /* ===== SUB-PAGES (Analytics, Investigation) ===== */
   .page { flex: 1; overflow-y: auto; padding: 28px; background: transparent; }
   .page-title { font-family: var(--display); font-size: 21px; font-weight: 700; color: var(--text); margin-bottom: 5px; }
   .page-sub { font-family: var(--mono); font-size: 10px; color: var(--text-mid); letter-spacing: 2px; margin-bottom: 26px; }
@@ -275,6 +286,7 @@ const sharedCss = `
   .inv-type-tls   { background: var(--purple-dim); color: var(--purple); }
   .inv-type-flow  { background: var(--bg3); color: var(--text-dim); }
 
+  /* ===== MODALS ===== */
   .modal-overlay { position: fixed; inset: 0; background: rgba(4,6,10,0.6); backdrop-filter: blur(6px); z-index: 100; display: flex; align-items: center; justify-content: center; }
   .modal {
     background: linear-gradient(180deg, rgba(30,30,34,0.85), rgba(20,20,24,0.85));
@@ -284,6 +296,7 @@ const sharedCss = `
   }
   .modal-close { position: absolute; top: 18px; right: 18px; background: rgba(255,255,255,0.06); border: 1px solid var(--border2); border-radius: 8px; width: 28px; height: 28px; color: var(--text-dim); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; }
 
+  /* ===== FLOATING PANELS ===== */
   .float-panel {
     position: fixed; z-index: 150; width: 420px; max-width: calc(100vw - 40px); max-height: 78vh; overflow-y: auto;
     background: linear-gradient(180deg, rgba(30,30,34,0.88), rgba(20,20,24,0.9));
@@ -401,7 +414,7 @@ function ConfidenceRing({ pct, color }) {
   }, [pct, color]);
   return <canvas ref={ref} width={40} height={40} style={{ width: 40, height: 40 }} />;
 }
-function SiraMessage({ text, modelChip, model }) {
+function SiraMessage({ text, modelChip }) {
   if (!text) return null;
   const sections = {};
   const sectionNames = ["SUMMARY","THREAT DETAILS","WHAT THIS MEANS","RISK ASSESSMENT","RECOMMENDED ACTIONS"];
@@ -706,6 +719,9 @@ export default function App() {
   const [voiceOptions, setVoiceOptions]   = useState([]);
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem("sira_voice") || "");
   useEffect(() => {
+    // Same pattern as /models -- single source of truth fetched from the
+    // backend instead of a hardcoded list, so it can never silently drift
+    // out of sync with what edge-tts actually has configured server-side.
     fetch(`${FLASK_URL}/voices`).then(r=>r.json()).then(data => {
       setVoiceOptions(data);
       if (!localStorage.getItem("sira_voice")) {
@@ -720,6 +736,11 @@ export default function App() {
     localStorage.setItem("sira_voice", val);
   };
   useEffect(() => {
+    // Single source of truth is now Flask's /models endpoint (see app.py) --
+    // this replaces a hardcoded array that had silently drifted out of sync
+    // with the backend (two newly-added lightweight models existed
+    // server-side but weren't selectable here at all, since this list was
+    // never updated to match).
     fetch(`${FLASK_URL}/models`).then(r=>r.json()).then(data => {
       setModelOptions(data.map(m => ({
         value: m.id,
@@ -731,6 +752,43 @@ export default function App() {
     }).catch(()=>{});
   }, []);
 
+  // // ── Performance tier system ───────────────────────────────────────────
+  // // Embeddings (nomic-embed-text) never change here -- only the reasoning
+  // // models (SIRA chat + Hermes reports) switch. Changing the embedding
+  // // model would silently break retrieval, since ChromaDB's whole index was
+  // // built against one specific embedding space.
+  // const PERF_TIERS = {
+  //   full:     { label: "Full",     siraModel: "ollama",          hermesModel: "nous-hermes2", ram: "~11 GB" },
+  //   balanced: { label: "Balanced", siraModel: "ollama_phi4mini", hermesModel: "phi4-mini",     ram: "~3 GB"  },
+  //   light:    { label: "Light",    siraModel: "ollama_llama32",  hermesModel: "phi4-mini",     ram: "~2.5 GB" },
+  // };
+  // const [perfTier, setPerfTier] = useState(() => localStorage.getItem("sira_perf_tier") || "full");
+  // const [hwSpecs, setHwSpecs] = useState(null);
+  // const [suggestedTier, setSuggestedTier] = useState(null);
+
+  // useEffect(() => {
+  //   // navigator.deviceMemory is Chrome/Edge-only and browsers deliberately
+  //   // round/cap it for privacy (e.g. reports "8" for anything >=8GB) -- a
+  //   // rough heuristic to SUGGEST a tier, never something to force silently.
+  //   const cores = navigator.hardwareConcurrency || null;
+  //   const mem = navigator.deviceMemory || null; // undefined on Firefox/Safari
+  //   setHwSpecs({ cores, mem });
+  //   let suggestion = "full";
+  //   if (mem && mem <= 4) suggestion = "light";
+  //   else if (mem && mem <= 8) suggestion = "balanced";
+  //   else if (!mem && cores && cores <= 4) suggestion = "balanced"; // no deviceMemory support -- fall back to core count only
+  //   setSuggestedTier(suggestion);
+  // }, []);
+
+  // const applyPerfTier = (tierKey) => {
+  //   const tier = PERF_TIERS[tierKey];
+  //   if (!tier) return;
+  //   setPerfTier(tierKey);
+  //   localStorage.setItem("sira_perf_tier", tierKey);
+  //   setSelectedModel(tier.siraModel);
+  //   showToast(`Switched to ${tier.label} mode`);
+  // };
+  // ─────────────────────────────────────────────────────────────────────
   const [messages, setMessages]           = useState([{ role:"ai", text:null, time:new Date().toLocaleTimeString(), isWelcome:true }]);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [lastSession, setLastSession]     = useState(null);
@@ -738,7 +796,7 @@ export default function App() {
   const [loading, setLoading]             = useState(false);
   const [alerts, setAlerts]               = useState([]);
   const [toast, setToast]                 = useState(null);
-  const [modelSuggestion, setModelSuggestion] = useState(null);
+  const [modelSuggestion, setModelSuggestion] = useState(null); // {failedChip, suggestions:[{value,label,chip}]}
   const [severityFilter, setSeverityFilter] = useState("all");
   const [reputations, setReputations]     = useState({});
   const [isDark, setIsDark]               = useState(true);
@@ -753,7 +811,13 @@ export default function App() {
   const [pendingActions, setPendingActions] = useState([]);
   const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
   const [actionsPanelPos, setActionsPanelPos] = useState(null);
-  const [actionsBusy, setActionsBusy] = useState(null);
+  const [actionsBusy, setActionsBusy] = useState(null); // id currently being approved/rejected, for a disabled state
+  // Was incorrectly driven by health.status (the OVERALL system health --
+  // ChromaDB, cloud, Ollama all factored in), meaning the Suricata/Zeek
+  // dots turned red whenever ANY unrelated part of the system had a rough
+  // moment, even though the sensors themselves were running fine. This
+  // tracks the sensors' own actual status instead, via whether the
+  // honeypot sync connection is genuinely alive.
   const [sensorsConnected, setSensorsConnected] = useState(false);
   const [emailScheduleOpen, setEmailScheduleOpen] = useState(false);
   const [emailScheduleData, setEmailScheduleData] = useState({ email: "", scheduled_time: "09:00", enabled: false });
@@ -762,6 +826,10 @@ export default function App() {
   const [stats, setStats]                 = useState(null);
   const [health, setHealth]               = useState(null);
   const [page, setPage]                   = useState("dashboard");
+  // const [showUpload, setShowUpload]       = useState(false);
+  // const [uploadFile, setUploadFile]       = useState(null);
+  // const [uploadStatus, setUploadStatus]   = useState("");
+  // const [uploading, setUploading]         = useState(false);
 const [sessionId, setSessionId] = useState(() => {
   const existing = sessionStorage.getItem("currentSessionId");
   if (existing) return existing;
@@ -773,6 +841,8 @@ const [sessionId, setSessionId] = useState(() => {
   const [bootDone, setBootDone]           = useState(() => sessionStorage.getItem("bootDone") === "true");
   const [machines, setMachines]           = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
+  // const [sentinelIP, setSentinelIP]       = useState("");
+  // const [sentinelSaving, setSentinelSaving] = useState(false);
   const [useOwnKey, setUseOwnKey]         = useState(false);
   const [apiKeyInput, setApiKeyInput]     = useState("");
   const [showApiKey, setShowApiKey]       = useState(false);
@@ -840,6 +910,15 @@ const [sessionId, setSessionId] = useState(() => {
   useEffect(() => { const t = setTimeout(() => { fetch(`${FLASK_URL}/stats`).then(r=>r.json()).then(setStats).catch(()=>{}); }, 500); return () => clearTimeout(t); }, []);
   useEffect(() => { const t = setTimeout(() => { fetch(`${FLASK_URL}/health`).then(r=>r.json()).then(setHealth).catch(()=>{}); }, 1000); return () => clearTimeout(t); }, []);
 
+  // useEffect(() => {
+  //   fetch(`${FLASK_URL}/sentinel-config`).then(r=>r.json()).then(data=>{
+  //     if (data.server) {
+  //       const ip = data.server.replace("http://","").split(":")[0];
+  //       setSentinelIP(ip);
+  //     }
+  //   }).catch(()=>{});
+  // }, []);
+
   useEffect(() => {
     const loadLastSession = async () => {
       try {
@@ -852,7 +931,7 @@ const [sessionId, setSessionId] = useState(() => {
     loadLastSession();
   }, []); // eslint-disable-line
 
-  const [honorific, setHonorific] = useState(null);
+  const [honorific, setHonorific] = useState(null); // null = not yet resolved from Firestore
   const [showHonorificPrompt, setShowHonorificPrompt] = useState(false);
 
   useEffect(() => {
@@ -866,7 +945,7 @@ const [sessionId, setSessionId] = useState(() => {
         }
       } catch (e) {
         console.error("Honorific load error:", e);
-        setHonorific("Sir");
+        setHonorific("Sir"); // fail safe to a sensible default rather than block forever
       }
     };
     loadHonorific();
@@ -883,11 +962,17 @@ const [sessionId, setSessionId] = useState(() => {
   };
 
   useEffect(() => {
-    if (!honorific) return;
+    if (!honorific) return; // wait until we actually know how to address them
     if (voicePlayed.current) return;
     voicePlayed.current = true;
 
     const speakBoot = async () => {
+      // Poll /stats briefly instead of one fixed-delay fetch -- on a cold
+      // start, honeypot sync may not have populated any events yet, and a
+      // single early fetch could genuinely return 0, making SIRA announce
+      // "I have loaded 0 security events" -- sounds broken, not just early.
+      // Retry for up to ~9s before falling back to honest phrasing that
+      // doesn't claim a specific count.
       let statsData = null;
       for (let attempt = 0; attempt < 6; attempt++) {
         try {
@@ -952,6 +1037,9 @@ const [sessionId, setSessionId] = useState(() => {
     try {
       const res = await fetch(`${FLASK_URL}/pending-actions/${id}/approve`, { method: "POST" });
       const data = await res.json();
+      // Was missing entirely -- fetch() only throws on a genuine network
+      // failure, not on a 4xx/5xx response, so a real server-side error
+      // (e.g. a database lock) was silently shown as if it succeeded.
       if (!res.ok) {
         showToast(data.error || `Failed to approve action #${id}`);
       } else {
@@ -1041,6 +1129,12 @@ const [sessionId, setSessionId] = useState(() => {
     showToast(`API key saved for ${modelObj.chip}`);
   };
 
+  // Turns a structured written report into something that sounds like a
+  // person talking, not a document being read aloud. The old version just
+  // stripped section-header words and hard-cut at 300 characters (often
+  // mid-sentence); this also removes markdown bullets/bold and numbered-
+  // list markers, and truncates at the nearest sentence boundary so it
+  // never cuts off awkwardly.
   const cleanForVoice = (text) => {
     if (!text) return "";
     let clean = text
@@ -1062,7 +1156,7 @@ const [sessionId, setSessionId] = useState(() => {
   };
 
   const [micListening, setMicListening] = useState(false);
-  const [ratings, setRatings] = useState({});
+  const [ratings, setRatings] = useState({}); // messageId -> "up" | "down", this session
 
   const rateMessage = async (messageId, rating, questionText, answerText) => {
     setRatings(prev => ({ ...prev, [messageId]: rating }));
@@ -1076,7 +1170,7 @@ const [sessionId, setSessionId] = useState(() => {
     }
   };
 
-  const startMicInput = () => {
+   const startMicInput = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast("Voice input needs Chrome or Edge"); return; }
     const rec = new SR();
@@ -1084,12 +1178,6 @@ const [sessionId, setSessionId] = useState(() => {
     setMicListening(true);
     rec.onresult = (e) => {
       const t = e.results[0][0].transcript;
-      // Was auto-sending immediately after transcription -- speech
-      // recognition rarely produces obvious "gibberish", it snaps to its
-      // best-guess real words even from unclear audio, so a misheard
-      // question would get sent as a normal-looking one with no chance to
-      // catch it first. Now it just fills the input box so the transcribed
-      // text can be reviewed or edited before actually sending.
       setInput(t);
       setMicListening(false);
       showToast("Transcribed — review and press Send");
@@ -1097,7 +1185,7 @@ const [sessionId, setSessionId] = useState(() => {
     rec.onerror = () => setMicListening(false);
     rec.onend = () => setMicListening(false);
     rec.start();
-  };
+  };;
 
   const sendMessage = async (text) => {
     const q = (text||input).trim();
@@ -1121,6 +1209,13 @@ try {
   const data = await res.json();
   if (!res.ok) { const err = new Error(data.error || `Request failed (${res.status})`); err.status = res.status; throw err; }
   const aiMessageId = uuidv4();
+  // Was always modelObj.chip -- the model the user SELECTED, never what
+  // the backend actually used. The backend already returns model_used
+  // and fallback_used/fallback_note specifically for this (e.g. picking
+  // a local-only model on Render, which silently falls back to a real
+  // cloud provider) -- this was being computed server-side and simply
+  // never displayed. Real bug: a response could come from Groq while the
+  // UI claimed it came from a local model that was never actually reached.
   const actualModelLabel = data.fallback_used
     ? `${data.model_used} (fallback from ${modelObj.chip})`
     : (modelOptions.find(m=>m.value===data.model_used)?.chip || data.model_used || modelObj.chip);
@@ -1132,12 +1227,21 @@ try {
   } catch(e) { console.error("Firestore AI save error:",e); }
 } catch(err) {
   setMessages(prev=>[...prev,{role:"ai",text:`Error: ${err.message}`,time:new Date().toLocaleTimeString(),model:modelObj.chip,isError:true}]);
+  // Every model in modelOptions is already tagged free (LOCAL — FREE / CLOUD — FREE, see
+  // /models in Flask), so "suggest an alternative" just means "suggest a different one from
+  // this list" — no separate free/paid curation needed. Local goes first since it can never
+  // rate-limit; everything else in the same request is a genuine 429/quota signal, not a
+  // one-off network blip, so we only show the banner for that.
   const isRateLimit = err.status === 429 || /rate.?limit|quota|too many requests|429/i.test(err.message || "");
   if (isRateLimit) {
     const alternatives = modelOptions.filter(m => m.value !== selectedModel);
     const local = alternatives.filter(m => !m.cloud);
     const otherCloud = alternatives.filter(m => m.cloud).slice(0, 2);
     const suggestions = [...local, ...otherCloud];
+    // Anything in KNOWN_FREE_PROVIDERS whose keyword isn't already reflected
+    // in a configured model's value/id counts as "not wired in yet" — these
+    // get a signup link instead of an instant switch, since your backend
+    // has no client for them.
     const configuredValues = modelOptions.map(m => (m.value || "").toLowerCase());
     const newProviders = KNOWN_FREE_PROVIDERS.filter(
       p => !configuredValues.some(v => v.includes(p.keyword))
@@ -1150,13 +1254,57 @@ try {
 setLoading(false);
   }
 
+  // const handleUpload = async () => {
+  //   if (!uploadFile) { setUploadStatus("No file selected"); return; }
+  //   setUploading(true); setUploadStatus("Uploading...");
+  //   const formData = new FormData(); formData.append("file",uploadFile);
+  //   try {
+  //     const data = await fetch(`${FLASK_URL}/upload`,{method:"POST",body:formData}).then(r=>r.json());
+  //     if (data.message) { setUploadStatus("✓ "+data.message+(data.events_loaded?` (${data.events_loaded} events loaded)`:"")); showToast("Logs uploaded"); setTimeout(()=>{setShowUpload(false);setUploadFile(null);setUploadStatus("");},2000); }
+  //     else { setUploadStatus("✗ "+(data.error||"Upload failed")); }
+  //   } catch { setUploadStatus("✗ Cannot connect to Flask"); }
+  //   setUploading(false);
+  // };
+
+  // const saveSentinelIP = async () => {
+  //   if (!sentinelIP.trim()) return;
+  //   setSentinelSaving(true);
+  //   try {
+  //     const res = await fetch(`${FLASK_URL}/sentinel-config`,{
+  //       method:"POST",
+  //       headers:{"Content-Type":"application/json"},
+  //       body:JSON.stringify({ip:sentinelIP.trim()})
+  //     });
+  //     const data = await res.json();
+  //     if (data.message) showToast("Sentinel IP updated");
+  //     else showToast(data.error||"Save failed");
+  //   } catch { showToast("Cannot connect to Flask"); }
+  //   setSentinelSaving(false);
+  // };
+
   const alertCount  = alerts.filter(a=>a.event_type==="alert").length;
   const uniqueIPs   = [...new Set(alerts.map(a=>a.src_ip).filter(Boolean))].length;
   const loadingLabel = { ollama:"SIRA", ollama_phi3:"PHI3", groq:"GROQ", gemini:"GEMINI", mistral:"MISTRAL" };
+  // Was PERF_TIERS[perfTier]?.hermesModel, a separate model choice
+  // entirely disconnected from the model the user actually picked for
+  // chat -- defaulted to "nous-hermes2", a model never pulled on this
+  // server, which is why Hermes stopped working after the migration.
+  // Using selectedModel directly means Hermes always runs on whatever
+  // the user is already using for regular questions -- one model choice,
+  // not two to keep in sync.
   const hermesModel = selectedModel;
+
+  // Shared by every "escalate to full chat" action across pages (Soc2Dashboard,
+  // InvestigationPage, and the floating Attacker Profile / What-If windows) --
+  // switches to the dashboard chat tab and sends the question there.
+  const handleAskSira = useCallback((q) => {
+    setPage("dashboard");
+    setTimeout(() => sendMessage(q), 300);
+  }, []); // eslint-disable-line
 
   return (
     <HermesProvider hermesModel={hermesModel}>
+    <FloatingAnalysisProvider onAskSira={handleAskSira}>
     <>
       {!bootDone && <BootSequence onComplete={()=>{ sessionStorage.setItem("bootDone","true"); setBootDone(true); }}/>}
       <style>{isDark ? darkCss : lightCss}{sharedCss}</style>
@@ -1324,6 +1472,7 @@ setLoading(false);
               </div>
             )}
 
+            {/* ── SIRA Voice — edge-tts voice picker, fetched from /voices ── */}
             <div className="section-label">SIRA Voice</div>
             <div className="model-select-wrap">
               <select className="model-select" value={selectedVoice} onChange={handleVoiceChange}>
@@ -1344,8 +1493,45 @@ setLoading(false);
             </div>
             <ThreatLevelCard alertCount={stats?.alert_count ?? alertCount} />
             <div className="panel-divider"/>
+            {/* <div className="section-label">Connected Machines</div>
+            <div style={{padding:"8px 20px"}}>
+              {machines.length===0 && <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text-dim)",letterSpacing:1}}>NO AGENTS CONNECTED</div>}
+              {machines.map((m,i)=>(
+    <div key={i} onClick={()=>setSelectedMachine(m)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid var(--border)",cursor:"pointer",transition:"all 0.15s"}}
+    onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
+    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <div style={{width:6,height:6,borderRadius:"50%",flexShrink:0,background:m.alert?"var(--red)":"var(--green)",boxShadow:m.alert?"0 0 6px var(--red)":"0 0 6px var(--green)",animation:"blink 2s infinite"}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontFamily:"var(--mono)",fontSize:9,color:"var(--text)",fontWeight:700}}>{m.id}</div>
+                    <div style={{fontFamily:"var(--mono)",fontSize:7,color:"var(--text-dim)"}}>{m.local_ip} — {m.platform}</div>
+                  </div>
+                  {m.alert && <span style={{fontFamily:"var(--mono)",fontSize:7,padding:"3px 8px",borderRadius:20,background:"var(--red-dim)",color:"var(--red)",border:"1px solid rgba(225,85,84,0.3)"}}>⚠ {m.suspicious_count}</span>}
+                </div>
+              ))}
 
-            <div className="section-label">Honeypot Status</div>
+              <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:8,color:"var(--text-dim)",letterSpacing:1.5,marginBottom:6}}>SENTINEL SERVER IP</div>
+                <div style={{display:"flex",gap:6}}>
+                  <input
+                    value={sentinelIP}
+                    onChange={e=>setSentinelIP(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&saveSentinelIP()}
+                    placeholder="e.g. 10.33.4.176"
+                    style={{flex:1,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"7px 10px",color:"var(--text)",fontFamily:"var(--mono)",fontSize:10,outline:"none"}}
+                  />
+                  <button
+                    onClick={saveSentinelIP}
+                    disabled={sentinelSaving||!sentinelIP.trim()}
+                    style={{padding:"7px 14px",background:"var(--accent-dim)",border:"1px solid var(--accent)",borderRadius:8,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,fontWeight:700,letterSpacing:1,cursor:sentinelIP.trim()?"pointer":"not-allowed",opacity:sentinelIP.trim()?1:0.4,textTransform:"uppercase"}}
+                  >
+                    {sentinelSaving?"...":"SAVE"}
+                  </button>
+                </div>
+              </div>
+            </div> */}
+
+
+                        <div className="section-label">Honeypot Status</div>
             <div style={{padding:"8px 20px"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0"}}>
                 <div style={{width:8,height:8,borderRadius:"50%",flexShrink:0,background:sensorsConnected?"var(--green)":"var(--red)",boxShadow:sensorsConnected?"0 0 6px var(--green)":"0 0 6px var(--red)",animation:"blink 2s infinite"}}/>
@@ -1355,9 +1541,14 @@ setLoading(false);
               </div>
             </div>
 
+
+
             <RustinelPanel/>
             <div className="panel-divider"/>
             <div className="feed-wrap">
+              {/* <div style={{padding:"0 20px 10px"}}>
+                <button onClick={()=>setShowUpload(true)} style={{width:"100%",padding:"9px",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,color:"var(--accent)",fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,textTransform:"uppercase",cursor:"pointer"}} onMouseEnter={e=>e.target.style.borderColor="var(--accent)"} onMouseLeave={e=>e.target.style.borderColor="var(--border2)"}>⬆ Upload Logs</button>
+              </div> */}
               <div className="section-label">Live Feed</div>
               <div style={{display:"flex",gap:5,padding:"9px 20px 7px",flexWrap:"wrap"}}>
                 {["all","alert","dns","http","tls","flow"].map(f=>(
@@ -1394,12 +1585,12 @@ setLoading(false);
 
         <div style={{display:page==="analytics"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <Soc2Dashboard
-            onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}}
+            onAskSira={handleAskSira}
             onSeeFindings={()=>setPage("investigation")}
           />
         </div>
         <div style={{display:page==="investigation"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
-          <InvestigationPage onAskSira={(q)=>{setPage("dashboard");setTimeout(()=>sendMessage(q),300);}} model={selectedModel}/>
+          <InvestigationPage onAskSira={handleAskSira} model={selectedModel}/>
         </div>
         <div style={{display:page==="pipeline"?"flex":"none",flex:1,overflow:"hidden",minHeight:0}}>
           <PipelineStatusPage/>
@@ -1587,6 +1778,7 @@ setLoading(false);
         </div>
       </div>
 
+
       {selectedMachine && createPortal(
   <div
     className="float-panel"
@@ -1750,7 +1942,7 @@ setLoading(false);
       </div>
 
       <div style={{marginBottom:14}}>
-        <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,color:"var(--text-dim)",marginBottom:6}}>TIME (YOUR LOCAL TIME, 24-HOUR)</div>
+        <div style={{fontFamily:"var(--mono)",fontSize:9,letterSpacing:1,color:"var(--text-dim)",marginBottom:6}}>TIME (UTC, 24-HOUR)</div>
         <input
           type="time"
           value={emailScheduleData.scheduled_time}
@@ -1780,6 +1972,7 @@ setLoading(false);
 
       <SiraVoice isOpen={didOpen} onClose={()=>setDidOpen(false)}/>
     </>
+    </FloatingAnalysisProvider>
     </HermesProvider>
   );
 }
