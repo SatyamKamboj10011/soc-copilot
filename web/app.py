@@ -7,10 +7,6 @@ from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 from langchain_mistralai import ChatMistralAI
-# OpenRouter is OpenAI-API-compatible, not a separate LangChain integration --
-# ChatOpenAI with a custom base_url pointed at OpenRouter's endpoint is the
-# correct way to use it, same pattern OpenRouter's own docs recommend.
-from langchain_openai import ChatOpenAI
 from collections import Counter
 from datetime import datetime
 import sqlite3
@@ -151,7 +147,7 @@ except Exception as e:
     retriever = None
 
 
-_KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral", "openrouter"}
+_KNOWN_CLOUD_MODELS = {"groq", "gemini", "mistral"}
 
 
 def _safe_cloud_default():
@@ -183,25 +179,6 @@ def get_llm(model, api_key=None):
             mistral_api_key=api_key or os.getenv("MISTRAL_API_KEY"),
             temperature=SIRA_TEMPERATURE,
         ), "cloud"
-    elif model == "openrouter":
-        # "openrouter/free" is OpenRouter's own auto-router -- it picks
-        # from whichever specific free models are currently available,
-        # rather than pinning to one named model. This project already
-        # got burned twice by cloud providers deprecating a specific
-        # pinned model out from under it (Groq's llama-3.3-70b, Gemini's
-        # gemini-2.0-flash) -- the auto-router avoids that same failure
-        # mode, since OpenRouter's free lineup is documented to rotate
-        # over time and this adapts automatically instead of needing a
-        # code update when it does. Genuinely separate rate-limit pool
-        # from Groq/Gemini/Mistral (20 req/min, 50/day free, 1000/day
-        # after any one-time $10 lifetime credit purchase) -- real extra
-        # headroom, not just another name for the same quota.
-        return ChatOpenAI(
-            model="openrouter/free",
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key or os.getenv("OPENROUTER_API_KEY"),
-            temperature=SIRA_TEMPERATURE,
-        ), "cloud"
     elif model == "ollama":
         if DEPLOYED and not OLLAMA_AVAILABLE:
             return get_llm(_safe_cloud_default(), api_key)
@@ -229,7 +206,7 @@ def _is_connection_error(err_msg):
     ])
 
 
-_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral", "openrouter"]
+_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral"]
 
 
 def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
@@ -891,8 +868,6 @@ def get_models():
          "chip": "gemini 3.5 (cloud)", "cloud": True, "requires_key": False},
         {"id": "mistral",         "name": "Mistral Small (cloud — free)",
          "chip": "mistral small (cloud)", "cloud": True, "requires_key": False},
-        {"id": "openrouter",      "name": "OpenRouter — auto-selects a free model (cloud)",
-         "chip": "openrouter (cloud)", "cloud": True, "requires_key": False},
     ])
 
 
