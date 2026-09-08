@@ -209,7 +209,7 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
 
   const loadProfile = async (ip) => {
     setProfileLoading(true); setProfile(null); setTimeline(null);
-    try { const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}`); setProfile(await res.json()); }
+    try { const res = await fetch(`${FLASK_URL}/attacker-profile/${ip}?model=${model}`); setProfile(await res.json()); }
     catch { setProfile({ error: "Failed to load profile" }); }
     setProfileLoading(false);
     // Separate try/catch -- a timeline failure shouldn't take down the
@@ -223,7 +223,7 @@ export const InvestigationPage = memo(function InvestigationPage({ onAskSira, mo
     try {
       const res = await fetch(`${FLASK_URL}/what-if`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signature: log.alert.signature, src_ip: log.src_ip, dest_ip: log.dest_ip }),
+        body: JSON.stringify({ signature: log.alert.signature, src_ip: log.src_ip, dest_ip: log.dest_ip, model }),
       });
       setWhatIf(await res.json());
     } catch { setWhatIf({ error: "Failed to load" }); }
