@@ -32,6 +32,8 @@ function InlineAskSira({ log, onEscalate, model }) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
+  const [consensus, setConsensus] = useState(null);
+  const [consensusLoading, setConsensusLoading] = useState(false);
 
   const ask = async (q) => {
     const finalQ = q || question;
@@ -52,6 +54,28 @@ function InlineAskSira({ log, onEscalate, model }) {
     setLoading(false);
   };
 
+  // Wired directly to the existing /ask-all backend route -- runs the same
+  // question through Groq, Gemini, and Mistral in parallel and shows all
+  // three raw answers side-by-side. No synthesis or agreement scoring, just
+  // the three models' answers as-is for comparison.
+  const compareModels = async (q) => {
+    const finalQ = q || question || QUICK_ASKS[0].build(log);
+    setConsensusLoading(true);
+    setConsensus(null);
+    try {
+      const res = await fetch(`${FLASK_URL}/ask-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: finalQ }),
+      });
+      const data = await res.json();
+      setConsensus(data);
+    } catch {
+      setConsensus({ error: "Could not reach SIRA." });
+    }
+    setConsensusLoading(false);
+  };
+
   // Light-touch section parse — just pulls a risk word out if the backend's
   // structured prompt happens to produce one, so the answer isn't a flat
   // grey wall even in this compact space.
@@ -59,6 +83,8 @@ function InlineAskSira({ log, onEscalate, model }) {
   const riskColor = riskMatch
     ? { critical: "var(--red, #E15554)", high: "var(--red, #E15554)", medium: "var(--orange, #F0A857)", low: "var(--green, #22D97A)" }[riskMatch[1].toLowerCase()]
     : "var(--accent, #29D3FF)";
+
+  const MODEL_LABELS = { groq: "Groq", gemini: "Gemini", mistral: "Mistral" };
 
   return (
     <div style={askPanelStyle}>
@@ -69,6 +95,9 @@ function InlineAskSira({ log, onEscalate, model }) {
             {qa.label}
           </button>
         ))}
+        <button onClick={() => compareModels()} style={compareBtnStyle} disabled={consensusLoading}>
+          ⇶ Compare Models
+        </button>
       </div>
       <div style={{ display: "flex", gap: 6, marginBottom: answer || loading ? 10 : 0 }}>
         <input
@@ -97,6 +126,32 @@ function InlineAskSira({ log, onEscalate, model }) {
             Continue in full chat →
           </button>
         </div>
+      )}
+
+      {consensusLoading && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0" }}>
+          <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--purple, #8B7CFF)", animation: "invAskPulse 1s ease-in-out infinite" }} />
+          <span style={{ fontFamily: "var(--mono, monospace)", fontSize: 10, color: "var(--purple, #8B7CFF)" }}>Asking Groq, Gemini, and Mistral…</span>
+        </div>
+      )}
+
+      {consensus && !consensusLoading && (
+        consensus.error ? (
+          <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 10, color: "var(--red, #E15554)" }}>{consensus.error}</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+            {Object.entries(consensus).map(([name, text]) => (
+              <div key={name} style={{ borderLeft: "2px solid var(--purple, #8B7CFF)", paddingLeft: 12 }}>
+                <div style={{ fontFamily: "var(--mono, monospace)", fontSize: 9, letterSpacing: 1, color: "var(--purple, #8B7CFF)", marginBottom: 4, textTransform: "uppercase" }}>
+                  {MODEL_LABELS[name] || name}
+                </div>
+                <div style={{ fontFamily: "var(--sans, Inter, sans-serif)", fontSize: 11.5, color: "var(--text-mid, #9A9AA2)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                  {text}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       )}
 
       <style>{`@keyframes invAskPulse{0%,100%{opacity:.3}50%{opacity:1}}`}</style>
@@ -669,6 +724,11 @@ const quickAskBtnStyle = {
   fontFamily: "var(--mono, monospace)", fontSize: 8.5, padding: "5px 11px", borderRadius: 20,
   border: "1px solid rgba(139,124,255,0.3)", background: "var(--purple-dim, rgba(139,124,255,0.09))",
   color: "var(--purple, #8B7CFF)", cursor: "pointer",
+};
+const compareBtnStyle = {
+  fontFamily: "var(--mono, monospace)", fontSize: 8.5, padding: "5px 11px", borderRadius: 20,
+  border: "1px solid rgba(139,124,255,0.5)", background: "transparent",
+  color: "var(--purple, #8B7CFF)", cursor: "pointer", fontWeight: 700,
 };
 const askInputStyle = {
   flex: 1, background: "var(--bg3, rgba(255,255,255,0.03))", border: "1px solid var(--border2, rgba(255,255,255,0.12))",
