@@ -10,6 +10,19 @@ from langchain_mistralai import ChatMistralAI
 from collections import Counter
 from datetime import datetime
 import sqlite3
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# Server-side Firestore access -- distinct from the client-side JS SDK
+# App.js uses. Needs a service account key (see SIRA_FIREBASE_CREDENTIALS
+# env var), since the server has no user's browser-session auth context.
+_fb_cred_path = os.getenv("SIRA_FIREBASE_CREDENTIALS")
+if _fb_cred_path and os.path.exists(_fb_cred_path) and not firebase_admin._apps:
+    firebase_admin.initialize_app(credentials.Certificate(_fb_cred_path))
+    fs_db = firestore.client()
+else:
+    fs_db = None
+    print("[firestore] SIRA_FIREBASE_CREDENTIALS not set or file missing -- pending_actions will be unavailable")
 import json
 import os
 import shutil
@@ -206,7 +219,29 @@ def _is_connection_error(err_msg):
     ])
 
 
-_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral"]
+_CLOUD_PROVIDER_PRIORITY = ["groq", "gemini", "mistral", "openrouter"]
+
+
+def _normalize_answer_text(raw):
+    """Some LangChain/Ollama package versions now return message content as
+    a list of content blocks (e.g. [{'type': 'text', 'text': '...'}])
+    instead of always a plain string -- a real behavioural change between
+    package versions, not a bug in the prompt or the model's output.
+    Downstream code (spoken-summary extraction, grounding regex, etc.) all
+    assumes a plain string, so this normalizes once, right where the
+    model's raw output first enters the system, rather than requiring
+    every call site to defensively check the type itself."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list):
+        parts = []
+        for block in raw:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(block.get("text", "") or block.get("content", ""))
+        return "".join(parts)
+    return str(raw) if raw is not None else ""
 
 
 def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
@@ -214,7 +249,7 @@ def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
     try:
         result = llm.invoke(prompt)
         answer = result if llm_type == "local" else result.content
-        return answer, model, False
+        return _normalize_answer_text(answer), model, False
     except Exception as e:
         err_msg = str(e)
         should_try_fallback = allow_fallback and DEPLOYED and (_is_connection_error(err_msg) or _is_rate_limit_error(err_msg))
@@ -227,7 +262,7 @@ def _invoke_llm(model, prompt, api_key=None, allow_fallback=True):
         for candidate in candidates:
             try:
                 fallback_llm, _ = get_llm(candidate, None)
-                answer = fallback_llm.invoke(prompt).content
+                answer = _normalize_answer_text(fallback_llm.invoke(prompt).content)
                 return answer, candidate, True
             except Exception as fallback_err:
                 fallback_msg = str(fallback_err)
@@ -274,40 +309,6 @@ def load_logs():
     _logs_cache["size"] = stat.st_size
     _logs_cache["data"] = logs
     return logs
-
-
-def _build_aggregate_stats_context():
-    """Real counted stats over all logs -- independent of vector retrieval,
-    so questions like 'summarize' or 'what IP is triggering alerts' always
-    have the correct top-attacker/alert numbers available, even if semantic
-    retrieval doesn't happen to surface those specific log entries."""
-    logs = load_logs()
-    alert_logs = [l for l in logs if l.get('event_type') == 'alert']
-    ip_counts = Counter(l.get('src_ip') for l in alert_logs if l.get('src_ip'))
-    top_ips = ip_counts.most_common(5)
-    sig_counts = Counter(
-        l.get('alert', {}).get('signature') for l in alert_logs
-        if l.get('alert', {}).get('signature')
-    )
-    top_sigs = sig_counts.most_common(5)
-    unique_ips = len(set(l.get('src_ip') for l in logs if l.get('src_ip')))
-
-    lines = [
-        f"VERIFIED AGGREGATE STATS (counted directly from all {len(logs)} log events, "
-        f"{len(alert_logs)} of them alerts, across {unique_ips} unique source IPs -- "
-        f"these are the correct numbers, use them for any 'how many', 'summarize', "
-        f"or 'top attacker' style question instead of estimating from the log excerpts below):"
-    ]
-    if top_ips:
-        lines.append("Top attacking IPs by alert count: " +
-                      ", ".join(f"{ip} ({count} alerts)" for ip, count in top_ips))
-    else:
-        lines.append("No alerting source IPs currently in the log window.")
-    if top_sigs:
-        lines.append("Top alert signatures: " +
-                      ", ".join(f"{sig} ({count}x)" for sig, count in top_sigs))
-    return "\n".join(lines)
-
 
 import re
 
@@ -562,8 +563,26 @@ def ask():
     honorific   = (data.get('honorific') or 'Sir').strip()
     _log_ask_event(question, model, "received")
 
-    if re.search(r'\b(who are you|what are you|what is sira|introduce yourself|what can you do|how do you work|tell me about yourself)\b', question, re.IGNORECASE):
-        identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
+    # Matches the WHOLE message, not just a word appearing anywhere in it --
+    # "hi" or "good morning" alone is a greeting, but "hi, what's going on
+    # with 1.2.3.4" is a real question that happens to start politely, and
+    # must still go through full analysis rather than being short-circuited
+    # into small talk.
+    _greeting_only = re.match(
+        r'^\s*(hi+|hello+|hey+)(\s*there)?[\s!.,?]*$|^\s*(yo|sup|howdy|good\s*(morning|afternoon|evening|day)|greetings|what\'?s\s*up|how\s*(are\s*you|are\s*things|is\s*it\s*going)|how\'?s\s*it\s*going)[\s!.,?]*$',
+        question, re.IGNORECASE
+    )
+    _identity_question = re.search(r'\b(who are you|what are you|what is sira|introduce yourself|what can you do|how do you work|tell me about yourself)\b', question, re.IGNORECASE)
+
+    if _greeting_only or _identity_question:
+        if _greeting_only:
+            identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
+Speak like JARVIS from Iron Man: calm, warm, brief. Address the analyst as "{honorific}" occasionally.
+The analyst just greeted you casually: "{question}"
+Respond with a short, natural greeting back -- 1-2 sentences, conversational, like a colleague saying hello.
+Do NOT perform log analysis, cite any IPs, list statistics, or produce a security report -- this is just a greeting, not a request for information."""
+        else:
+            identity_prompt = f"""You are SIRA — Security Incident Response Assistant.
 Speak like JARVIS from Iron Man: calm, precise, address the analyst as "{honorific}" occasionally.
 The analyst asked: "{question}"
 Answer conversationally in 2-4 sentences, describing who you are and what you help with
@@ -647,10 +666,6 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
     context
 )
 
-    aggregate_stats = _call_with_timeout(_build_aggregate_stats_context, 5, default="")
-    if aggregate_stats:
-        context = aggregate_stats + "\n\n" + context
-
     SIMPLE_PROMPT_MODELS = {"ollama_phi4mini", "ollama"}
 
     no_data_warning = ""
@@ -661,7 +676,7 @@ Do NOT perform log analysis, cite any IPs, or produce a security report for this
 CONFIRMED: {ip_list} does NOT appear anywhere in the actual log data below. This was verified directly against the real data, not assumed. You MUST NOT describe any alerts, activity, signatures, ports, or timestamps for {ip_list} -- doing so would be fabrication, not analysis. Your answer must state plainly that no log data exists for {ip_list}, even if you have general knowledge about this IP from elsewhere -- that outside knowledge is NOT this deployment's log data and must not be presented as if it were."""
 
     if model in SIMPLE_PROMPT_MODELS:
-        prompt = f"""You are SIRA — Security Incident Response Assistant. Speak calmly and precisely, like JARVIS from Iron Man, addressing the analyst as "{honorific}" occasionally. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If there are no alert-severity events for an IP but it still shows significant non-alert traffic (flow/dns/http/tls), say so explicitly rather than just stating "zero alerts", since that alone can misleadingly imply no activity at all. If the log data below does not answer the question, say so plainly.{no_data_warning}
+        prompt = f"""You are SIRA, a security assistant. Answer the question below using ONLY the log data provided. Do not invent any IP address, CVE, signature, or event that is not shown here. Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure, not attackers -- never describe them as an attack. If the log data below does not answer the question, say so plainly.{no_data_warning}
 
 Log Data:
 {context}
@@ -689,7 +704,6 @@ STRICT RULES:
 - Write so a junior analyst with 3 months experience can understand
 - VARY your response based on what is being asked — not every question needs 5 sections
 - Private/internal IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x) and known cloud platform IPs (168.63.129.16, 169.254.169.254) are internal infrastructure traffic, not external attackers — even with a high event count. Never describe traffic from these as unauthorized access, an intrusion, or an attack, and never recommend blocking them.
-- If there are no alert-severity events for an IP but that IP still shows significant non-alert traffic (flow/dns/http/tls), say so explicitly: e.g. "No alert-severity events for this IP, but it does show significant [type] traffic." Never just say "zero alerts" when real traffic exists — that reads as a flat contradiction next to anything showing total activity for that IP.
 - If the retrieved log data below doesn't actually relate to the question asked, say so plainly instead of forcing it into a security-report structure
 
 Previous conversation:
@@ -906,6 +920,8 @@ def get_models():
          "chip": "gemini 3.5 (cloud)", "cloud": True, "requires_key": False},
         {"id": "mistral",         "name": "Mistral Small (cloud — free)",
          "chip": "mistral small (cloud)", "cloud": True, "requires_key": False},
+        {"id": "openrouter",      "name": "OpenRouter — auto-selects a free model (cloud)",
+         "chip": "openrouter (cloud)", "cloud": True, "requires_key": False},
     ])
 
 
@@ -1191,19 +1207,15 @@ def attention_items():
         })
 
     try:
-        conn = get_db()
-        pending = conn.execute(
-            "SELECT COUNT(*) AS c FROM pending_actions WHERE status = 'pending'"
-        ).fetchone()
-        conn.close()
-        pending_count = pending['c'] if pending else 0
-        if pending_count > 0:
-            items.append({
-                "priority": "high",
-                "type": "pending_actions",
-                "title": f"{pending_count} action{'s' if pending_count != 1 else ''} awaiting approval",
-                "detail": "Proposed by Hermes, not yet executed",
-            })
+        if fs_db:
+            pending_count = len(list(fs_db.collection('pending_actions').where('status', '==', 'pending').stream()))
+            if pending_count > 0:
+                items.append({
+                    "priority": "high",
+                    "type": "pending_actions",
+                    "title": f"{pending_count} action{'s' if pending_count != 1 else ''} awaiting approval",
+                    "detail": "Proposed by Hermes, not yet executed",
+                })
     except Exception:
         pass
 
@@ -1582,7 +1594,7 @@ def rustinel_alerts():
 def attacker_profile(ip):
     import requests as req
     honorific = (request.args.get('honorific') or 'Sir').strip()
-    requested_model = (request.args.get('model') or 'ollama').strip()
+    model = (request.args.get('model') or 'ollama').strip()
 
     logs = load_logs()
     events = [l for l in logs if l.get('src_ip') == ip or l.get('dest_ip') == ip]
@@ -1658,19 +1670,12 @@ RECOMMENDED BLOCK:
 YES or NO — one sentence justification."""
 
     try:
-        sira_assessment, used_model, _ = _invoke_llm(requested_model, prompt)
+        sira_assessment, _, _ = _invoke_llm(model, prompt)
     except Exception:
-        # Requested model failed -- fall back to local rather than
-        # returning nothing, same pattern /ask uses.
-        try:
-            sira_assessment, used_model, _ = _invoke_llm("ollama", prompt)
-        except Exception:
-            sira_assessment = "SIRA offline — manual review required"
-            used_model = requested_model
+        sira_assessment = "SIRA offline — manual review required"
 
     return jsonify({
         "ip": ip,
-        "model_used": used_model,
         "geo": {
             "country": geo.get("country", "Unknown"),
             "city": geo.get("city", "Unknown"),
@@ -1699,6 +1704,7 @@ def what_if():
     src_ip = data.get('src_ip', '')
     dest_ip = data.get('dest_ip', '')
     honorific = (data.get('honorific') or 'Sir').strip()
+    model = (data.get('model') or 'ollama').strip()
 
     docs = _call_with_timeout(lambda: retriever.invoke(f"{alert_signature} {src_ip}"), 15, default=[])
     context = "\n\n".join([d.page_content for d in docs[:8]])
@@ -1734,7 +1740,7 @@ LESSON:
 One plain English sentence on what this tells us about our defences."""
 
     try:
-        answer, _, _ = _invoke_llm("ollama", prompt)
+        answer, _, _ = _invoke_llm(model, prompt)
     except Exception as e:
         answer = f"Error: {str(e)}"
 
@@ -1858,25 +1864,6 @@ def init_sentinel_db():
 init_sentinel_db()
 
 
-def init_actions_db():
-    conn = get_db()
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS pending_actions (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            action_type TEXT NOT NULL,
-            target      TEXT NOT NULL,
-            machine_id  TEXT,
-            reason      TEXT,
-            status      TEXT DEFAULT 'pending',
-            created_at  TEXT,
-            executed_at TEXT,
-            result      TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_actions_db()
 
 
 def _execute_add_suricata_rule(rule_text):
@@ -1915,6 +1902,8 @@ def _send_webhook_alert(message):
 
 @app.route('/propose-action', methods=['POST'])
 def propose_action():
+    if not fs_db:
+        return jsonify({"error": "Firestore not configured (SIRA_FIREBASE_CREDENTIALS missing)"}), 500
     data = request.json or {}
     action_type = data.get('action_type')
     target      = data.get('target', '').strip()
@@ -1927,14 +1916,18 @@ def propose_action():
     if not target:
         return jsonify({"error": "target is required"}), 400
 
-    conn = get_db()
-    cur = conn.execute(
-        "INSERT INTO pending_actions (action_type, target, machine_id, reason, created_at) VALUES (?, ?, ?, ?, ?)",
-        (action_type, target, machine_id, reason, datetime.utcnow().isoformat() + "Z")
-    )
-    conn.commit()
-    action_id = cur.lastrowid
-    conn.close()
+    doc_ref = fs_db.collection('pending_actions').document()
+    doc_ref.set({
+        "action_type": action_type,
+        "target": target,
+        "machine_id": machine_id,
+        "reason": reason,
+        "status": "pending",
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "executed_at": None,
+        "result": None,
+    })
+    action_id = doc_ref.id
 
     _send_webhook_alert(
         f"🛡️ **SIRA proposed action #{action_id}**: {action_type} on `{target}`\n{reason}\n"
@@ -1946,72 +1939,71 @@ def propose_action():
 
 @app.route('/pending-actions', methods=['GET'])
 def list_pending_actions():
+    if not fs_db:
+        return jsonify([])
     status_filter = request.args.get('status')
-    conn = get_db()
+    query = fs_db.collection('pending_actions')
     if status_filter:
-        rows = conn.execute("SELECT * FROM pending_actions WHERE status = ? ORDER BY id DESC", (status_filter,)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM pending_actions ORDER BY id DESC").fetchall()
-    conn.close()
-    return jsonify([dict(r) for r in rows])
+        query = query.where('status', '==', status_filter)
+    docs = query.order_by('created_at', direction=firestore.Query.DESCENDING).stream()
+    result = []
+    for d in docs:
+        item = d.to_dict()
+        item['id'] = d.id
+        result.append(item)
+    return jsonify(result)
 
 
-@app.route('/pending-actions/<int:action_id>/approve', methods=['POST'])
+@app.route('/pending-actions/<action_id>/approve', methods=['POST'])
 def approve_pending_action(action_id):
+    if not fs_db:
+        return jsonify({"error": "Firestore not configured"}), 500
     try:
-        conn = get_db()
-        row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
-        if not row:
-            conn.close()
+        doc_ref = fs_db.collection('pending_actions').document(action_id)
+        snap = doc_ref.get()
+        if not snap.exists:
             return jsonify({"error": "not found"}), 404
-        if row["status"] != "pending":
-            conn.close()
-            return jsonify({"error": f"action is already {row['status']}, not pending"}), 400
+        row = snap.to_dict()
+        if row.get("status") != "pending":
+            return jsonify({"error": f"action is already {row.get('status')}, not pending"}), 400
 
         action_type = row["action_type"]
         target = row["target"]
         now = datetime.utcnow().isoformat() + "Z"
 
         if action_type == "block_ip":
+            conn = get_db()
             conn.execute("INSERT INTO sentinel_block_queue (ip) VALUES (?)", (target,))
-            conn.execute("UPDATE pending_actions SET status='executed', executed_at=?, result=? WHERE id=?",
-                         (now, "Queued for next Sentinel check-in", action_id))
             conn.commit()
             conn.close()
+            doc_ref.update({"status": "executed", "executed_at": now, "result": "Queued for next Sentinel check-in"})
             return jsonify({"status": "executed", "detail": "Queued for next Sentinel check-in"})
 
         elif action_type == "add_suricata_rule":
             ok, detail = _execute_add_suricata_rule(target)
-            conn.execute("UPDATE pending_actions SET status=?, executed_at=?, result=? WHERE id=?",
-                         ("executed" if ok else "failed", now, detail, action_id))
-            conn.commit()
-            conn.close()
+            doc_ref.update({"status": "executed" if ok else "failed", "executed_at": now, "result": detail})
             return jsonify({"status": "executed" if ok else "failed", "detail": detail})
 
         elif action_type in ("isolate_endpoint", "restart_service"):
-            conn.execute("UPDATE pending_actions SET status='approved', executed_at=?, result=? WHERE id=?",
-                         (now, "Approved -- execution for this action type is not yet implemented on the endpoint agent", action_id))
-            conn.commit()
-            conn.close()
+            detail = "Approved -- execution for this action type is not yet implemented on the endpoint agent"
+            doc_ref.update({"status": "approved", "executed_at": now, "result": detail})
             return jsonify({"status": "approved", "detail": "Approved, but endpoint-agent execution isn't wired up yet for this action type"})
 
-        conn.close()
         return jsonify({"error": "unknown action_type"}), 400
     except Exception as e:
         return jsonify({"error": f"Could not approve action: {e}"}), 500
 
 
-@app.route('/pending-actions/<int:action_id>/reject', methods=['POST'])
+@app.route('/pending-actions/<action_id>/reject', methods=['POST'])
 def reject_pending_action(action_id):
+    if not fs_db:
+        return jsonify({"error": "Firestore not configured"}), 500
     try:
-        conn = get_db()
-        row = conn.execute("SELECT * FROM pending_actions WHERE id = ?", (action_id,)).fetchone()
-        if not row:
-            conn.close()
+        doc_ref = fs_db.collection('pending_actions').document(action_id)
+        snap = doc_ref.get()
+        if not snap.exists:
             return jsonify({"error": "not found"}), 404
-        conn.execute("UPDATE pending_actions SET status='rejected' WHERE id=?", (action_id,))
-        conn.commit()
-        conn.close()
+        doc_ref.update({"status": "rejected"})
         return jsonify({"status": "rejected"})
     except Exception as e:
         return jsonify({"error": f"Could not reject action: {e}"}), 500
