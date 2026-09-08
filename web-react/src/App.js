@@ -1170,7 +1170,7 @@ const [sessionId, setSessionId] = useState(() => {
     }
   };
 
-  const startMicInput = () => {
+   const startMicInput = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showToast("Voice input needs Chrome or Edge"); return; }
     const rec = new SR();
@@ -1180,12 +1180,12 @@ const [sessionId, setSessionId] = useState(() => {
       const t = e.results[0][0].transcript;
       setInput(t);
       setMicListening(false);
-      sendMessage(t);
+      showToast("Transcribed — review and press Send");
     };
     rec.onerror = () => setMicListening(false);
     rec.onend = () => setMicListening(false);
     rec.start();
-  };
+  };;
 
   const sendMessage = async (text) => {
     const q = (text||input).trim();
