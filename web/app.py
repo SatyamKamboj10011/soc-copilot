@@ -1,46 +1,38 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-from flask_bcrypt import Bcrypt
-from langchain_ollama import OllamaLLM
-from langchain_groq import ChatGroq
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_chroma import Chroma
-from langchain_mistralai import ChatMistralAI
-from collections import Counter
-from datetime import datetime
-import sqlite3
-import firebase_admin
-from firebase_admin import credentials, firestore
-
-# Server-side Firestore access -- distinct from the client-side JS SDK
-# App.js uses. Needs a service account key (see SIRA_FIREBASE_CREDENTIALS
-# env var), since the server has no user's browser-session auth context.
-_fb_cred_path = os.getenv("SIRA_FIREBASE_CREDENTIALS")
-if _fb_cred_path and os.path.exists(_fb_cred_path) and not firebase_admin._apps:
-    firebase_admin.initialize_app(credentials.Certificate(_fb_cred_path))
-    fs_db = firestore.client()
-else:
-    fs_db = None
-    print("[firestore] SIRA_FIREBASE_CREDENTIALS not set or file missing -- pending_actions will be unavailable")
-import json
 import os
+import sys
+import json
 import shutil
 import subprocess
 import threading
 import time
 import requests
 import uuid
+import asyncio
+import sqlite3
+import io
+import csv
+import re
+import concurrent.futures
+
+from flask import Flask, request, jsonify, Response
+from flask_cors import CORS
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_bcrypt import Bcrypt
+from dotenv import load_dotenv
+
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+from collections import Counter
+from datetime import datetime
+
+from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_chroma import Chroma
+from langchain_mistralai import ChatMistralAI
 from langgraph.func import task
 from werkzeug.utils import secure_filename
-import csv
-import io
-from flask import Response
-from dotenv import load_dotenv
-import os
-import sys
-
-import asyncio
 import edge_tts
 
 ROOT_DIR = os.path.abspath(
