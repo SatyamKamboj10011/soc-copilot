@@ -414,7 +414,7 @@ function ConfidenceRing({ pct, color }) {
   }, [pct, color]);
   return <canvas ref={ref} width={40} height={40} style={{ width: 40, height: 40 }} />;
 }
-function SiraMessage({ text, modelChip }) {
+function SiraMessage({ text, modelChip, model }) {
   if (!text) return null;
   const sections = {};
   const sectionNames = ["SUMMARY","THREAT DETAILS","WHAT THIS MEANS","RISK ASSESSMENT","RECOMMENDED ACTIONS"];
