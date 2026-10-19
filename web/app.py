@@ -64,7 +64,7 @@ def root():
     return jsonify({"service": "soc-copilot-backend", "status": "running"}), 200
 
 
-app.config["JWT_SECRET_KEY"] = "soc-copilot-secret-key-2024"
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY") or os.urandom(32).hex()  # no hardcoded secret; legacy /auth routes only
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 jwt = JWTManager(app)
 bcrypt = Bcrypt(app)
@@ -2022,8 +2022,8 @@ def detect_suspicious(connections):
 @app.route("/ingest/<machine_id>", methods=["POST"])
 def ingest(machine_id):
     auth_header = request.headers.get("Authorization", "")
-    expected_key = os.getenv("SENTINEL_SECRET", "sira-sentinel-2026")
-    if not auth_header.startswith("Bearer ") or auth_header[len("Bearer "):].strip() != expected_key:
+    expected_key = os.getenv("SENTINEL_SECRET")
+    if not expected_key or not auth_header.startswith("Bearer ") or auth_header[len("Bearer "):].strip() != expected_key:
         return jsonify({"error": "unauthorized"}), 401
 
     data = request.json or {}

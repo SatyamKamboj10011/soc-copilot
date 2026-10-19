@@ -1,0 +1,1 @@
+{"alert_count":2074,"event_breakdown":{"alert":2074,"dns":331,"flow":1525,"http":203,"tls":105},"top_source_ips":[["10.0.0.4",502],["185.231.77.14",465],["103.77.192.208",284]],"total_events":4238,"unique_ips":26}

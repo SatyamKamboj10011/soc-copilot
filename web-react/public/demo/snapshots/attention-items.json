@@ -1,0 +1,1 @@
+[{"detail":"465 events in current log window","ip":"185.231.77.14","priority":"high","title":"185.231.77.14 is the top external attacker","type":"top_attacker"},{"detail":"Across 25 unique external source IPs","priority":"low","title":"2074 total alerts in current log window","type":"alert_volume"}]

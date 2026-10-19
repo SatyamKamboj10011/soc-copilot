@@ -1,0 +1,218 @@
+{
+ "185.231.77.14": {
+  "country": "Netherlands",
+  "country_code": "NL",
+  "city": "Amsterdam",
+  "lat": 52.37,
+  "lon": 4.9,
+  "isp": "Demo Hosting BV"
+ },
+ "45.142.200.63": {
+  "country": "Russia",
+  "country_code": "RU",
+  "city": "Moscow",
+  "lat": 55.75,
+  "lon": 37.62,
+  "isp": "Example Telecom JSC"
+ },
+ "103.77.192.208": {
+  "country": "China",
+  "country_code": "CN",
+  "city": "Shenzhen",
+  "lat": 22.54,
+  "lon": 114.06,
+  "isp": "Sample Net Co."
+ },
+ "218.92.41.7": {
+  "country": "China",
+  "country_code": "CN",
+  "city": "Nanjing",
+  "lat": 32.06,
+  "lon": 118.8,
+  "isp": "Sample Net Co."
+ },
+ "159.65.23.190": {
+  "country": "Singapore",
+  "country_code": "SG",
+  "city": "Singapore",
+  "lat": 1.35,
+  "lon": 103.82,
+  "isp": "Demo Cloud Pte"
+ },
+ "91.240.118.52": {
+  "country": "Ukraine",
+  "country_code": "UA",
+  "city": "Kyiv",
+  "lat": 50.45,
+  "lon": 30.52,
+  "isp": "Example Hosting UA"
+ },
+ "167.99.140.31": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "New York",
+  "lat": 40.71,
+  "lon": -74.01,
+  "isp": "Demo Cloud Inc"
+ },
+ "177.54.133.9": {
+  "country": "Brazil",
+  "country_code": "BR",
+  "city": "Sao Paulo",
+  "lat": -23.55,
+  "lon": -46.63,
+  "isp": "Example Broadband SA"
+ },
+ "14.162.88.201": {
+  "country": "Vietnam",
+  "country_code": "VN",
+  "city": "Hanoi",
+  "lat": 21.03,
+  "lon": 105.85,
+  "isp": "Sample Telecom VN"
+ },
+ "201.76.12.144": {
+  "country": "Argentina",
+  "country_code": "AR",
+  "city": "Buenos Aires",
+  "lat": -34.6,
+  "lon": -58.38,
+  "isp": "Example Cable AR"
+ },
+ "123.25.41.77": {
+  "country": "Vietnam",
+  "country_code": "VN",
+  "city": "Ho Chi Minh",
+  "lat": 10.82,
+  "lon": 106.63,
+  "isp": "Sample Telecom VN"
+ },
+ "193.32.162.45": {
+  "country": "Germany",
+  "country_code": "DE",
+  "city": "Frankfurt",
+  "lat": 50.11,
+  "lon": 8.68,
+  "isp": "Demo Hosting GmbH"
+ },
+ "20.171.207.88": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "Boydton",
+  "lat": 36.67,
+  "lon": -78.39,
+  "isp": "Demo Cloud Inc"
+ },
+ "94.102.61.30": {
+  "country": "Netherlands",
+  "country_code": "NL",
+  "city": "Amsterdam",
+  "lat": 52.37,
+  "lon": 4.9,
+  "isp": "Demo Hosting BV"
+ },
+ "167.94.138.12": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "Ann Arbor",
+  "lat": 42.28,
+  "lon": -83.74,
+  "isp": "Research Scanner Net"
+ },
+ "71.6.135.131": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "San Diego",
+  "lat": 32.72,
+  "lon": -117.16,
+  "isp": "Research Scanner Net"
+ },
+ "198.235.24.90": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "Chicago",
+  "lat": 41.88,
+  "lon": -87.63,
+  "isp": "Research Scanner Net"
+ },
+ "80.82.77.139": {
+  "country": "Netherlands",
+  "country_code": "NL",
+  "city": "Amsterdam",
+  "lat": 52.37,
+  "lon": 4.9,
+  "isp": "Demo Hosting BV"
+ },
+ "162.142.125.55": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "Ann Arbor",
+  "lat": 42.28,
+  "lon": -83.74,
+  "isp": "Research Scanner Net"
+ },
+ "222.186.30.112": {
+  "country": "China",
+  "country_code": "CN",
+  "city": "Zhenjiang",
+  "lat": 32.19,
+  "lon": 119.45,
+  "isp": "Sample Net Co."
+ },
+ "141.98.11.33": {
+  "country": "Lithuania",
+  "country_code": "LT",
+  "city": "Vilnius",
+  "lat": 54.69,
+  "lon": 25.28,
+  "isp": "Example Hosting LT"
+ },
+ "89.248.165.74": {
+  "country": "Netherlands",
+  "country_code": "NL",
+  "city": "Amsterdam",
+  "lat": 52.37,
+  "lon": 4.9,
+  "isp": "Demo Hosting BV"
+ },
+ "43.134.66.10": {
+  "country": "Hong Kong",
+  "country_code": "HK",
+  "city": "Hong Kong",
+  "lat": 22.32,
+  "lon": 114.17,
+  "isp": "Demo Cloud Ltd"
+ },
+ "37.49.230.18": {
+  "country": "France",
+  "country_code": "FR",
+  "city": "Paris",
+  "lat": 48.86,
+  "lon": 2.35,
+  "isp": "Example Hosting FR"
+ },
+ "205.210.31.77": {
+  "country": "United States",
+  "country_code": "US",
+  "city": "Ashburn",
+  "lat": 39.04,
+  "lon": -77.49,
+  "isp": "Demo Cloud Inc"
+ },
+ "62.204.41.190": {
+  "country": "Russia",
+  "country_code": "RU",
+  "city": "Saint Petersburg",
+  "lat": 59.93,
+  "lon": 30.34,
+  "isp": "Example Telecom JSC"
+ },
+ "51.222.30.101": {
+  "country": "Canada",
+  "country_code": "CA",
+  "city": "Montreal",
+  "lat": 45.5,
+  "lon": -73.57,
+  "isp": "Demo Cloud Ltd"
+ }
+}

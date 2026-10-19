@@ -1,0 +1,22 @@
+[
+ {
+  "id": "C-01",
+  "name": "SSH compromise -> Mirai-style payload -> Monero miner",
+  "attacker": "185.231.77.14",
+  "payload_host": "62.204.41.190",
+  "mining_pool": "51.222.30.101",
+  "start": "2026-10-16T20:22:00.000000+0000",
+  "stages": [
+   "recon",
+   "bruteforce",
+   "payload download",
+   "cryptominer"
+  ],
+  "mitre": [
+   "T1595",
+   "T1110",
+   "T1105",
+   "T1496"
+  ]
+ }
+]

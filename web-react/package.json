@@ -33,7 +33,8 @@
     "start": "craco start",
     "build": "craco build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "build:demo": "REACT_APP_DEMO=true CI=false craco build"
   },
   "eslintConfig": {
     "extends": [

@@ -1,0 +1,1 @@
+{"status": "ok", "flask": "ok", "ollama": "skipped (demo mode)", "cloud": "ok", "chromadb": "ok", "deployed": true, "demo": true}
