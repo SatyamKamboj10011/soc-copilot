@@ -12,6 +12,7 @@
  * All data is synthetic. No server, no cost, never sleeps.
  */
 import { answerQuestion, answerWhatIf, runHermes, answerAskAll } from "./demoAi";
+import { speakResponse, makePdf } from "./demoMedia";
 import { loadEvents, setRealFetch, getRealFetch, isInternal } from "./demoData";
 
 export const DEMO = process.env.REACT_APP_DEMO === "true";
@@ -101,7 +102,7 @@ async function route(method, path, params, body) {
   if (method === "POST" && path === "/what-if") return json(await answerWhatIf(body));
   if (method === "POST" && path === "/hermes-agent") return json(await runHermes(body));
   if (method === "POST" && (path === "/sira-speak" || path === "/sira-face-speak"))
-    return json({ error: "Voice synthesis is disabled in the public demo" }, 501);
+    return speakResponse(body.text);
 
   // ---- actions / writes ---------------------------------------------------
   let m;
@@ -118,8 +119,10 @@ async function route(method, path, params, body) {
   if (method === "POST" && path === "/block-ip") return json({ message: "Demo mode: block request accepted (no real change made)" });
   if (method === "POST" && path === "/email-schedule") return json({ message: "Demo mode: schedule not saved" });
   if (method === "POST" && path.startsWith("/history/")) return json({ ok: true });
+  if (method === "POST" && path === "/api/documents/pdf")
+    return new Response(await makePdf(body), { status: 200, headers: { "Content-Type": "application/pdf" } });
   if (method === "POST" && path.startsWith("/api/documents/"))
-    return json({ error: "PDF / email export is disabled in the public demo" }, 403);
+    return json({ error: "Email delivery is disabled in the public demo (PDF export works)" }, 403);
   if (method !== "GET") return json({ error: "Not available in demo" }, 404);
 
   // ---- computed from the dataset ------------------------------------------

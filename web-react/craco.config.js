@@ -12,6 +12,13 @@ module.exports = {
         include: /node_modules\/@react-aria\/ssr/,
         use: [],
       });
+      // Public demo: swap Firestore for a localStorage-backed stand-in.
+      if (process.env.REACT_APP_DEMO === "true") {
+        webpackConfig.resolve.alias = {
+          ...(webpackConfig.resolve.alias || {}),
+          "firebase/firestore$": require("path").resolve(__dirname, "src/demo/firestoreLocal.js"),
+        };
+      }
       return webpackConfig;
     },
   },
